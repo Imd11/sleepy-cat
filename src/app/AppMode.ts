@@ -1,0 +1,1 @@
+export type AppMode = "popover" | "manager" | "settings";
