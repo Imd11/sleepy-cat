@@ -4,14 +4,21 @@ import type { FrontmostApp } from "../platform/platformApi";
 
 interface InputTarget {
   frame: { x: number; y: number; width: number; height: number };
+  window_frame: { x: number; y: number; width: number; height: number };
   button_position: [number, number];
   app: FrontmostApp | null;
 }
 
-export function useInputTargetPolling(blacklist: string[] = []) {
+type OverlayPlacement = {
+  buttonOffset: { x: number; y: number } | null;
+};
+
+export function useInputTargetPolling(
+  blacklist: string[] = [],
+  overlayPlacement: OverlayPlacement = { buttonOffset: null }
+) {
   const [target, setTarget] = useState<InputTarget | null>(null);
   const [showAttached, setShowAttached] = useState(false);
-  const [showFallback, setShowFallback] = useState(false);
   const pollingRef = useRef<boolean>(true);
 
   useEffect(() => {
@@ -23,7 +30,6 @@ export function useInputTargetPolling(blacklist: string[] = []) {
 
         if (app && blacklist.includes(app.bundle_id)) {
           setShowAttached(false);
-          setShowFallback(false);
           await hidePromptButton();
           await hidePromptPopover();
           return;
@@ -34,13 +40,14 @@ export function useInputTargetPolling(blacklist: string[] = []) {
         if (inputTarget && app) {
           setTarget(inputTarget);
           setShowAttached(true);
-          setShowFallback(false);
           const [x, y] = inputTarget.button_position;
-          await showPromptButton(x, y);
+          const offset = overlayPlacement.buttonOffset;
+          const displayX = offset ? x + offset.x : x;
+          const displayY = offset ? y + offset.y : y;
+          await showPromptButton(displayX, displayY);
         } else {
           setTarget(null);
           setShowAttached(false);
-          setShowFallback(true);
           await hidePromptButton();
         }
       } catch (e) {
@@ -57,16 +64,14 @@ export function useInputTargetPolling(blacklist: string[] = []) {
     return () => {
       pollingRef.current = false;
     };
-  }, [blacklist]);
+  }, [blacklist, overlayPlacement]);
 
   const openPopover = async () => {
     if (target) {
       const [x, y] = target.button_position;
       await showPromptPopover(x + 40, y);
-    } else {
-      await showPromptPopover(100, 100);
     }
   };
 
-  return { showAttached, showFallback, openPopover };
+  return { showAttached, openPopover };
 }

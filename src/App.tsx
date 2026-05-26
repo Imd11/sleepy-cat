@@ -6,6 +6,9 @@ import type { PromptItem } from "./shared/promptTypes";
 import type { Settings } from "./shared/settingsStore";
 import { createPromptStore } from "./shared/promptStore";
 import { createTauriPromptStorage } from "./storage/tauriPromptStorage";
+import { createSettingsStore } from "./shared/settingsStore";
+import { createTauriSettingsStorage } from "./storage/tauriSettingsStorage";
+import { useInputTargetPolling } from "./overlay/useInputTargetPolling";
 import { PromptPopover } from "./ui/PromptPopover";
 import { PromptManager } from "./ui/PromptManager";
 import { SettingsPanel } from "./ui/SettingsPanel";
@@ -17,14 +20,23 @@ interface AppProps {
   onRemoveBlacklist?: (bundleId: string) => void;
 }
 
-export function App({ settings = { version: 1, blacklistedApps: [] }, onRemoveBlacklist }: AppProps) {
+export function App({ settings = { version: 1, blacklistedApps: [], overlayPlacement: { buttonOffset: null } }, onRemoveBlacklist }: AppProps) {
   const [mode, setMode] = useState<AppMode>("popover");
   const [prompts, setPrompts] = useState<PromptItem[]>([]);
   const storeRef = useRef(createPromptStore(createTauriPromptStorage()));
+  const settingsStoreRef = useRef(createSettingsStore(createTauriSettingsStorage()));
 
   useEffect(() => {
     storeRef.current.list().then(setPrompts);
+    settingsStoreRef.current.get().then(setActiveSettings);
   }, []);
+
+  const [activeSettings, setActiveSettings] = useState<Settings>(settings);
+
+  useInputTargetPolling(
+    activeSettings.blacklistedApps.map((app) => app.bundleId),
+    activeSettings.overlayPlacement
+  );
 
   const handleSelect = async (prompt: PromptItem) => {
     try {
