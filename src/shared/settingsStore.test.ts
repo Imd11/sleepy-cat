@@ -38,4 +38,23 @@ describe("settings store", () => {
     const matching = settings.blacklistedApps.filter(a => a.bundleId === "com.example.app");
     expect(matching).toHaveLength(1);
   });
+
+  it("defaults overlay placement to no saved offset", async () => {
+    const store = createTestSettingsStore();
+    const settings = await store.get();
+    expect(settings.overlayPlacement).toEqual({ buttonOffset: null });
+  });
+
+  it("saves overlay button offset", async () => {
+    const store = createTestSettingsStore();
+    await store.setOverlayButtonOffset({ x: 24, y: -12 });
+    const settings = await store.get();
+    expect(settings.overlayPlacement.buttonOffset).toEqual({ x: 24, y: -12 });
+  });
+
+  it("normalizes old settings without overlay placement", async () => {
+    const store = createTestSettingsStore('{"version":1,"blacklistedApps":[]}');
+    const settings = await store.get();
+    expect(settings.overlayPlacement).toEqual({ buttonOffset: null });
+  });
 });
