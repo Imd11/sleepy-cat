@@ -6,6 +6,7 @@ use serde::Serialize;
 #[derive(Clone, Debug, Serialize)]
 pub struct InputTarget {
     pub frame: CandidateInput,
+    pub window_frame: CandidateInput,
     pub button_position: (f64, f64),
     pub app: Option<FrontmostApp>,
 }
