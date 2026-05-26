@@ -64,24 +64,34 @@ export function App({ settings = { version: 1, blacklistedApps: [] }, onRemoveBl
             setPrompts(await storeRef.current.list());
           }}
           onImport={async () => {
-            const file = await open({
-              filters: [{ name: "JSON", extensions: ["json"] }],
-              multiple: false,
-            });
-            if (file) {
-              const content = await readTextFile(file as string);
-              await storeRef.current.importJson(content);
-              setPrompts(await storeRef.current.list());
+            try {
+              const file = await open({
+                filters: [{ name: "JSON", extensions: ["json"] }],
+                multiple: false,
+              });
+              if (file) {
+                const content = await readTextFile(file as string);
+                await storeRef.current.importJson(content);
+                setPrompts(await storeRef.current.list());
+              }
+            } catch (e) {
+              console.error("Import failed:", e);
+              alert("Failed to import prompts. Please check the file format.");
             }
           }}
           onExport={async () => {
-            const path = await save({
-              filters: [{ name: "JSON", extensions: ["json"] }],
-              defaultPath: "prompts.json",
-            });
-            if (path) {
-              const json = await storeRef.current.exportJson();
-              await writeTextFile(path, json);
+            try {
+              const path = await save({
+                filters: [{ name: "JSON", extensions: ["json"] }],
+                defaultPath: "prompts.json",
+              });
+              if (path) {
+                const json = await storeRef.current.exportJson();
+                await writeTextFile(path, json);
+              }
+            } catch (e) {
+              console.error("Export failed:", e);
+              alert("Failed to export prompts. Please try again.");
             }
           }}
         />
