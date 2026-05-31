@@ -60,16 +60,7 @@ fn frontmost_app_info() -> Option<FrontmostAppInfo> {
 
     let name = parse_app_name(info_trimmed).unwrap_or_else(|| "Unknown".to_string());
     let bundle_id = parse_bundle_id(info_trimmed).unwrap_or_else(|| format!("unknown.{}", &asn));
-    let pid = info_trimmed
-        .lines()
-        .find(|l| l.trim().starts_with("pid"))
-        .and_then(|l| {
-            l.find(':')
-                .or_else(|| l.find('='))
-                .and_then(|eq| l[eq + 1..].trim().split_whitespace().next())
-        })
-        .and_then(|s| s.parse::<u32>().ok())
-        .unwrap_or(0);
+    let pid = parse_pid(info_trimmed)?;
 
     Some(FrontmostAppInfo {
         app: FrontmostApp { name, bundle_id },
@@ -241,6 +232,29 @@ pub fn parse_app_name(s: &str) -> Option<String> {
             }
         }
     }
+
+    let first_line = s.lines().next()?.trim();
+    let rest = first_line.strip_prefix('"')?;
+    let end = rest.find('"')?;
+    let name = rest[..end].trim();
+    if name.is_empty() {
+        return None;
+    }
+    Some(name.to_string())
+}
+
+/// Parse pid from lsappinfo info output.
+pub fn parse_pid(s: &str) -> Option<u32> {
+    for line in s.lines() {
+        let line = line.trim();
+        let Some(rest) = line.strip_prefix("pid") else {
+            continue;
+        };
+        let rest = rest.trim_start();
+        let rest = rest.strip_prefix('=').or_else(|| rest.strip_prefix(':'))?;
+        let value = rest.trim_start().split_whitespace().next()?;
+        return value.parse::<u32>().ok();
+    }
     None
 }
 
@@ -315,6 +329,12 @@ mod tests {
 
     #[test]
     fn parses_app_name() {
+        assert_eq!(
+            parse_app_name(
+                "\"Finder\" ASN:0x0-0xe00e: (in front)\n    bundleID=\"com.apple.finder\""
+            ),
+            Some("Finder".to_string())
+        );
         // LSApplicationName format
         assert_eq!(
             parse_app_name("bundleID=\"com.apple.finder\"\nLSApplicationName=\"Finder\""),
@@ -325,6 +345,17 @@ mod tests {
             parse_app_name("CFBundleName=\"Safari\"\nbundleID=\"com.apple.Safari\""),
             Some("Safari".to_string())
         );
+    }
+
+    #[test]
+    fn parses_pid_and_rejects_invalid_pid() {
+        assert_eq!(
+            parse_pid("\"Finder\" ASN:0x0-0xe00e:\n    pid = 650 type=\"Foreground\""),
+            Some(650)
+        );
+        assert_eq!(parse_pid("pid: 12345 type=\"Foreground\""), Some(12345));
+        assert!(parse_pid("pid = not-a-number type=\"Foreground\"").is_none());
+        assert!(parse_pid("bundleID=\"com.apple.finder\"").is_none());
     }
 
     #[test]

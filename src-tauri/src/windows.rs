@@ -115,7 +115,7 @@ pub fn hide_prompt_popover(app: tauri::AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub fn show_prompt_popover_from_button(app: tauri::AppHandle) -> Result<(), String> {
-    let position = button_relative_popover_position(&app, 32.0);
+    let position = button_relative_popover_position(&app, BUTTON_WIDTH);
     show_popover_mode(position.0, position.1, "popover", &app)
 }
 
