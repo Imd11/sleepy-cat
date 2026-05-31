@@ -61,7 +61,9 @@ describe("useInputTargetPolling", () => {
       vi.advanceTimersByTime(2000);
     });
 
+    // Must show at fallback AND not hide
     await waitFor(() => {
+      expect(showPromptButton).toHaveBeenCalledWith(960, 700);
       expect(hidePromptButton).not.toHaveBeenCalled();
     });
   });

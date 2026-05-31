@@ -244,5 +244,47 @@ describe("app", () => {
     const allCalls = (vi.mocked(invoke) as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
     expect(allCalls).toContain("hide_prompt_button");
     expect(allCalls).toContain("hide_prompt_popover");
+    expect(allCalls).not.toContain("open_main_window");
+  });
+
+  it("open prompt picker calls open_main_window", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    currentWindowLabel = "prompt-popover";
+    window.history.pushState({}, "", "/?mode=button-controls");
+    const { readTextFile, writeTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockImplementation(async (path: string) => {
+      if (path.includes("prompts")) return JSON.stringify({ version: 1, prompts: mockPrompts });
+      if (path.includes("settings")) return JSON.stringify({ version: 1, blacklistedApps: [], overlayPlacement: { buttonOffset: null }, floatingButton: { visible: true } });
+      throw new Error("missing file");
+    });
+    (writeTextFile as ReturnType<typeof vi.fn>).mockImplementation(async (path: string, value: string) => {});
+
+    await act(async () => { render(<App />); });
+
+    await screen.findByRole("button", { name: "Open Prompt Picker" });
+    fireEvent.click(screen.getByRole("button", { name: "Open Prompt Picker" }));
+
+    await waitFor(() => {
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith("open_main_window");
+    });
+  });
+
+  it("button controls mode does not render manager actions", async () => {
+    currentWindowLabel = "prompt-popover";
+    window.history.pushState({}, "", "/?mode=button-controls");
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockImplementation(async (path: string) => {
+      if (path.includes("prompts")) return JSON.stringify({ version: 1, prompts: mockPrompts });
+      if (path.includes("settings")) return JSON.stringify({ version: 1, blacklistedApps: [], overlayPlacement: { buttonOffset: null }, floatingButton: { visible: true } });
+      throw new Error("missing file");
+    });
+
+    await act(async () => { render(<App />); });
+
+    expect(screen.queryByRole("button", { name: "Hide Button" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Open Prompt Picker" })).not.toBeNull();
+    expect(screen.queryByText("Manage Prompts")).toBeNull();
+    expect(screen.queryByText("Settings")).toBeNull();
   });
 });
