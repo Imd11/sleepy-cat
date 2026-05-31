@@ -130,10 +130,58 @@ fn button_relative_popover_position(app: &tauri::AppHandle, button_side_width: f
         .and_then(|window| {
             let position = window.outer_position().ok()?;
             let scale = window.scale_factor().unwrap_or(1.0);
-            Some((
-                position.x as f64 / scale + button_side_width + POPOVER_GAP,
-                position.y as f64 / scale,
+            let button_x = position.x as f64 / scale;
+            let button_y = position.y as f64 / scale;
+            let monitor = window.current_monitor().ok().flatten();
+            Some(clamp_popover_position(
+                button_x,
+                button_y,
+                button_side_width,
+                monitor.as_ref(),
             ))
         })
         .unwrap_or((100.0, 100.0))
+}
+
+fn clamp_popover_position(
+    button_x: f64,
+    button_y: f64,
+    button_side_width: f64,
+    monitor: Option<&tauri::Monitor>,
+) -> (f64, f64) {
+    let right_x = button_x + button_side_width + POPOVER_GAP;
+    let left_x = button_x - POPOVER_WIDTH - POPOVER_GAP;
+    let Some(monitor) = monitor else {
+        return (right_x, button_y);
+    };
+
+    let scale = monitor.scale_factor();
+    let monitor_x = monitor.position().x as f64 / scale;
+    let monitor_y = monitor.position().y as f64 / scale;
+    let monitor_width = monitor.size().width as f64 / scale;
+    let monitor_height = monitor.size().height as f64 / scale;
+    let monitor_right = monitor_x + monitor_width;
+    let monitor_bottom = monitor_y + monitor_height;
+    let margin = 8.0;
+
+    let x = if right_x + POPOVER_WIDTH + margin <= monitor_right {
+        right_x
+    } else {
+        left_x
+    }
+    .clamp(monitor_x + margin, monitor_right - POPOVER_WIDTH - margin);
+
+    let y = button_y.clamp(monitor_y + margin, monitor_bottom - POPOVER_HEIGHT - margin);
+    (x, y)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keeps_popover_to_right_when_there_is_room() {
+        let position = clamp_popover_position(100.0, 200.0, BUTTON_WIDTH, None);
+        assert_eq!(position, (220.0, 200.0));
+    }
 }

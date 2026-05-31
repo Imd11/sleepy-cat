@@ -78,9 +78,7 @@ btn.addEventListener('pointerdown', (event) => {
       animationFrame = requestAnimationFrame(flushMove);
     }
   }).catch(() => {
-    if (start?.sequence === sequence) {
-      start = null;
-    }
+    if (start?.sequence === sequence) start.positionReady = false;
   });
 });
 
