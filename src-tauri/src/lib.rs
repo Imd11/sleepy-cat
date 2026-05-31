@@ -1,4 +1,4 @@
-use tauri::Manager;
+use tauri::{Manager, WindowEvent};
 
 mod platform;
 pub use platform::{
@@ -74,6 +74,14 @@ pub fn run() {
         .setup(|app| {
             let window = app.get_webview_window("main").unwrap();
             window.set_title("Prompt Picker").unwrap();
+            let main_window = window.clone();
+            window.on_window_event(move |event| {
+                if let WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = main_window.hide();
+                }
+            });
+            let _ = show_prompt_button(960.0, 700.0, app.handle().clone());
             Ok(())
         })
         .run(tauri::generate_context!())
