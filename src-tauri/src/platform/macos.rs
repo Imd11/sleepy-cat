@@ -47,42 +47,29 @@ struct FrontmostAppInfo {
 }
 
 fn frontmost_app_info() -> Option<FrontmostAppInfo> {
-    let output = Command::new("lsappinfo").args(["front"]).output().ok()?;
+    let front = Command::new("lsappinfo").arg("front").output().ok()?;
+    let asn = parse_front_asn(String::from_utf8_lossy(&front.stdout).as_ref())?;
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let trimmed = stdout.trim();
-
-    let pid = if let Some(start) = trimmed.find("pid:") {
-        trimmed[start + 4..]
-            .split_whitespace()
-            .next()?
-            .parse()
-            .ok()?
-    } else if let Some(eq) = trimmed.find(" = ") {
-        let val = &trimmed[eq + 3..];
-        val.split_whitespace()
-            .next()?
-            .trim_matches('"')
-            .parse()
-            .ok()?
-    } else {
-        return None;
-    };
-
-    let info_output = Command::new("lsappinfo")
-        .args(["info", "-app", &format!("{}", pid)])
+    let info = Command::new("lsappinfo")
+        .args(["info", &asn])
         .output()
         .ok()?;
 
-    let info_stdout = String::from_utf8_lossy(&info_output.stdout);
+    let info_stdout = String::from_utf8_lossy(&info.stdout);
     let info_trimmed = info_stdout.trim();
 
-    let name = extract_lsappinfo_field(info_trimmed, "CFBundleName")
-        .or_else(|| extract_lsappinfo_field(info_trimmed, "LSApplicationName"))
-        .unwrap_or_else(|| "Unknown".to_string());
-
-    let bundle_id = extract_lsappinfo_field(info_trimmed, "CFBundleIdentifier")
-        .unwrap_or_else(|| format!("unknown.{}", pid));
+    let name = parse_app_name(info_trimmed).unwrap_or_else(|| "Unknown".to_string());
+    let bundle_id = parse_bundle_id(info_trimmed).unwrap_or_else(|| format!("unknown.{}", &asn));
+    let pid = info_trimmed
+        .lines()
+        .find(|l| l.trim().starts_with("pid"))
+        .and_then(|l| {
+            l.find(':')
+                .or_else(|| l.find('='))
+                .and_then(|eq| l[eq + 1..].trim().split_whitespace().next())
+        })
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(0);
 
     Some(FrontmostAppInfo {
         app: FrontmostApp { name, bundle_id },
@@ -171,41 +158,7 @@ end run"#,
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let trimmed = stdout.trim();
-
-    let parts: Vec<&str> = trimmed.split('|').collect();
-    if parts.len() < 5 {
-        return None;
-    }
-
-    let window_pos = parse_xy(parts[1])?;
-    let window_size = parse_xy(parts[2])?;
-    let elem_pos = parse_xy(parts[3])?;
-    let elem_size = parse_xy(parts[4])?;
-
-    let window_frame = CandidateInput {
-        x: window_pos.0,
-        y: window_pos.1,
-        width: window_size.0,
-        height: window_size.1,
-    };
-
-    let frame = CandidateInput {
-        x: elem_pos.0,
-        y: elem_pos.1,
-        width: elem_size.0,
-        height: elem_size.1,
-    };
-
-    let button_x = elem_pos.0 + elem_size.0;
-    let button_y = elem_pos.1 + elem_size.1;
-
-    Some(InputTarget {
-        frame,
-        window_frame,
-        button_position: (button_x, button_y),
-        app: Some(app),
-    })
+    parse_focused_input_output(stdout.trim(), &app)
 }
 
 fn parse_xy(s: &str) -> Option<(f64, f64)> {
@@ -264,4 +217,160 @@ fn copy_to_clipboard(body: &str) -> Result<(), String> {
     }
     child.wait().map_err(|e| e.to_string())?;
     Ok(())
+}
+
+// ── Parsing helpers (pub for testing) ─────────────────────────────────────────
+
+/// Parse "ASN:0x0-0x46046:\n" → "ASN:0x0-0x46046"
+pub fn parse_front_asn(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.starts_with("ASN:") {
+        return Some(trimmed.trim_end_matches(':').to_string());
+    }
+    None
+}
+
+/// Parse bundle ID from lsappinfo info output (any format).
+pub fn parse_bundle_id(s: &str) -> Option<String> {
+    for line in s.lines() {
+        let line = line.trim();
+        // Handle bundleID="..." or bundleID = "..."
+        if line.starts_with("bundleID") || line.starts_with("CFBundleIdentifier") {
+            if let Some(eq) = line.find('=') {
+                let val = &line[eq + 1..].trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(val.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Parse app name from lsappinfo info output.
+pub fn parse_app_name(s: &str) -> Option<String> {
+    for line in s.lines() {
+        let line = line.trim();
+        // Try LSApplicationName / CFBundleName
+        if line.starts_with("LSApplicationName") || line.starts_with("CFBundleName") {
+            if let Some(eq) = line.find('=') {
+                let val = &line[eq + 1..].trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(val.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Parse 4-field focused input output: "wx,wy|ww,wh|ex,ey|ew,eh"
+pub fn parse_focused_input_output(raw: &str, app: &FrontmostApp) -> Option<InputTarget> {
+    let parts: Vec<&str> = raw.trim().split('|').collect();
+    if parts.len() != 4 {
+        return None;
+    }
+    let window_pos = parse_xy(parts[0])?;
+    let window_size = parse_xy(parts[1])?;
+    let elem_pos = parse_xy(parts[2])?;
+    let elem_size = parse_xy(parts[3])?;
+
+    let window_frame = CandidateInput {
+        x: window_pos.0,
+        y: window_pos.1,
+        width: window_size.0,
+        height: window_size.1,
+    };
+    let frame = CandidateInput {
+        x: elem_pos.0,
+        y: elem_pos.1,
+        width: elem_size.0,
+        height: elem_size.1,
+    };
+
+    // Button anchors at bottom-right of focused element
+    let button_x = elem_pos.0 + elem_size.0;
+    let button_y = elem_pos.1 + elem_size.1;
+
+    Some(InputTarget {
+        frame,
+        window_frame,
+        button_position: (button_x, button_y),
+        app: Some(app.clone()),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_lsappinfo_front_asn_output() {
+        assert_eq!(
+            parse_front_asn("ASN:0x0-0x46046:\n").as_deref(),
+            Some("ASN:0x0-0x46046")
+        );
+        // Trailing colon variant
+        assert_eq!(
+            parse_front_asn("ASN:0x0-0x46046:").as_deref(),
+            Some("ASN:0x0-0x46046")
+        );
+    }
+
+    #[test]
+    fn parses_bundle_id_various_formats() {
+        assert_eq!(
+            parse_bundle_id("bundleID=\"com.openai.codex\"\nfoo"),
+            Some("com.openai.codex".to_string())
+        );
+        assert_eq!(
+            parse_bundle_id("bundleID = \"com.apple.Safari\"\n"),
+            Some("com.apple.Safari".to_string())
+        );
+        assert_eq!(
+            parse_bundle_id("CFBundleIdentifier = \"com.github.GitHubDesktop\"\n"),
+            Some("com.github.GitHubDesktop".to_string())
+        );
+    }
+
+    #[test]
+    fn parses_app_name() {
+        // LSApplicationName format
+        assert_eq!(
+            parse_app_name("bundleID=\"com.apple.finder\"\nLSApplicationName=\"Finder\""),
+            Some("Finder".to_string())
+        );
+        // CFBundleName variant
+        assert_eq!(
+            parse_app_name("CFBundleName=\"Safari\"\nbundleID=\"com.apple.Safari\""),
+            Some("Safari".to_string())
+        );
+    }
+
+    #[test]
+    fn parses_focused_input_output() {
+        let app = FrontmostApp {
+            name: "Codex".to_string(),
+            bundle_id: "com.openai.codex".to_string(),
+        };
+        let target =
+            parse_focused_input_output("10,20|1200,800|700,680|500,96", &app).unwrap();
+
+        assert_eq!(target.window_frame.x, 10.0);
+        assert_eq!(target.window_frame.width, 1200.0);
+        assert_eq!(target.frame.x, 700.0);
+        assert_eq!(target.frame.height, 96.0);
+        // button = elem_pos + elem_size = (700+500, 680+96) = (1200, 776)
+        assert_eq!(target.button_position, (1200.0, 776.0));
+    }
+
+    #[test]
+    fn parse_focused_input_rejects_wrong_field_count() {
+        let app = FrontmostApp {
+            name: "Test".to_string(),
+            bundle_id: "com.test".to_string(),
+        };
+        assert!(parse_focused_input_output("10,20|1200,800|700,680", &app).is_none());
+        assert!(parse_focused_input_output("10,20|1200,800|700,680|500,96|extra", &app).is_none());
+    }
 }
