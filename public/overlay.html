@@ -25,6 +25,16 @@ function distance(a, b) {
   return Math.hypot(a.screenX - b.screenX, a.screenY - b.screenY);
 }
 
+async function openButtonControls(event) {
+  event.preventDefault();
+  contextMenuOpened = true;
+  start = null;
+  dragging = false;
+  lastMove = null;
+  if (!tauri?.core?.invoke) return;
+  await tauri.core.invoke('show_prompt_button_controls_from_button');
+}
+
 async function flushMove() {
   animationFrame = 0;
   if (!lastMove || !start || !start.positionReady) return;
@@ -35,6 +45,11 @@ async function flushMove() {
 }
 
 btn.addEventListener('pointerdown', (event) => {
+  if (event.button === 2 || (event.button === 0 && event.ctrlKey)) {
+    openButtonControls(event);
+    return;
+  }
+
   const sequence = ++pointerSequence;
   start = {
     screenX: event.screenX,
@@ -110,10 +125,7 @@ btn.addEventListener('pointerup', async (event) => {
 });
 
 btn.addEventListener('contextmenu', async (event) => {
-  event.preventDefault();
-  contextMenuOpened = true;
-  if (!tauri?.core?.invoke) return;
-  await tauri.core.invoke('show_prompt_button_controls_from_button');
+  await openButtonControls(event);
 });
 </script>
 </body>
