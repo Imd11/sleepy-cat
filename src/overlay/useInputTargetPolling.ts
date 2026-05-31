@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { getFrontmostApp, getCurrentInputTarget, showPromptButton, hidePromptButton, showPromptPopover, hidePromptPopover } from "../platform/platformApi";
+import {
+  getFrontmostApp,
+  getCurrentInputTarget,
+  showPromptButton,
+  hidePromptButton,
+  hidePromptPopover,
+} from "../platform/platformApi";
 import type { FrontmostApp } from "../platform/platformApi";
 
 interface InputTarget {
@@ -13,9 +19,15 @@ type OverlayPlacement = {
   buttonOffset: { x: number; y: number } | null;
 };
 
+interface InputTargetPollingOptions {
+  onBasePositionChange?: (position: [number, number]) => void;
+}
+
 export function useInputTargetPolling(
   blacklist: string[] = [],
-  overlayPlacement: OverlayPlacement = { buttonOffset: null }
+  overlayPlacement: OverlayPlacement = { buttonOffset: null },
+  options: InputTargetPollingOptions = {},
+  floatingButtonVisible = true
 ) {
   const [target, setTarget] = useState<InputTarget | null>(null);
   const [showAttached, setShowAttached] = useState(false);
@@ -23,22 +35,33 @@ export function useInputTargetPolling(
   const lastButtonPositionRef = useRef<[number, number] | null>(null);
   const lastTargetAtRef = useRef(0);
   const pollingRef = useRef<boolean>(true);
+  const activeRef = useRef(true);
+  const prevVisibilityRef = useRef(floatingButtonVisible);
 
   useEffect(() => {
+    activeRef.current = true;
+    pollingRef.current = true;
+
     const poll = async () => {
-      if (!pollingRef.current) return;
+      if (!activeRef.current) return;
+
+      if (!floatingButtonVisible) {
+        setTarget(null);
+        setShowAttached(false);
+        await hidePromptButton();
+        await hidePromptPopover();
+        pollingRef.current = false;
+        return;
+      }
+
+      if (!pollingRef.current) {
+        pollingRef.current = true;
+      }
 
       try {
         const app = await getFrontmostApp();
 
-        if (app && blacklist.includes(app.bundle_id)) {
-          setShowAttached(false);
-          await hidePromptButton();
-          await hidePromptPopover();
-          return;
-        }
-
-        const inputTarget = await getCurrentInputTarget() as InputTarget | null;
+        const inputTarget = (await getCurrentInputTarget()) as InputTarget | null;
 
         if (inputTarget && app) {
           setTarget(inputTarget);
@@ -50,8 +73,14 @@ export function useInputTargetPolling(
           const displayY = offset ? y + offset.y : y;
           lastButtonPositionRef.current = [displayX, displayY];
           lastTargetAtRef.current = Date.now();
+          options.onBasePositionChange?.([displayX, displayY]);
           await showPromptButton(displayX, displayY);
-        } else if (app && app.name === "Prompt Picker" && lastTargetAtRef.current > 0 && lastButtonPositionRef.current) {
+        } else if (
+          app &&
+          app.name === "Prompt Picker" &&
+          lastTargetAtRef.current > 0 &&
+          lastButtonPositionRef.current
+        ) {
           // Grace period during overlay self-interaction
           const recentlyHadTarget = Date.now() - lastTargetAtRef.current < 3000;
           if (recentlyHadTarget) {
@@ -60,36 +89,42 @@ export function useInputTargetPolling(
             setTimeout(poll, 500 + Math.random() * 500);
             return;
           }
-          setTarget(null);
+        } else if (
+          lastTargetAtRef.current > 0 &&
+          lastButtonPositionRef.current &&
+          prevVisibilityRef.current
+        ) {
+          // Keep button visible at last known position (always-visible mode)
+          const [x, y] = lastButtonPositionRef.current;
+          await showPromptButton(x, y);
           setShowAttached(false);
-          await hidePromptButton();
-        } else {
-          setTarget(null);
-          setShowAttached(false);
-          await hidePromptButton();
         }
-      } catch (e) {
-        console.error("Polling error:", e);
-      }
 
-      if (pollingRef.current) {
-        setTimeout(poll, 500 + Math.random() * 500);
+        setTimeout(poll, 1000 + Math.random() * 1000);
+      } catch {
+        setTimeout(poll, 2000);
       }
     };
+
+    prevVisibilityRef.current = floatingButtonVisible;
+    if (!floatingButtonVisible) {
+      hidePromptButton().catch(console.error);
+      hidePromptPopover().catch(console.error);
+      return;
+    }
 
     poll();
 
     return () => {
-      pollingRef.current = false;
+      activeRef.current = false;
     };
-  }, [blacklist, overlayPlacement]);
+  }, [
+    blacklist.join("\u0000"),
+    overlayPlacement.buttonOffset
+      ? `${overlayPlacement.buttonOffset.x}:${overlayPlacement.buttonOffset.y}`
+      : "none",
+    floatingButtonVisible,
+  ]);
 
-  const openPopover = async () => {
-    if (target) {
-      const [x, y] = target.button_position;
-      await showPromptPopover(x + 40, y);
-    }
-  };
-
-  return { showAttached, openPopover, lastTargetApp: lastTargetAppRef.current };
+  return { target, showAttached };
 }

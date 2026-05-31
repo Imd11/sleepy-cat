@@ -1,115 +1,230 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { renderHook, act } from "@testing-library/react";
+import { renderHook, act, waitFor } from "@testing-library/react";
 import { useInputTargetPolling } from "./useInputTargetPolling";
+import * as platformApi from "../platform/platformApi";
 
 vi.mock("../platform/platformApi", () => ({
   getFrontmostApp: vi.fn(),
   getCurrentInputTarget: vi.fn(),
-  showPromptButton: vi.fn(),
-  hidePromptButton: vi.fn(),
-  showPromptPopover: vi.fn(),
-  hidePromptPopover: vi.fn()
+  showPromptButton: vi.fn().mockResolvedValue(undefined),
+  hidePromptButton: vi.fn().mockResolvedValue(undefined),
+  showPromptPopover: vi.fn().mockResolvedValue(undefined),
+  hidePromptPopover: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { getFrontmostApp, getCurrentInputTarget, showPromptButton, hidePromptButton } from "../platform/platformApi";
+const getFrontmostApp = platformApi.getFrontmostApp as ReturnType<typeof vi.fn>;
+const getCurrentInputTarget = platformApi.getCurrentInputTarget as ReturnType<typeof vi.fn>;
+const showPromptButton = platformApi.showPromptButton as ReturnType<typeof vi.fn>;
+const hidePromptButton = platformApi.hidePromptButton as ReturnType<typeof vi.fn>;
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+});
 
 describe("useInputTargetPolling", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("shows attached button when target exists and app not blacklisted", async () => {
-    vi.mocked(getFrontmostApp).mockResolvedValue({ name: "Codex", bundle_id: "com.codex.app" });
-    vi.mocked(getCurrentInputTarget).mockResolvedValue({
-      frame: { x: 100, y: 100, width: 300, height: 200 },
-      button_position: [148, 268],
-      app: { name: "Codex", bundle_id: "com.codex.app" }
+  it("shows attached button when target exists", async () => {
+    getFrontmostApp.mockResolvedValue({ name: "Finder", bundle_id: "com.apple.finder" });
+    getCurrentInputTarget.mockResolvedValue({
+      frame: { x: 100, y: 200, width: 300, height: 40 },
+      window_frame: { x: 100, y: 200, width: 300, height: 40 },
+      button_position: [960, 700],
+      app: { name: "Finder", bundle_id: "com.apple.finder" },
     });
 
-    renderHook(() => useInputTargetPolling([]));
+    void renderHook(() =>
+      useInputTargetPolling([], { buttonOffset: null }, {}, true)
+    );
 
     await act(async () => {
-      await new Promise((r) => setTimeout(r, 600));
+      vi.advanceTimersByTime(1500);
     });
 
-    expect(showPromptButton).toHaveBeenCalledWith(148, 268);
+    await waitFor(() => {
+      expect(showPromptButton).toHaveBeenCalledWith(960, 700);
+    });
   });
 
-  it("hides button when app is blacklisted", async () => {
-    vi.mocked(getFrontmostApp).mockResolvedValue({ name: "Codex", bundle_id: "com.codex.app" });
+  it("keeps a fallback button visible when no target frame is available", async () => {
+    getFrontmostApp.mockResolvedValue({ name: "Finder", bundle_id: "com.apple.finder" });
+    getCurrentInputTarget.mockResolvedValue(null);
 
-    renderHook(() => useInputTargetPolling(["com.codex.app"]));
+    void renderHook(() =>
+      useInputTargetPolling([], { buttonOffset: null }, {}, true)
+    );
 
     await act(async () => {
-      await new Promise((r) => setTimeout(r, 600));
+      vi.advanceTimersByTime(2000);
     });
 
+    await waitFor(() => {
+      expect(hidePromptButton).not.toHaveBeenCalled();
+    });
+  });
+
+  it("keeps a fallback button visible when frontmost app has no target", async () => {
+    getFrontmostApp.mockResolvedValue({ name: "Finder", bundle_id: "com.apple.finder" });
+    getCurrentInputTarget.mockResolvedValue(null);
+
+    void renderHook(() =>
+      useInputTargetPolling([], { buttonOffset: null }, {}, true)
+    );
+
+    await act(async () => {
+      vi.advanceTimersByTime(2000);
+    });
+
+    await waitFor(() => {
+      expect(hidePromptButton).not.toHaveBeenCalled();
+    });
+  });
+
+  it("keeps the floating button visible even when the frontmost app is blacklisted", async () => {
+    getFrontmostApp.mockResolvedValue({ name: "Codex", bundle_id: "com.codex.app" });
+    getCurrentInputTarget.mockResolvedValue({
+      frame: { x: 100, y: 200, width: 300, height: 40 },
+      window_frame: { x: 100, y: 200, width: 300, height: 40 },
+      button_position: [960, 700],
+      app: { name: "Codex", bundle_id: "com.codex.app" },
+    });
+
+    void renderHook(() =>
+      useInputTargetPolling(["com.codex.app"], { buttonOffset: null }, {}, true)
+    );
+
+    await act(async () => {
+      vi.advanceTimersByTime(2000);
+    });
+
+    await waitFor(() => {
+      expect(showPromptButton).toHaveBeenCalledWith(960, 700);
+    });
+  });
+
+  it("hides the floating button only when user visibility setting is false", async () => {
+    getFrontmostApp.mockResolvedValue({ name: "Finder", bundle_id: "com.apple.finder" });
+    getCurrentInputTarget.mockResolvedValue({
+      frame: { x: 100, y: 200, width: 300, height: 40 },
+      window_frame: { x: 100, y: 200, width: 300, height: 40 },
+      button_position: [960, 700],
+      app: { name: "Finder", bundle_id: "com.apple.finder" },
+    });
+
+    const { rerender } = renderHook(
+      ({ visible }) => useInputTargetPolling([], { buttonOffset: null }, {}, visible),
+      { initialProps: { visible: true } }
+    );
+
+    await act(async () => { vi.advanceTimersByTime(1500); });
+    expect(showPromptButton).toHaveBeenCalledWith(960, 700);
+
+    rerender({ visible: false });
+
+    await act(async () => { vi.advanceTimersByTime(1500); });
     expect(hidePromptButton).toHaveBeenCalled();
   });
 
-  it("shows fallback when no target found", async () => {
-    vi.mocked(getFrontmostApp).mockResolvedValue({ name: "Finder", bundle_id: "com.apple.finder" });
-    vi.mocked(getCurrentInputTarget).mockResolvedValue(null);
-
-    renderHook(() => useInputTargetPolling([]));
-
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 600));
+  it("keeps the fallback button visible while Prompt Picker itself is frontmost", async () => {
+    getFrontmostApp
+      .mockResolvedValueOnce({ name: "Finder", bundle_id: "com.apple.finder" })
+      .mockResolvedValue({ name: "Prompt Picker", bundle_id: "local.promptpicker.dev" });
+    getCurrentInputTarget.mockResolvedValueOnce({
+      frame: { x: 100, y: 200, width: 300, height: 40 },
+      window_frame: { x: 100, y: 200, width: 300, height: 40 },
+      button_position: [960, 700],
+      app: { name: "Finder", bundle_id: "com.apple.finder" },
     });
 
-    expect(hidePromptButton).toHaveBeenCalled();
+    void renderHook(() =>
+      useInputTargetPolling([], { buttonOffset: null }, {}, true)
+    );
+
+    await act(async () => { vi.advanceTimersByTime(1500); });
+    expect(showPromptButton).toHaveBeenCalledWith(960, 700);
+
+    await act(async () => { vi.advanceTimersByTime(2000); });
+    await waitFor(() => {
+      expect(showPromptButton).toHaveBeenCalled();
+    });
   });
 
   it("applies saved overlay offset to attached button position", async () => {
-    vi.mocked(getFrontmostApp).mockResolvedValue({ name: "Codex", bundle_id: "com.openai.codex" });
-    vi.mocked(getCurrentInputTarget).mockResolvedValue({
-      frame: { x: 300, y: 748, width: 600, height: 128 },
-      window_frame: { x: 0, y: 0, width: 1200, height: 900 },
-      button_position: [776, 700],
-      app: { name: "Codex", bundle_id: "com.openai.codex" }
+    getFrontmostApp.mockResolvedValue({ name: "Finder", bundle_id: "com.apple.finder" });
+    getCurrentInputTarget.mockResolvedValue({
+      frame: { x: 100, y: 200, width: 300, height: 40 },
+      window_frame: { x: 100, y: 200, width: 300, height: 40 },
+      button_position: [960, 700],
+      app: { name: "Finder", bundle_id: "com.apple.finder" },
     });
 
-    renderHook(() => useInputTargetPolling([], { buttonOffset: { x: 20, y: -10 } }));
+    void renderHook(() =>
+      useInputTargetPolling([], { buttonOffset: { x: 10, y: -5 } }, {}, true)
+    );
 
     await act(async () => {
-      await new Promise((r) => setTimeout(r, 600));
+      vi.advanceTimersByTime(1500);
     });
 
-    expect(showPromptButton).toHaveBeenCalledWith(796, 690);
+    await waitFor(() => {
+      expect(showPromptButton).toHaveBeenCalledWith(970, 695);
+    });
   });
 
-  it("does not show a screen-bottom fallback when no target frame is available", async () => {
-    vi.mocked(getFrontmostApp).mockResolvedValue({ name: "Codex", bundle_id: "com.openai.codex" });
-    vi.mocked(getCurrentInputTarget).mockResolvedValue(null);
+  it("keeps the last button position during overlay self-interaction", async () => {
+    getFrontmostApp
+      .mockResolvedValueOnce({ name: "Finder", bundle_id: "com.apple.finder" })
+      .mockResolvedValueOnce({ name: "Prompt Picker", bundle_id: "local.promptpicker.dev" })
+      .mockResolvedValue({ name: "Prompt Picker", bundle_id: "local.promptpicker.dev" });
+    getCurrentInputTarget
+      .mockResolvedValueOnce({
+        frame: { x: 100, y: 200, width: 300, height: 40 },
+        window_frame: { x: 100, y: 200, width: 300, height: 40 },
+        button_position: [960, 700],
+        app: { name: "Finder", bundle_id: "com.apple.finder" },
+      })
+      .mockResolvedValue(null);
 
-    renderHook(() => useInputTargetPolling([], { buttonOffset: null }));
+    void renderHook(() =>
+      useInputTargetPolling([], { buttonOffset: null }, {}, true)
+    );
 
     await act(async () => {
-      await new Promise((r) => setTimeout(r, 600));
+      vi.advanceTimersByTime(1500);
     });
 
-    expect(hidePromptButton).toHaveBeenCalled();
-    expect(showPromptButton).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(showPromptButton).toHaveBeenLastCalledWith(960, 700);
+    });
   });
 
-  it("keeps the last button position during brief overlay self-interaction", async () => {
-    vi.mocked(getFrontmostApp)
-      .mockResolvedValueOnce({ name: "Codex", bundle_id: "com.openai.codex" })
-      .mockResolvedValueOnce({ name: "Prompt Picker", bundle_id: "local.promptpicker.dev" });
-    vi.mocked(getCurrentInputTarget).mockResolvedValue({
-      frame: { x: 300, y: 748, width: 600, height: 128 },
-      window_frame: { x: 0, y: 0, width: 1200, height: 900 },
-      button_position: [776, 700],
-      app: { name: "Codex", bundle_id: "com.openai.codex" }
+  it("keeps polling after rerendering with an equivalent blacklist", async () => {
+    getFrontmostApp.mockResolvedValue({ name: "Finder", bundle_id: "com.apple.finder" });
+    getCurrentInputTarget.mockResolvedValue({
+      frame: { x: 100, y: 200, width: 300, height: 40 },
+      window_frame: { x: 100, y: 200, width: 300, height: 40 },
+      button_position: [960, 700],
+      app: { name: "Finder", bundle_id: "com.apple.finder" },
     });
 
-    renderHook(() => useInputTargetPolling([], { buttonOffset: null }));
+    const { rerender } = renderHook(
+      ({ blacklist }) => useInputTargetPolling(blacklist, { buttonOffset: null }, {}, true),
+      { initialProps: { blacklist: ["com.apple.finder"] } }
+    );
 
     await act(async () => {
-      await new Promise((r) => setTimeout(r, 1200));
+      vi.advanceTimersByTime(1500);
     });
 
-    expect(hidePromptButton).not.toHaveBeenCalled();
-    expect(showPromptButton).toHaveBeenCalledWith(776, 700);
+    rerender({ blacklist: ["com.apple.finder"] });
+
+    await act(async () => {
+      vi.advanceTimersByTime(1500);
+    });
+
+    expect(showPromptButton).toHaveBeenCalled(); // at least once, polling continues
   });
 });

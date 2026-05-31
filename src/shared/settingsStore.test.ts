@@ -57,4 +57,24 @@ describe("settings store", () => {
     const settings = await store.get();
     expect(settings.overlayPlacement).toEqual({ buttonOffset: null });
   });
+
+  it("defaults floating button visibility to visible", async () => {
+    const store = createTestSettingsStore();
+    const settings = await store.get();
+    expect(settings.floatingButton.visible).toBe(true);
+  });
+
+  it("saves floating button visibility", async () => {
+    const store = createTestSettingsStore();
+    await store.setFloatingButtonVisible(false);
+    expect((await store.get()).floatingButton.visible).toBe(false);
+    await store.setFloatingButtonVisible(true);
+    expect((await store.get()).floatingButton.visible).toBe(true);
+  });
+
+  it("normalizes old settings without floating button visibility", async () => {
+    const store = createTestSettingsStore('{"version":1,"blacklistedApps":[],"overlayPlacement":{"buttonOffset":null}}');
+    const settings = await store.get();
+    expect(settings.floatingButton.visible).toBe(true);
+  });
 });

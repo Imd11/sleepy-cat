@@ -9,6 +9,9 @@ export type Settings = {
   overlayPlacement: {
     buttonOffset: OverlayButtonOffset | null;
   };
+  floatingButton: {
+    visible: boolean;
+  };
 };
 
 interface SettingsAdapter {
@@ -21,7 +24,8 @@ export function createSettingsStore(adapter: SettingsAdapter) {
     return {
       version: 1,
       blacklistedApps: [],
-      overlayPlacement: { buttonOffset: null }
+      overlayPlacement: { buttonOffset: null },
+      floatingButton: { visible: true }
     };
   }
 
@@ -33,18 +37,33 @@ export function createSettingsStore(adapter: SettingsAdapter) {
     return { x: candidate.x, y: candidate.y };
   }
 
+  function normalizeSettings(value: unknown): Settings {
+    if (!value || typeof value !== "object") return defaultSettings();
+    const candidate = value as Partial<Settings> & {
+      overlayPlacement?: { buttonOffset?: unknown };
+    };
+    if (candidate.version !== 1 || !Array.isArray(candidate.blacklistedApps)) {
+      return defaultSettings();
+    }
+    return {
+      version: 1,
+      blacklistedApps: candidate.blacklistedApps
+        .filter((app) => app && typeof app.bundleId === "string" && typeof app.name === "string")
+        .map((app) => ({ bundleId: app.bundleId, name: app.name })),
+      overlayPlacement: {
+        buttonOffset: normalizeOffset(candidate.overlayPlacement?.buttonOffset)
+      },
+      floatingButton: {
+        visible: candidate.floatingButton?.visible === false ? false : true
+      }
+    };
+  }
+
   async function load(): Promise<Settings> {
     const data = await adapter.read();
     if (!data) return defaultSettings();
     try {
-      const parsed = JSON.parse(data) as Settings;
-      // Ensure overlayPlacement exists
-      if (!parsed.overlayPlacement) {
-        parsed.overlayPlacement = { buttonOffset: null };
-      }
-      // Ensure buttonOffset is normalized
-      parsed.overlayPlacement.buttonOffset = normalizeOffset(parsed.overlayPlacement.buttonOffset);
-      return parsed;
+      return normalizeSettings(JSON.parse(data));
     } catch {
       return defaultSettings();
     }
@@ -82,6 +101,12 @@ export function createSettingsStore(adapter: SettingsAdapter) {
     async setOverlayButtonOffset(offset: OverlayButtonOffset | null): Promise<void> {
       const settings = await load();
       settings.overlayPlacement.buttonOffset = offset;
+      await save(settings);
+    },
+
+    async setFloatingButtonVisible(visible: boolean): Promise<void> {
+      const settings = await load();
+      settings.floatingButton.visible = visible;
       await save(settings);
     }
   };

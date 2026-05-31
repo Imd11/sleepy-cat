@@ -1,1 +1,1 @@
-export type AppMode = "popover" | "manager" | "settings";
+export type AppMode = "popover" | "manager" | "settings" | "button-controls";

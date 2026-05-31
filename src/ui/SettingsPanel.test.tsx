@@ -8,7 +8,9 @@ describe("settings panel", () => {
     version: 1,
     blacklistedApps: [
       { bundleId: "com.example.app", name: "Example App" }
-    ]
+    ],
+    overlayPlacement: { buttonOffset: null },
+    floatingButton: { visible: true }
   };
 
   it("renders blacklisted apps", () => {
@@ -31,7 +33,7 @@ describe("settings panel", () => {
   });
 
   it("empty state renders when no blacklisted apps", () => {
-    render(<SettingsPanel settings={{ version: 1, blacklistedApps: [] }} onRemove={() => {}} />);
+    render(<SettingsPanel settings={{ version: 1, blacklistedApps: [], overlayPlacement: { buttonOffset: null }, floatingButton: { visible: true } }} onRemove={() => {}} />);
     expect(screen.getByText("No blacklisted apps")).toBeTruthy();
   });
 });

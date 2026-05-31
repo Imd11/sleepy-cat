@@ -61,3 +61,6 @@ export async function showPromptPopoverFromButton(): Promise<void> {
 export async function pastePromptToApp(body: string, bundle_id: string): Promise<void> {
   return invoke("paste_prompt_to_app", { body, bundle_id });
 }
+export async function openMainWindow(): Promise<void> {
+  return invoke("open_main_window");
+}

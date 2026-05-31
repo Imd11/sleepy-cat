@@ -5,7 +5,15 @@ pub use platform::{accessibility_status, frontmost_app, AccessibilityStatus, Fro
 mod overlay_position;
 pub use overlay_position::{prompt_button_position, OverlayPoint};
 mod windows;
-pub use windows::*;
+pub use windows::{
+    show_prompt_button,
+    hide_prompt_button,
+    show_prompt_popover,
+    show_prompt_popover_from_button,
+    hide_prompt_popover,
+    prompt_button_position_cmd,
+    move_prompt_button_to,
+};
 mod macos_panels;
 pub use macos_panels::configure_non_activating_panel;
 
@@ -33,6 +41,15 @@ fn paste_prompt(body: String) -> Result<(), String> {
 fn paste_prompt_to_app(body: String, bundle_id: String) -> Result<(), String> {
     platform::macos::paste_prompt_to_app(&body, &bundle_id)
 }
+#[tauri::command]
+fn open_main_window(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("main") {
+        window.show().map_err(|e| e.to_string())?;
+        window.set_focus().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
