@@ -213,4 +213,36 @@ describe("app", () => {
     expect(screen.queryByText("Import")).toBeNull();
     expect(screen.queryByText("Export")).toBeNull();
   });
+
+  it("button controls hide persists state and hides the floating button", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    currentWindowLabel = "prompt-popover";
+    window.history.pushState({}, "", "/?mode=button-controls");
+    const files = new Map<string, string>();
+    const { readTextFile, writeTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockImplementation(async (path: string) => {
+      if (path.includes("prompts")) return JSON.stringify({ version: 1, prompts: mockPrompts });
+      if (path.includes("settings")) return JSON.stringify({ version: 1, blacklistedApps: [], overlayPlacement: { buttonOffset: null }, floatingButton: { visible: true } });
+      throw new Error("missing file");
+    });
+    (writeTextFile as ReturnType<typeof vi.fn>).mockImplementation(async (path: string, value: string) => {
+      files.set(path, value);
+    });
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    await screen.findByRole("button", { name: "Hide Button" });
+    fireEvent.click(screen.getByRole("button", { name: "Hide Button" }));
+
+    await waitFor(() => {
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith("hide_prompt_button");
+    });
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("hide_prompt_popover");
+    const allCalls = (vi.mocked(invoke) as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
+    expect(allCalls).toContain("hide_prompt_button");
+    expect(allCalls).toContain("hide_prompt_popover");
+  });
 });

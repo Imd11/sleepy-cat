@@ -9,7 +9,7 @@ import { createSettingsStore } from "./shared/settingsStore";
 import { createPromptStore } from "./shared/promptStore";
 import { createTauriPromptStorage } from "./storage/tauriPromptStorage";
 import { createTauriSettingsStorage } from "./storage/tauriSettingsStorage";
-import { getAccessibilityStatus, hidePromptPopover, pastePrompt } from "./platform/platformApi";
+import { getAccessibilityStatus, hidePromptButton, hidePromptPopover, openMainWindow, pastePrompt } from "./platform/platformApi";
 import { useInputTargetPolling } from "./overlay/useInputTargetPolling";
 import { PromptQuickList } from "./ui/PromptQuickList";
 import { PromptManager } from "./ui/PromptManager";
@@ -206,6 +206,7 @@ export function App({
           onClick={async () => {
             await settingsStoreRef.current.setFloatingButtonVisible(false);
             setActiveSettings(await settingsStoreRef.current.get());
+            await hidePromptButton();
             await hidePromptPopover();
           }}
         >
@@ -213,7 +214,6 @@ export function App({
         </button>
         <button
           onClick={async () => {
-            const { openMainWindow } = await import("./platform/platformApi");
             await openMainWindow();
             await hidePromptPopover();
           }}

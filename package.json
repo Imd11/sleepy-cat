@@ -9,7 +9,6 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "preview": "vite preview",
-    "preview": "vite preview",
     "tauri": "tauri"
   },
   "keywords": [],
@@ -19,6 +18,7 @@
     "@tauri-apps/cli": "^2.11.2",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
+    "@types/node": "^25.9.1",
     "@types/react": "^19.2.15",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.7.0",
