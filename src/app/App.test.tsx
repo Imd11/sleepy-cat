@@ -3,6 +3,12 @@ import { render, screen, waitFor, act, fireEvent } from "@testing-library/react"
 import { App } from "../App";
 import type { PromptItem } from "../shared/promptTypes";
 
+const inputTargetPollingMock = vi.hoisted(() => vi.fn());
+
+vi.mock("../overlay/useInputTargetPolling", () => ({
+  useInputTargetPolling: inputTargetPollingMock,
+}));
+
 // Mock Tauri core invoke
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn().mockResolvedValue(undefined),
@@ -41,6 +47,8 @@ const mockPrompts: PromptItem[] = [
 describe("app", () => {
   beforeEach(() => {
     currentWindowLabel = "prompt-popover";
+    window.history.pushState({}, "", "/");
+    inputTargetPollingMock.mockClear();
   });
 
   it("shows prompt list in popover mode by default", async () => {
@@ -76,6 +84,66 @@ describe("app", () => {
     expect(screen.queryByText("Settings")).toBeNull();
     expect(screen.queryByText("Import")).toBeNull();
     expect(screen.queryByText("Export")).toBeNull();
+  });
+
+  it("does not start input target polling in prompt popover windows", async () => {
+    currentWindowLabel = "prompt-popover";
+    window.history.pushState({}, "", "/?mode=popover");
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      JSON.stringify({ version: 1, prompts: mockPrompts })
+    );
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    await screen.findByText("Test Prompt");
+    expect(inputTargetPollingMock).not.toHaveBeenCalled();
+  });
+
+  it("does not start input target polling in button controls windows", async () => {
+    currentWindowLabel = "prompt-popover";
+    window.history.pushState({}, "", "/?mode=button-controls");
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockImplementation(
+      async (path: string) => {
+        if (path.includes("prompts")) {
+          return JSON.stringify({ version: 1, prompts: mockPrompts });
+        }
+        if (path.includes("settings")) {
+          return JSON.stringify({
+            version: 1,
+            blacklistedApps: [],
+            overlayPlacement: { buttonOffset: null },
+            floatingButton: { visible: true },
+          });
+        }
+        throw new Error("unexpected path: " + path);
+      }
+    );
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    await screen.findByRole("button", { name: "Hide Button" });
+    expect(inputTargetPollingMock).not.toHaveBeenCalled();
+  });
+
+  it("starts input target polling in the main window", async () => {
+    currentWindowLabel = "main";
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValue(
+      JSON.stringify({ version: 1, prompts: mockPrompts })
+    );
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    await screen.findByText("Prompt Picker");
+    expect(inputTargetPollingMock).toHaveBeenCalled();
   });
 
   it("pastes selected prompt into the backend last input target", async () => {

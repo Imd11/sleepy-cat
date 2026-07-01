@@ -35,6 +35,28 @@ const DEFAULT_SETTINGS: Settings = {
   floatingButton: { visible: true },
 };
 
+interface InputTargetPollingControllerProps {
+  settings: Settings;
+  onButtonDragEnd: (
+    position: { x: number; y: number },
+    basePosition: [number, number] | null
+  ) => void;
+}
+
+function InputTargetPollingController({
+  settings,
+  onButtonDragEnd,
+}: InputTargetPollingControllerProps) {
+  useInputTargetPolling(
+    settings.blacklistedApps.map((app) => app.bundleId),
+    settings.overlayPlacement,
+    { onButtonDragEnd },
+    settings.floatingButton.visible
+  );
+
+  return null;
+}
+
 function initialWindowLabel() {
   return new URLSearchParams(window.location.search).has("mode")
     ? "prompt-popover"
@@ -109,154 +131,169 @@ export function App({
     setActiveSettings(await settingsStoreRef.current.get());
   };
 
-  // eslint-disable-next-line react-hooks/rules-of-hooks
-  useInputTargetPolling(
-    activeSettings.blacklistedApps.map((app) => app.bundleId),
-    activeSettings.overlayPlacement,
-    { onButtonDragEnd: handleButtonDragEnd },
-    activeSettings.floatingButton.visible
-  );
+  const pollingController =
+    windowLabel === "main" ? (
+      <InputTargetPollingController
+        settings={activeSettings}
+        onButtonDragEnd={handleButtonDragEnd}
+      />
+    ) : null;
 
   // ── Main window: show/hide floating button controls ────────────────────
   if (windowLabel === "main" && mode === "popover") {
     return (
-      <MainWindow
-        floatingButtonVisible={activeSettings.floatingButton.visible}
-        onManage={handleManage}
-        onSettings={handleSettings}
-        onShowFloatingButton={async () => {
-          await settingsStoreRef.current.setFloatingButtonVisible(true);
-          setActiveSettings(await settingsStoreRef.current.get());
-          const pos =
-            await invoke<{ x: number; y: number }>("prompt_button_position_cmd");
-          if (pos) {
-            await invoke("show_prompt_button", { x: pos.x, y: pos.y });
-          } else {
-            await invoke("show_prompt_button", { x: 960, y: 700 });
-          }
-        }}
-        onHideFloatingButton={async () => {
-          await settingsStoreRef.current.setFloatingButtonVisible(false);
-          setActiveSettings(await settingsStoreRef.current.get());
-          await invoke("hide_prompt_button");
-        }}
-      />
+      <>
+        {pollingController}
+        <MainWindow
+          floatingButtonVisible={activeSettings.floatingButton.visible}
+          onManage={handleManage}
+          onSettings={handleSettings}
+          onShowFloatingButton={async () => {
+            await settingsStoreRef.current.setFloatingButtonVisible(true);
+            setActiveSettings(await settingsStoreRef.current.get());
+            const pos =
+              await invoke<{ x: number; y: number }>("prompt_button_position_cmd");
+            if (pos) {
+              await invoke("show_prompt_button", { x: pos.x, y: pos.y });
+            } else {
+              await invoke("show_prompt_button", { x: 960, y: 700 });
+            }
+          }}
+          onHideFloatingButton={async () => {
+            await settingsStoreRef.current.setFloatingButtonVisible(false);
+            setActiveSettings(await settingsStoreRef.current.get());
+            await invoke("hide_prompt_button");
+          }}
+        />
+      </>
     );
   }
 
   // ── Manager ─────────────────────────────────────────────────────────
   if (mode === "manager") {
     return (
-      <div className="app-window app-window-main">
-        <PromptManager
-          prompts={prompts}
-          onCreate={async (input) => {
-            await storeRef.current.create(input);
-            setPrompts(await storeRef.current.list());
-          }}
-          onUpdate={async (id, input) => {
-            await storeRef.current.update(id, input);
-            setPrompts(await storeRef.current.list());
-          }}
-          onDelete={async (id) => {
-            await storeRef.current.remove(id);
-            setPrompts(await storeRef.current.list());
-          }}
-          onReorder={async (ids) => {
-            await storeRef.current.reorder(ids);
-            setPrompts(await storeRef.current.list());
-          }}
-          onImport={async () => {
-            try {
-              const file = await open({
-                filters: [{ name: "JSON", extensions: ["json"] }],
-                multiple: false,
-              });
-              if (file) {
-                const content = await readTextFile(file as string);
-                await storeRef.current.importJson(content);
-                setPrompts(await storeRef.current.list());
+      <>
+        {pollingController}
+        <div className="app-window app-window-main">
+          <PromptManager
+            prompts={prompts}
+            onCreate={async (input) => {
+              await storeRef.current.create(input);
+              setPrompts(await storeRef.current.list());
+            }}
+            onUpdate={async (id, input) => {
+              await storeRef.current.update(id, input);
+              setPrompts(await storeRef.current.list());
+            }}
+            onDelete={async (id) => {
+              await storeRef.current.remove(id);
+              setPrompts(await storeRef.current.list());
+            }}
+            onReorder={async (ids) => {
+              await storeRef.current.reorder(ids);
+              setPrompts(await storeRef.current.list());
+            }}
+            onImport={async () => {
+              try {
+                const file = await open({
+                  filters: [{ name: "JSON", extensions: ["json"] }],
+                  multiple: false,
+                });
+                if (file) {
+                  const content = await readTextFile(file as string);
+                  await storeRef.current.importJson(content);
+                  setPrompts(await storeRef.current.list());
+                }
+              } catch (e) {
+                console.error("Import failed:", e);
+                alert("Failed to import prompts. Please check the file format.");
               }
-            } catch (e) {
-              console.error("Import failed:", e);
-              alert("Failed to import prompts. Please check the file format.");
-            }
-          }}
-          onExport={async () => {
-            try {
-              const path = await save({
-                filters: [{ name: "JSON", extensions: ["json"] }],
-                defaultPath: "prompts.json",
-              });
-              if (path) {
-                const json = await storeRef.current.exportJson();
-                await writeTextFile(path, json);
+            }}
+            onExport={async () => {
+              try {
+                const path = await save({
+                  filters: [{ name: "JSON", extensions: ["json"] }],
+                  defaultPath: "prompts.json",
+                });
+                if (path) {
+                  const json = await storeRef.current.exportJson();
+                  await writeTextFile(path, json);
+                }
+              } catch (e) {
+                console.error("Export failed:", e);
+                alert("Failed to export prompts. Please try again.");
               }
-            } catch (e) {
-              console.error("Export failed:", e);
-              alert("Failed to export prompts. Please try again.");
-            }
-          }}
-        />
-        <div className="page-footer">
-          <button className="button button-secondary" onClick={handleBackToPopover}>
-            Back
-          </button>
+            }}
+          />
+          <div className="page-footer">
+            <button className="button button-secondary" onClick={handleBackToPopover}>
+              Back
+            </button>
+          </div>
         </div>
-      </div>
+      </>
     );
   }
 
   // ── Settings ────────────────────────────────────────────────────────
   if (mode === "settings") {
     return (
-      <div className="app-window app-window-main">
-        <SettingsPanel
-          settings={activeSettings}
-          onRemove={removeBlacklistedApp}
-        />
-        <div className="page-footer">
-          <button className="button button-secondary" onClick={handleBackToPopover}>
-            Back
-          </button>
+      <>
+        {pollingController}
+        <div className="app-window app-window-main">
+          <SettingsPanel
+            settings={activeSettings}
+            onRemove={removeBlacklistedApp}
+          />
+          <div className="page-footer">
+            <button className="button button-secondary" onClick={handleBackToPopover}>
+              Back
+            </button>
+          </div>
         </div>
-      </div>
+      </>
     );
   }
 
   // ── Button controls mode ────────────────────────────────────────────
   if (mode === "button-controls") {
     return (
-      <div className="button-controls">
-        <button
-          className="button button-danger"
-          onClick={async () => {
-            await settingsStoreRef.current.setFloatingButtonVisible(false);
-            setActiveSettings(await settingsStoreRef.current.get());
-            await hidePromptButton();
-            await hidePromptPopover();
-          }}
-        >
-          Hide Button
-        </button>
-        <button
-          className="button button-secondary"
-          onClick={async () => {
-            await openMainWindow();
-            await hidePromptPopover();
-          }}
-        >
-          Open Prompt Picker
-        </button>
-      </div>
+      <>
+        {pollingController}
+        <div className="button-controls">
+          <button
+            className="button button-danger"
+            onClick={async () => {
+              await settingsStoreRef.current.setFloatingButtonVisible(false);
+              setActiveSettings(await settingsStoreRef.current.get());
+              await hidePromptButton();
+              await hidePromptPopover();
+            }}
+          >
+            Hide Button
+          </button>
+          <button
+            className="button button-secondary"
+            onClick={async () => {
+              await openMainWindow();
+              await hidePromptPopover();
+            }}
+          >
+            Open Prompt Picker
+          </button>
+        </div>
+      </>
     );
   }
 
   // ── Default: popover quick-list ─────────────────────────────────────
   return (
-    <div className="popover-window">
-      <PromptQuickList prompts={prompts} onSelect={handleSelect} />
-    </div>
+    <>
+      {pollingController}
+      <div className="popover-window">
+        <PromptQuickList prompts={prompts} onSelect={handleSelect} />
+      </div>
+    </>
   );
 }
 
