@@ -9,6 +9,10 @@ pub const POPOVER_WIDTH: f64 = 280.0;
 pub const POPOVER_HEIGHT: f64 = 240.0;
 pub const POPOVER_GAP: f64 = 8.0;
 
+fn prompt_button_window_position(x: f64, y: f64) -> tauri::Position {
+    tauri::Position::Logical(tauri::LogicalPosition { x, y })
+}
+
 #[derive(serde::Serialize)]
 pub struct PromptButtonPosition {
     pub x: f64,
@@ -64,10 +68,7 @@ fn show_popover_mode(x: f64, y: f64, mode: &str, app: &tauri::AppHandle) -> Resu
 pub fn show_prompt_button(x: f64, y: f64, app: tauri::AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(BUTTON_WINDOW_LABEL) {
         window
-            .set_position(tauri::Position::Physical(tauri::PhysicalPosition {
-                x: x as i32,
-                y: y as i32,
-            }))
+            .set_position(prompt_button_window_position(x, y))
             .map_err(|e| e.to_string())?;
         window.show().map_err(|e| e.to_string())?;
         crate::macos_panels::configure_non_activating_panel(&window)?;
@@ -183,5 +184,18 @@ mod tests {
     fn keeps_popover_to_right_when_there_is_room() {
         let position = clamp_popover_position(100.0, 200.0, BUTTON_WIDTH, None);
         assert_eq!(position, (220.0, 200.0));
+    }
+
+    #[test]
+    fn prompt_button_set_position_uses_logical_coordinates() {
+        let position = prompt_button_window_position(320.0, 240.0);
+
+        match position {
+            tauri::Position::Logical(logical) => {
+                assert_eq!(logical.x, 320.0);
+                assert_eq!(logical.y, 240.0);
+            }
+            _ => panic!("prompt button position must use logical coordinates"),
+        }
     }
 }
