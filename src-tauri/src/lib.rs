@@ -26,8 +26,10 @@ fn frontmost_app_cmd() -> Option<FrontmostApp> {
 }
 
 #[tauri::command]
-fn current_input_target() -> Option<platform::InputTarget> {
-    platform::macos::current_input_target()
+fn current_input_target(state: tauri::State<LastInputTargetState>) -> Option<platform::InputTarget> {
+    let target = platform::macos::current_input_target()?;
+    record_last_input_target_if_valid(state.inner(), &target);
+    Some(target)
 }
 
 #[tauri::command]
@@ -48,9 +50,51 @@ fn open_main_window(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct LastInputTarget {
+    pub app: FrontmostApp,
+    pub observed_at_ms: u128,
+}
+
+#[derive(Default)]
+pub struct LastInputTargetState(std::sync::Mutex<Option<LastInputTarget>>);
+
+impl LastInputTargetState {
+    pub fn set(&self, target: LastInputTarget) {
+        *self.0.lock().expect("last input target lock poisoned") = Some(target);
+    }
+
+    pub fn get(&self) -> Option<LastInputTarget> {
+        self.0
+            .lock()
+            .expect("last input target lock poisoned")
+            .clone()
+    }
+}
+
+fn record_last_input_target_if_valid(
+    state: &LastInputTargetState,
+    target: &platform::InputTarget,
+) {
+    let Some(app) = target.app.clone() else {
+        return;
+    };
+    if app.bundle_id == "local.promptpicker.dev" || app.name == "Prompt Picker" {
+        return;
+    }
+    state.set(LastInputTarget {
+        app,
+        observed_at_ms: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis(),
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(LastInputTargetState::default())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -86,4 +130,81 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+    }
+
+#[cfg(test)]
+mod last_input_target_tests {
+    use super::*;
+
+    #[test]
+    fn stores_and_reads_last_input_target() {
+        let state = LastInputTargetState::default();
+        let target = LastInputTarget {
+            app: FrontmostApp {
+                name: "Notes".to_string(),
+                bundle_id: "com.apple.Notes".to_string(),
+            },
+            observed_at_ms: 123,
+        };
+
+        state.set(target);
+
+        assert_eq!(state.get().unwrap().app.bundle_id, "com.apple.Notes");
+    }
+
+    #[test]
+    fn records_non_prompt_picker_input_target() {
+        let state = LastInputTargetState::default();
+        let target = platform::InputTarget {
+            frame: CandidateInput {
+                x: 0.0,
+                y: 0.0,
+                width: 10.0,
+                height: 10.0,
+            },
+            window_frame: CandidateInput {
+                x: 0.0,
+                y: 0.0,
+                width: 100.0,
+                height: 100.0,
+            },
+            button_position: (10.0, 10.0),
+            app: Some(FrontmostApp {
+                name: "Notes".to_string(),
+                bundle_id: "com.apple.Notes".to_string(),
+            }),
+        };
+
+        record_last_input_target_if_valid(&state, &target);
+
+        assert_eq!(state.get().unwrap().app.bundle_id, "com.apple.Notes");
+    }
+
+    #[test]
+    fn skips_prompt_picker_as_last_input_target() {
+        let state = LastInputTargetState::default();
+        let target = platform::InputTarget {
+            frame: CandidateInput {
+                x: 0.0,
+                y: 0.0,
+                width: 10.0,
+                height: 10.0,
+            },
+            window_frame: CandidateInput {
+                x: 0.0,
+                y: 0.0,
+                width: 100.0,
+                height: 100.0,
+            },
+            button_position: (10.0, 10.0),
+            app: Some(FrontmostApp {
+                name: "Prompt Picker".to_string(),
+                bundle_id: "local.promptpicker.dev".to_string(),
+            }),
+        };
+
+        record_last_input_target_if_valid(&state, &target);
+
+        assert!(state.get().is_none());
+    }
 }

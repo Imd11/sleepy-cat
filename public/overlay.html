@@ -20,9 +20,32 @@ let lastMove = null;
 let animationFrame = 0;
 let contextMenuOpened = false;
 let pointerSequence = 0;
+let dragStartedEmitted = false;
 
 function distance(a, b) {
   return Math.hypot(a.screenX - b.screenX, a.screenY - b.screenY);
+}
+
+async function invoke(command, args) {
+  if (!tauri?.core?.invoke) {
+    console.error("Tauri invoke API is unavailable in overlay.html");
+    return null;
+  }
+  try {
+    return await tauri.core.invoke(command, args);
+  } catch (error) {
+    console.error(`Tauri command failed: ${command}`, error);
+    return null;
+  }
+}
+
+async function emit(event, payload) {
+  if (!tauri?.event?.emit) return;
+  try {
+    await tauri.event.emit(event, payload);
+  } catch (error) {
+    console.error(`Tauri event failed: ${event}`, error);
+  }
 }
 
 async function openButtonControls(event) {
@@ -31,14 +54,13 @@ async function openButtonControls(event) {
   start = null;
   dragging = false;
   lastMove = null;
-  if (!tauri?.core?.invoke) return;
-  await tauri.core.invoke('show_prompt_button_controls_from_button');
+  await invoke('show_prompt_button_controls_from_button');
 }
 
 async function flushMove() {
   animationFrame = 0;
   if (!lastMove || !start || !start.positionReady) return;
-  await tauri.core.invoke('move_prompt_button_to', {
+  await invoke('move_prompt_button_to', {
     x: start.windowX + lastMove.screenX - start.screenX,
     y: start.windowY + lastMove.screenY - start.screenY
   });
@@ -64,11 +86,12 @@ btn.addEventListener('pointerdown', (event) => {
   dragging = false;
   lastMove = null;
   contextMenuOpened = false;
+  dragStartedEmitted = false;
   try {
     btn.setPointerCapture(event.pointerId);
   } catch {}
 
-  start.positionPromise = tauri.core.invoke('prompt_button_position_cmd');
+  start.positionPromise = invoke('prompt_button_position_cmd');
   start.positionPromise.then((position) => {
     if (!position || !start || start.sequence !== sequence) return;
     start.windowX = position.x;
@@ -86,6 +109,10 @@ btn.addEventListener('pointermove', (event) => {
   if (!start) return;
   const current = { screenX: event.screenX, screenY: event.screenY };
   if (!dragging && distance(start, current) < 4) return;
+  if (!dragStartedEmitted) {
+    dragStartedEmitted = true;
+    emit('prompt-button-drag-started').catch(() => {});
+  }
   dragging = true;
   lastMove = current;
   if (!animationFrame) {
@@ -110,16 +137,17 @@ btn.addEventListener('pointerup', async (event) => {
       await start.positionPromise.catch(() => null);
     }
     await flushMove();
-    const position = await tauri.core.invoke('prompt_button_position_cmd');
-    if (tauri.event?.emit && position) {
-      await tauri.event.emit('prompt-button-drag-ended', position);
+    const position = await invoke('prompt_button_position_cmd');
+    if (position) {
+      await emit('prompt-button-drag-ended', position);
     }
   } else {
-    await tauri.core.invoke('show_prompt_popover_from_button');
+    await invoke('show_prompt_popover_from_button');
   }
   start = null;
   dragging = false;
   lastMove = null;
+  dragStartedEmitted = false;
 });
 
 btn.addEventListener('contextmenu', async (event) => {

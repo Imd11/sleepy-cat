@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import {
   getFrontmostApp,
   getCurrentInputTarget,
@@ -15,12 +16,21 @@ interface InputTarget {
   app: FrontmostApp | null;
 }
 
+type PromptButtonPosition = {
+  x: number;
+  y: number;
+};
+
 type OverlayPlacement = {
   buttonOffset: { x: number; y: number } | null;
 };
 
 interface InputTargetPollingOptions {
   onBasePositionChange?: (position: [number, number]) => void;
+  onButtonDragEnd?: (
+    position: PromptButtonPosition,
+    basePosition: [number, number] | null
+  ) => void;
 }
 
 const DEFAULT_BUTTON_POSITION: [number, number] = [960, 700];
@@ -39,6 +49,55 @@ export function useInputTargetPolling(
   const pollingRef = useRef<boolean>(true);
   const activeRef = useRef(true);
   const prevVisibilityRef = useRef(floatingButtonVisible);
+  const currentBasePositionRef = useRef<[number, number] | null>(null);
+  const draggingRef = useRef(false);
+
+  useEffect(() => {
+    let active = true;
+    let unlistenDragStarted: (() => void) | undefined;
+    let unlistenDragEnded: (() => void) | undefined;
+
+    listen("prompt-button-drag-started", () => {
+      draggingRef.current = true;
+    })
+      .then((unlisten) => {
+        if (active) {
+          unlistenDragStarted = unlisten;
+        } else {
+          unlisten();
+        }
+      })
+      .catch(() => {});
+
+    listen<PromptButtonPosition>("prompt-button-drag-ended", (event) => {
+      draggingRef.current = false;
+      const position = event.payload;
+      if (
+        !position ||
+        !Number.isFinite(position.x) ||
+        !Number.isFinite(position.y)
+      ) {
+        return;
+      }
+      lastButtonPositionRef.current = [position.x, position.y];
+      lastTargetAtRef.current = Date.now();
+      options.onButtonDragEnd?.(position, currentBasePositionRef.current);
+    })
+      .then((unlisten) => {
+        if (active) {
+          unlistenDragEnded = unlisten;
+        } else {
+          unlisten();
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      active = false;
+      unlistenDragStarted?.();
+      unlistenDragEnded?.();
+    };
+  }, [options.onButtonDragEnd]);
 
   useEffect(() => {
     activeRef.current = true;
@@ -56,6 +115,11 @@ export function useInputTargetPolling(
         return;
       }
 
+      if (draggingRef.current) {
+        setTimeout(poll, 250);
+        return;
+      }
+
       if (!pollingRef.current) {
         pollingRef.current = true;
       }
@@ -70,6 +134,7 @@ export function useInputTargetPolling(
           setShowAttached(true);
           lastTargetAppRef.current = inputTarget.app;
           const [x, y] = inputTarget.button_position;
+          currentBasePositionRef.current = [x, y];
           const offset = overlayPlacement.buttonOffset;
           const displayX = offset ? x + offset.x : x;
           const displayY = offset ? y + offset.y : y;
@@ -77,6 +142,8 @@ export function useInputTargetPolling(
           lastTargetAtRef.current = Date.now();
           options.onBasePositionChange?.([displayX, displayY]);
           await showPromptButton(displayX, displayY);
+          setTimeout(poll, 1000 + Math.random() * 1000);
+          return;
         } else if (
           app &&
           app.name === "Prompt Picker" &&
@@ -95,6 +162,7 @@ export function useInputTargetPolling(
 
         // No input target and no recent target — show at default/fallback position
         // This ensures the button appears even on first run before any target is detected
+        currentBasePositionRef.current = null;
         if (floatingButtonVisible && lastButtonPositionRef.current) {
           const [x, y] = lastButtonPositionRef.current;
           await showPromptButton(x, y);

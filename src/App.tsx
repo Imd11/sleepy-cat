@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { save, open } from "@tauri-apps/plugin-dialog";
@@ -88,6 +88,21 @@ export function App({
   const handleSettings = () => setMode("settings");
   const handleBackToPopover = () => setMode("popover");
 
+  const handleButtonDragEnd = useCallback(
+    async (
+      position: { x: number; y: number },
+      basePosition: [number, number] | null
+    ) => {
+      if (!basePosition) return;
+      await settingsStoreRef.current.setOverlayButtonOffset({
+        x: position.x - basePosition[0],
+        y: position.y - basePosition[1],
+      });
+      setActiveSettings(await settingsStoreRef.current.get());
+    },
+    []
+  );
+
   const removeBlacklistedApp = async (bundleId: string) => {
     await settingsStoreRef.current.removeBlacklistedApp(bundleId);
     setActiveSettings(await settingsStoreRef.current.get());
@@ -97,7 +112,7 @@ export function App({
   useInputTargetPolling(
     activeSettings.blacklistedApps.map((app) => app.bundleId),
     activeSettings.overlayPlacement,
-    {},
+    { onButtonDragEnd: handleButtonDragEnd },
     activeSettings.floatingButton.visible
   );
 
