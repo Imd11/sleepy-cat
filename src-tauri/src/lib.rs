@@ -136,6 +136,9 @@ pub fn run() {
             open_main_window
         ])
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
             let window = app.get_webview_window("main").unwrap();
             window.set_title("Prompt Picker").unwrap();
             let main_window = window.clone();
