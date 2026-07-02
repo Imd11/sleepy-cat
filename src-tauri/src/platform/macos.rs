@@ -791,15 +791,19 @@ mod tests {
 
     #[test]
     fn should_cmd_tab_refocus_only_when_prompt_picker_is_frontmost() {
-        assert!(should_cmd_tab_refocus_before_autosend(Some(&FrontmostApp {
-            name: "Prompt Picker".to_string(),
-            bundle_id: "local.promptpicker.dev".to_string(),
-        })));
+        assert!(should_cmd_tab_refocus_before_autosend(Some(
+            &FrontmostApp {
+                name: "Prompt Picker".to_string(),
+                bundle_id: "local.promptpicker.dev".to_string(),
+            }
+        )));
 
-        assert!(!should_cmd_tab_refocus_before_autosend(Some(&FrontmostApp {
-            name: "Codex".to_string(),
-            bundle_id: "com.openai.codex".to_string(),
-        })));
+        assert!(!should_cmd_tab_refocus_before_autosend(Some(
+            &FrontmostApp {
+                name: "Codex".to_string(),
+                bundle_id: "com.openai.codex".to_string(),
+            }
+        )));
 
         assert!(!should_cmd_tab_refocus_before_autosend(None));
     }
