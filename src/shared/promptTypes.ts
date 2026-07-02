@@ -62,6 +62,18 @@ export function getPromptContainerBodies(container: PromptContainer): string[] {
     .filter(Boolean);
 }
 
+export function getPromptContainerPreviewLines(container: PromptContainer): string[] {
+  const bodies = getPromptContainerBodies(container).map((body) =>
+    body.replace(/\s+/g, " ").trim()
+  );
+
+  if (container.type === "group") {
+    return bodies.slice(0, 2).map((body, index) => `${index + 1}. ${body}`);
+  }
+
+  return bodies.slice(0, 1);
+}
+
 export function getPromptContainerPreview(
   container: PromptContainer,
   maxLength = 120

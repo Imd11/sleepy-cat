@@ -27,6 +27,7 @@ const prompts: PromptContainer[] = [
     prompts: [
       { id: "2-entry-1", body: "分析根本原因。", order: 0 },
       { id: "2-entry-2", body: "执行修复。", order: 1 },
+      { id: "2-entry-3", body: "完成验证。", order: 2 },
     ],
     intervalMs: 700,
     order: 1,
@@ -44,12 +45,30 @@ describe("PromptQuickList", () => {
     expect(screen.getByText("Single · 1 prompt")).toBeTruthy();
   });
 
-  it("renders group containers with a distinct count", () => {
+  it("renders group containers with two one-line preview entries", () => {
     render(<PromptQuickList prompts={prompts} onSelect={() => {}} />);
 
     expect(screen.getByText("修复流程")).toBeTruthy();
-    expect(screen.getByText("Group · 2 prompts · 700ms")).toBeTruthy();
-    expect(screen.getByText(/1. 分析根本原因。 2. 执行修复。/)).toBeTruthy();
+    expect(screen.getByText("Group · 3 prompts · 700ms")).toBeTruthy();
+    expect(screen.getByText("1. 分析根本原因。")).toBeTruthy();
+    expect(screen.getByText("2. 执行修复。")).toBeTruthy();
+    expect(screen.queryByText("3. 完成验证。")).toBeNull();
+  });
+
+  it("shows full prompt content on hover", () => {
+    render(<PromptQuickList prompts={prompts} onSelect={() => {}} />);
+
+    expect(screen.queryByRole("tooltip")).toBeNull();
+
+    fireEvent.mouseEnter(screen.getByRole("option", { name: /修复流程/i }));
+
+    expect(screen.getByRole("tooltip").textContent).toContain("1. 分析根本原因。");
+    expect(screen.getByRole("tooltip").textContent).toContain("2. 执行修复。");
+    expect(screen.getByRole("tooltip").textContent).toContain("3. 完成验证。");
+
+    fireEvent.mouseLeave(screen.getByRole("option", { name: /修复流程/i }));
+
+    expect(screen.queryByRole("tooltip")).toBeNull();
   });
 
   it("does not render management actions", () => {
@@ -80,7 +99,7 @@ describe("PromptQuickList", () => {
     );
 
     expect(
-      (screen.getByRole("button", { name: /讨论方案/i }) as HTMLButtonElement)
+      (screen.getByRole("option", { name: /讨论方案/i }) as HTMLButtonElement)
         .disabled
     ).toBe(true);
   });

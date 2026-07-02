@@ -6,6 +6,7 @@ import {
   clampGroupIntervalMs,
   getPromptContainerMeta,
   getPromptContainerPreview,
+  getPromptContainerPreviewLines,
   getPromptPreview,
   normalizePromptTitle,
 } from "./promptTypes";
@@ -55,6 +56,45 @@ describe("prompt model helpers", () => {
     expect(getPromptContainerPreview(container)).toContain("2. Write a plan.");
     expect(getPromptContainerPreview(container)).not.toContain("Step");
     expect(getPromptContainerMeta(container)).toBe("Group · 2 prompts · 700ms");
+  });
+
+  it("returns one preview line for a single prompt container", () => {
+    const container: PromptContainer = {
+      id: "single-lines",
+      title: "Single lines",
+      type: "single",
+      prompts: [{ id: "entry-1", body: "Use brainstorming skill.\nDiscuss first.", order: 0 }],
+      intervalMs: DEFAULT_GROUP_INTERVAL_MS,
+      order: 0,
+      createdAt: "2026-07-03T00:00:00.000Z",
+      updatedAt: "2026-07-03T00:00:00.000Z",
+    };
+
+    expect(getPromptContainerPreviewLines(container)).toEqual([
+      "Use brainstorming skill. Discuss first.",
+    ]);
+  });
+
+  it("returns the first two ordered preview lines for a group prompt container", () => {
+    const container: PromptContainer = {
+      id: "group-lines",
+      title: "Group lines",
+      type: "group",
+      prompts: [
+        { id: "entry-2", body: "Second prompt", order: 1 },
+        { id: "entry-1", body: "First prompt", order: 0 },
+        { id: "entry-3", body: "Third prompt", order: 2 },
+      ],
+      intervalMs: DEFAULT_GROUP_INTERVAL_MS,
+      order: 0,
+      createdAt: "2026-07-03T00:00:00.000Z",
+      updatedAt: "2026-07-03T00:00:00.000Z",
+    };
+
+    expect(getPromptContainerPreviewLines(container)).toEqual([
+      "1. First prompt",
+      "2. Second prompt",
+    ]);
   });
 
   it("keeps group intervals in a milliseconds-level range", () => {
