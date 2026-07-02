@@ -42,7 +42,7 @@ describe("PromptQuickList", () => {
 
     expect(screen.getByText("讨论方案")).toBeTruthy();
     expect(screen.getByText(/brainstorming skill/)).toBeTruthy();
-    expect(screen.getByText("Single · 1 prompt")).toBeTruthy();
+    expect(screen.queryByText("Single · 1 prompt")).toBeNull();
   });
 
   it("renders group containers with two one-line preview entries", () => {

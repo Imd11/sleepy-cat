@@ -51,7 +51,9 @@ export function PromptQuickList({
             >
               <span className="prompt-quick-title-row">
                 <span className="prompt-quick-title">{prompt.title}</span>
-                <span className="prompt-quick-meta">{getPromptContainerMeta(prompt)}</span>
+                {prompt.type === "group" ? (
+                  <span className="prompt-quick-meta">{getPromptContainerMeta(prompt)}</span>
+                ) : null}
               </span>
               <span className="prompt-quick-preview-lines">
                 {getPromptContainerPreviewLines(prompt).map((line) => (
@@ -76,7 +78,7 @@ function PromptHoverPreview({ prompt }: { prompt: PromptContainer }) {
     <aside className="prompt-hover-preview" role="tooltip">
       <div className="prompt-hover-preview-header">
         <strong>{prompt.title}</strong>
-        <span>{getPromptContainerMeta(prompt)}</span>
+        {prompt.type === "group" ? <span>{getPromptContainerMeta(prompt)}</span> : null}
       </div>
       <div className="prompt-hover-preview-body">
         {prompt.type === "group" ? (
