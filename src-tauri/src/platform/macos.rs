@@ -348,20 +348,30 @@ pub fn paste_prompt_and_submit_to_foreground(body: &str) -> Result<AutosendOutco
     if let Err(error) = copy_to_clipboard(body) {
         return Ok(AutosendOutcome::copy_failed(error));
     }
+    if !is_accessibility_trusted() {
+        return Ok(AutosendOutcome::keyboard_failed(
+            "Accessibility permission required for autosend.".to_string(),
+        ));
+    }
     refocus_previous_app_if_prompt_picker_frontmost();
+    std::thread::sleep(std::time::Duration::from_millis(280));
 
-    let script = foreground_paste_and_submit_script();
-    let output = Command::new("osascript")
-        .arg("-e")
-        .arg(script)
-        .output()
-        .map_err(|e| e.to_string())?;
-    if !output.status.success() {
+    if let Err(error) = post_paste_shortcut() {
         return Ok(AutosendOutcome::keyboard_failed(format_autosend_error(
-            "foreground-paste-and-submit",
-            String::from_utf8_lossy(&output.stderr).as_ref(),
+            "Native paste event failed",
+            &error,
         )));
     }
+
+    std::thread::sleep(std::time::Duration::from_millis(320));
+
+    if let Err(error) = post_return_key() {
+        return Ok(AutosendOutcome::keyboard_failed(format_autosend_error(
+            "Native return event failed",
+            &error,
+        )));
+    }
+
     Ok(AutosendOutcome::sent())
 }
 
@@ -705,6 +715,15 @@ mod tests {
         assert!(outcome.copied);
         assert!(!outcome.sent);
         assert_eq!(outcome.error.as_deref(), Some("System Events denied"));
+    }
+
+    #[test]
+    fn autosend_outcome_reports_native_keyboard_failure_after_copy() {
+        let outcome = AutosendOutcome::keyboard_failed("native key event failed".to_string());
+
+        assert!(outcome.copied);
+        assert!(!outcome.sent);
+        assert_eq!(outcome.error.as_deref(), Some("native key event failed"));
     }
 
     #[test]
