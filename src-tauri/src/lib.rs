@@ -634,6 +634,14 @@ mod menu_bar_app_tests {
     }
 
     #[test]
+    fn macos_info_plist_declares_apple_events_usage() {
+        let info_plist = include_str!("../Info.plist");
+
+        assert!(info_plist.contains("<key>NSAppleEventsUsageDescription</key>"));
+        assert!(info_plist.contains("send keyboard events"));
+    }
+
+    #[test]
     fn tauri_capabilities_do_not_allow_blocking_message_dialogs() {
         let capabilities = include_str!("../capabilities/default.json");
 
