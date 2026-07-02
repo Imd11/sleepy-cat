@@ -42,7 +42,7 @@ describe("settings store", () => {
   it("defaults overlay placement to no saved offset", async () => {
     const store = createTestSettingsStore();
     const settings = await store.get();
-    expect(settings.overlayPlacement).toEqual({ buttonOffset: null });
+    expect(settings.overlayPlacement).toEqual({ buttonOffset: null, buttonPosition: null });
   });
 
   it("saves overlay button offset", async () => {
@@ -52,10 +52,28 @@ describe("settings store", () => {
     expect(settings.overlayPlacement.buttonOffset).toEqual({ x: 24, y: -12 });
   });
 
+  it("saves overlay button position and clears legacy offset", async () => {
+    const store = createTestSettingsStore();
+    await store.setOverlayButtonOffset({ x: 24, y: -12 });
+    await store.setOverlayButtonPosition({ x: 420, y: 260 });
+    const settings = await store.get();
+    expect(settings.overlayPlacement.buttonPosition).toEqual({ x: 420, y: 260 });
+    expect(settings.overlayPlacement.buttonOffset).toBeNull();
+  });
+
   it("normalizes old settings without overlay placement", async () => {
     const store = createTestSettingsStore('{"version":1,"blacklistedApps":[]}');
     const settings = await store.get();
-    expect(settings.overlayPlacement).toEqual({ buttonOffset: null });
+    expect(settings.overlayPlacement).toEqual({ buttonOffset: null, buttonPosition: null });
+  });
+
+  it("normalizes old settings without absolute button position", async () => {
+    const store = createTestSettingsStore('{"version":1,"blacklistedApps":[],"overlayPlacement":{"buttonOffset":{"x":24,"y":-12}}}');
+    const settings = await store.get();
+    expect(settings.overlayPlacement).toEqual({
+      buttonOffset: { x: 24, y: -12 },
+      buttonPosition: null
+    });
   });
 
   it("defaults floating button visibility to visible", async () => {

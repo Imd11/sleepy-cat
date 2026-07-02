@@ -3,6 +3,7 @@
 use serde::Serialize;
 use std::ffi::c_void;
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct FrontmostApp {
@@ -20,6 +21,7 @@ pub struct AccessibilityStatus {
 pub enum AutosendFailureReason {
     CopyFailed,
     MissingAccessibilityPermission,
+    NoSafeTarget,
     PasteEventFailed,
     ReturnEventFailed,
     TargetFocusFailed,
@@ -65,6 +67,15 @@ impl AutosendOutcome {
         }
     }
 
+    pub fn copied_without_send(error: String) -> Self {
+        Self {
+            copied: true,
+            sent: false,
+            error: Some(error),
+            reason: Some(AutosendFailureReason::NoSafeTarget),
+        }
+    }
+
     pub fn paste_event_failed(error: String) -> Self {
         Self {
             copied: true,
@@ -82,6 +93,15 @@ impl AutosendOutcome {
             reason: Some(AutosendFailureReason::ReturnEventFailed),
         }
     }
+
+    pub fn target_focus_failed(error: String) -> Self {
+        Self {
+            copied: true,
+            sent: false,
+            error: Some(error),
+            reason: Some(AutosendFailureReason::TargetFocusFailed),
+        }
+    }
 }
 
 // ── Accessibility ──────────────────────────────────────────────────────────────
@@ -89,6 +109,12 @@ impl AutosendOutcome {
 pub fn accessibility_status() -> AccessibilityStatus {
     AccessibilityStatus {
         trusted: is_accessibility_trusted(),
+    }
+}
+
+pub fn request_accessibility_permission() -> AccessibilityStatus {
+    AccessibilityStatus {
+        trusted: is_accessibility_trusted_with_prompt(),
     }
 }
 
@@ -117,8 +143,51 @@ unsafe fn ax_is_process_trusted() -> bool {
     AXIsProcessTrusted()
 }
 
+// SAFETY: AXIsProcessTrustedWithOptions and CoreFoundation dictionary creation are
+// public macOS APIs. Static key/value pointers are provided by the frameworks.
+unsafe fn ax_is_process_trusted_with_prompt() -> bool {
+    #[link(name = "ApplicationServices", kind = "framework")]
+    extern "C" {
+        static kAXTrustedCheckOptionPrompt: *const c_void;
+        fn AXIsProcessTrustedWithOptions(options: *const c_void) -> bool;
+    }
+    #[link(name = "CoreFoundation", kind = "framework")]
+    extern "C" {
+        static kCFBooleanTrue: *const c_void;
+        fn CFDictionaryCreate(
+            allocator: *const c_void,
+            keys: *const *const c_void,
+            values: *const *const c_void,
+            num_values: isize,
+            key_callbacks: *const c_void,
+            value_callbacks: *const c_void,
+        ) -> *const c_void;
+    }
+
+    let keys = [kAXTrustedCheckOptionPrompt];
+    let values = [kCFBooleanTrue];
+    let options = CFDictionaryCreate(
+        std::ptr::null(),
+        keys.as_ptr(),
+        values.as_ptr(),
+        1,
+        std::ptr::null(),
+        std::ptr::null(),
+    );
+    if options.is_null() {
+        return ax_is_process_trusted();
+    }
+    let trusted = AXIsProcessTrustedWithOptions(options);
+    CFRelease(options);
+    trusted
+}
+
 fn is_accessibility_trusted() -> bool {
     unsafe { ax_is_process_trusted() }
+}
+
+fn is_accessibility_trusted_with_prompt() -> bool {
+    unsafe { ax_is_process_trusted_with_prompt() }
 }
 
 // ── Frontmost App ─────────────────────────────────────────────────────────────
@@ -135,9 +204,12 @@ struct FrontmostAppInfo {
 fn frontmost_app_info() -> Option<FrontmostAppInfo> {
     let front = Command::new("lsappinfo").arg("front").output().ok()?;
     let asn = parse_front_asn(String::from_utf8_lossy(&front.stdout).as_ref())?;
+    app_info_for_asn(&asn)
+}
 
+fn app_info_for_asn(asn: &str) -> Option<FrontmostAppInfo> {
     let info = Command::new("lsappinfo")
-        .args(["info", &asn])
+        .args(["info", asn])
         .output()
         .ok()?;
 
@@ -152,6 +224,20 @@ fn frontmost_app_info() -> Option<FrontmostAppInfo> {
         app: FrontmostApp { name, bundle_id },
         pid,
     })
+}
+
+pub fn visible_apps() -> Vec<FrontmostApp> {
+    let Ok(output) = Command::new("lsappinfo").arg("visibleProcessList").output() else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+
+    parse_visible_process_asns(String::from_utf8_lossy(&output.stdout).as_ref())
+        .into_iter()
+        .filter_map(|asn| app_info_for_asn(&asn).map(|info| info.app))
+        .collect()
 }
 
 // ── Current Input Target ──────────────────────────────────────────────────────
@@ -235,15 +321,24 @@ fn parse_xy(s: &str) -> Option<(f64, f64)> {
 
 const DIRECT_TYPE_MAX_CHARS: usize = 500;
 
+#[allow(dead_code)]
 type CGEventSourceRef = *mut c_void;
+#[allow(dead_code)]
 type CGEventRef = *mut c_void;
+#[allow(dead_code)]
 type CGEventFlags = u64;
+#[allow(dead_code)]
 type CGKeyCode = u16;
 
+#[allow(dead_code)]
 const CG_EVENT_FLAG_MASK_COMMAND: CGEventFlags = 1 << 20;
+#[allow(dead_code)]
 const KEY_CODE_V: CGKeyCode = 9;
+#[allow(dead_code)]
 const KEY_CODE_RETURN: CGKeyCode = 36;
+#[allow(dead_code)]
 const KEY_CODE_COMMAND: CGKeyCode = 55;
+#[allow(dead_code)]
 const CG_HID_EVENT_TAP: u32 = 0;
 
 #[link(name = "ApplicationServices", kind = "framework")]
@@ -258,6 +353,7 @@ extern "C" {
     fn CFRelease(cf: *const c_void);
 }
 
+#[allow(dead_code)]
 fn post_key_event(key_code: CGKeyCode, key_down: bool, flags: CGEventFlags) -> Result<(), String> {
     unsafe {
         let event = CGEventCreateKeyboardEvent(std::ptr::null_mut(), key_code, key_down);
@@ -271,17 +367,20 @@ fn post_key_event(key_code: CGKeyCode, key_down: bool, flags: CGEventFlags) -> R
     Ok(())
 }
 
+#[allow(dead_code)]
 fn post_key_tap(key_code: CGKeyCode, flags: CGEventFlags) -> Result<(), String> {
     post_key_event(key_code, true, flags)?;
     post_key_event(key_code, false, flags)
 }
 
+#[allow(dead_code)]
 fn post_paste_shortcut() -> Result<(), String> {
     post_key_event(KEY_CODE_COMMAND, true, CG_EVENT_FLAG_MASK_COMMAND)?;
     post_key_tap(KEY_CODE_V, CG_EVENT_FLAG_MASK_COMMAND)?;
     post_key_event(KEY_CODE_COMMAND, false, 0)
 }
 
+#[allow(dead_code)]
 fn post_return_key() -> Result<(), String> {
     post_key_tap(KEY_CODE_RETURN, 0)
 }
@@ -313,6 +412,55 @@ pub fn paste_prompt(body: &str) -> Result<(), String> {
         .output()
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+pub fn copy_prompt_to_clipboard(body: &str) -> Result<(), String> {
+    copy_to_clipboard(body)
+}
+
+#[allow(dead_code)]
+pub fn paste_prompt_and_submit_to_app_native(body: &str, bundle_id: &str) -> AutosendOutcome {
+    if let Err(error) = copy_to_clipboard(body) {
+        return AutosendOutcome::copy_failed(error);
+    }
+
+    if !is_accessibility_trusted_with_prompt() {
+        return AutosendOutcome::missing_accessibility_permission();
+    }
+
+    if let Err(error) = activate_app_by_bundle_id(bundle_id) {
+        return AutosendOutcome::target_focus_failed(format_autosend_error(
+            "activate-target",
+            &error,
+        ));
+    }
+
+    if !wait_for_frontmost_bundle_id(bundle_id, Duration::from_millis(1200)) {
+        return AutosendOutcome::target_focus_failed(format!(
+            "Target app did not become frontmost: {}",
+            bundle_id
+        ));
+    }
+
+    std::thread::sleep(Duration::from_millis(120));
+
+    if let Err(error) = post_paste_shortcut() {
+        return AutosendOutcome::paste_event_failed(format_autosend_error(
+            "native-paste",
+            &error,
+        ));
+    }
+
+    std::thread::sleep(Duration::from_millis(180));
+
+    if let Err(error) = post_return_key() {
+        return AutosendOutcome::return_event_failed(format_autosend_error(
+            "native-return",
+            &error,
+        ));
+    }
+
+    AutosendOutcome::sent()
 }
 
 pub fn paste_prompt_to_app(body: &str, bundle_id: &str) -> Result<(), String> {
@@ -350,6 +498,31 @@ pub fn paste_prompt_and_submit_to_app(body: &str, bundle_id: &str) -> Result<(),
     Ok(())
 }
 
+pub fn paste_prompt_and_submit_to_app_clipboard(
+    body: &str,
+    bundle_id: &str,
+    click_point: Option<(f64, f64)>,
+) -> AutosendOutcome {
+    if let Err(error) = copy_to_clipboard(body) {
+        return AutosendOutcome::copy_failed(error);
+    }
+    if !is_accessibility_trusted() {
+        return AutosendOutcome::missing_accessibility_permission();
+    }
+
+    let script = click_point
+        .map(|(x, y)| paste_and_submit_to_app_at_point_script(bundle_id, x, y))
+        .unwrap_or_else(|| paste_and_submit_to_app_script(bundle_id));
+
+    match run_system_events_script(&script) {
+        Ok(()) => AutosendOutcome::sent(),
+        Err(error) => AutosendOutcome::paste_event_failed(format_autosend_error(
+            "clipboard-paste-and-submit",
+            &error,
+        )),
+    }
+}
+
 #[allow(dead_code)]
 pub fn type_or_paste_prompt_and_submit_to_app(body: &str, bundle_id: &str) -> Result<(), String> {
     restore_focus_before_autosend(bundle_id);
@@ -380,6 +553,7 @@ pub fn type_or_paste_prompt_and_submit_to_app(body: &str, bundle_id: &str) -> Re
     })
 }
 
+#[allow(dead_code)]
 pub fn paste_prompt_and_submit_to_foreground(body: &str) -> Result<AutosendOutcome, String> {
     if let Err(error) = copy_to_clipboard(body) {
         return Ok(AutosendOutcome::copy_failed(error));
@@ -407,6 +581,48 @@ pub fn paste_prompt_and_submit_to_foreground(body: &str) -> Result<AutosendOutco
     }
 
     Ok(AutosendOutcome::sent())
+}
+
+#[allow(dead_code)]
+pub fn type_or_paste_prompt_and_submit_to_foreground(body: &str) -> AutosendOutcome {
+    let copy_result = copy_to_clipboard(body);
+    if !is_accessibility_trusted() {
+        return AutosendOutcome::missing_accessibility_permission();
+    }
+
+    refocus_previous_app_if_prompt_picker_frontmost();
+    std::thread::sleep(Duration::from_millis(320));
+
+    let mut direct_type_error = None;
+    if should_direct_type(body) {
+        match run_system_events_script(&foreground_type_and_submit_script(body)) {
+            Ok(()) => return AutosendOutcome::sent(),
+            Err(error) => {
+                direct_type_error = Some(error);
+            }
+        }
+    }
+
+    if let Err(error) = copy_result {
+        return AutosendOutcome::copy_failed(error);
+    }
+
+    match run_system_events_script(foreground_paste_and_submit_script()) {
+        Ok(()) => AutosendOutcome::sent(),
+        Err(error) => {
+            let paste_error = format_autosend_error("foreground-paste-and-submit", &error);
+            let error = direct_type_error
+                .map(|direct_error| {
+                    format!(
+                        "{} Fallback also failed: {}",
+                        format_autosend_error("foreground-direct-type", &direct_error),
+                        paste_error
+                    )
+                })
+                .unwrap_or(paste_error);
+            AutosendOutcome::paste_event_failed(error)
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -454,7 +670,6 @@ end tell"#,
     )
 }
 
-#[cfg(test)]
 fn foreground_paste_and_submit_script() -> &'static str {
     r#"tell application "System Events"
     keystroke "v" using command down
@@ -463,12 +678,37 @@ fn foreground_paste_and_submit_script() -> &'static str {
 end tell"#
 }
 
+fn run_system_events_script(script: &str) -> Result<(), String> {
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).to_string())
+    }
+}
+
 fn should_direct_type(body: &str) -> bool {
-    !body.contains('\n') && body.chars().count() <= DIRECT_TYPE_MAX_CHARS
+    body.is_ascii() && !body.contains('\n') && body.chars().count() <= DIRECT_TYPE_MAX_CHARS
 }
 
 fn escape_applescript_string(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn foreground_type_and_submit_script(body: &str) -> String {
+    let escaped = escape_applescript_string(body);
+    format!(
+        r#"tell application "System Events"
+    keystroke "{}"
+    delay 0.08
+    key code 36
+end tell"#,
+        escaped
+    )
 }
 
 fn direct_type_and_submit_to_app_script(bundle_id: &str, body: &str) -> String {
@@ -492,6 +732,39 @@ fn format_autosend_error(method: &str, stderr: &str) -> String {
     } else {
         format!("Autosend failed while using {}: {}", method, trimmed)
     }
+}
+
+#[allow(dead_code)]
+fn activate_app_by_bundle_id(bundle_id: &str) -> Result<(), String> {
+    let script = format!(r#"tell application id "{}" to activate"#, bundle_id);
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).to_string())
+    }
+}
+
+#[allow(dead_code)]
+fn wait_for_frontmost_bundle_id(bundle_id: &str, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if frontmost_app()
+            .map(|app| app.bundle_id == bundle_id)
+            .unwrap_or(false)
+        {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    frontmost_app()
+        .map(|app| app.bundle_id == bundle_id)
+        .unwrap_or(false)
 }
 
 fn should_cmd_tab_refocus_before_autosend(frontmost: Option<&FrontmostApp>) -> bool {
@@ -587,6 +860,22 @@ pub fn parse_front_asn(raw: &str) -> Option<String> {
         return Some(trimmed.trim_end_matches(':').to_string());
     }
     None
+}
+
+pub fn parse_visible_process_asns(raw: &str) -> Vec<String> {
+    raw.split("ASN:")
+        .skip(1)
+        .filter_map(|part| {
+            let candidate = format!("ASN:{}", part.trim_start());
+            let end = candidate.find("-\"")?;
+            let asn = candidate[..end].trim().trim_end_matches(':');
+            if asn.starts_with("ASN:") {
+                Some(asn.to_string())
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 /// Parse bundle ID from lsappinfo info output (any format).
@@ -845,6 +1134,20 @@ mod tests {
     }
 
     #[test]
+    fn parses_visible_process_list_asns_in_order() {
+        let raw = r#"ASN:0x0-0x3b03b-"Codex": ASN:0x0-0x10010-"Finder": ASN:0x0-0x1398397-"WeChat":"#;
+
+        assert_eq!(
+            parse_visible_process_asns(raw),
+            vec![
+                "ASN:0x0-0x3b03b".to_string(),
+                "ASN:0x0-0x10010".to_string(),
+                "ASN:0x0-0x1398397".to_string(),
+            ]
+        );
+    }
+
+    #[test]
     fn parses_bundle_id_various_formats() {
         assert_eq!(
             parse_bundle_id("bundleID=\"com.openai.codex\"\nfoo"),
@@ -1014,10 +1317,15 @@ mod tests {
     }
 
     #[test]
-    fn direct_type_strategy_allows_short_single_line_text() {
-        assert!(should_direct_type(
+    fn direct_type_strategy_rejects_non_ascii_text() {
+        assert!(!should_direct_type(
             "使用 brainstorming skill，先和我讨论方案。"
         ));
+    }
+
+    #[test]
+    fn direct_type_strategy_allows_short_ascii_single_line_text() {
+        assert!(should_direct_type("Use brainstorming skill first."));
     }
 
     #[test]
@@ -1043,6 +1351,17 @@ mod tests {
 
         assert!(script.contains("tell application \"System Events\""));
         assert!(script.contains("keystroke \"v\" using command down"));
+        assert!(script.contains("key code 36"));
+        assert!(!script.contains("tell application id"));
+        assert!(!script.contains("click at"));
+    }
+
+    #[test]
+    fn foreground_type_and_submit_script_matches_openwhip_focus_model() {
+        let script = foreground_type_and_submit_script("讨论方案");
+
+        assert!(script.contains("tell application \"System Events\""));
+        assert!(script.contains("keystroke \"讨论方案\""));
         assert!(script.contains("key code 36"));
         assert!(!script.contains("tell application id"));
         assert!(!script.contains("click at"));

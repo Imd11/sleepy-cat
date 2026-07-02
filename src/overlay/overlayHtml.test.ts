@@ -49,11 +49,11 @@ describe("overlay button html", () => {
     expect(html).toContain("releasePointerCapture");
   });
 
-  it("records the current input target before opening the prompt list", () => {
+  it("records the prompt pick session target before opening the prompt list", () => {
     const html = readFileSync("public/overlay.html", "utf8");
 
-    expect(html).toContain("current_input_target");
-    expect(html.indexOf("current_input_target")).toBeLessThan(
+    expect(html).toContain("begin_prompt_pick_session");
+    expect(html.indexOf("begin_prompt_pick_session")).toBeLessThan(
       html.indexOf("show_prompt_popover_from_button")
     );
   });
@@ -74,13 +74,15 @@ describe("overlay button html", () => {
     expect(html).not.toContain("可手动 Cmd+V");
   });
 
-  it("opens Accessibility settings from actionable autosend status bubbles", () => {
+  it("requests Accessibility permission from actionable autosend status bubbles", () => {
     const html = readFileSync("public/overlay.html", "utf8");
 
+    expect(html).toContain("request_accessibility_permission");
+    expect(html).toContain("request_accessibility_permission_cmd");
     expect(html).toContain("open_accessibility_settings");
     expect(html).toContain("statusBubble.dataset.action");
     expect(html).toContain("is-action");
-    expect(html).toContain("Open Accessibility Settings");
+    expect(html).toContain("Open Accessibility Permission Help");
     expect(html).not.toContain("payload.kind || 'copied'");
   });
 });

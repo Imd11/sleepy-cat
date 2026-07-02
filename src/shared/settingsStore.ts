@@ -3,11 +3,17 @@ export type OverlayButtonOffset = {
   y: number;
 };
 
+export type OverlayButtonPosition = {
+  x: number;
+  y: number;
+};
+
 export type Settings = {
   version: 1;
   blacklistedApps: Array<{ bundleId: string; name: string }>;
   overlayPlacement: {
     buttonOffset: OverlayButtonOffset | null;
+    buttonPosition: OverlayButtonPosition | null;
   };
   floatingButton: {
     visible: boolean;
@@ -24,23 +30,23 @@ export function createSettingsStore(adapter: SettingsAdapter) {
     return {
       version: 1,
       blacklistedApps: [],
-      overlayPlacement: { buttonOffset: null },
+      overlayPlacement: { buttonOffset: null, buttonPosition: null },
       floatingButton: { visible: true }
     };
   }
 
-  function normalizeOffset(value: unknown): OverlayButtonOffset | null {
+  function normalizePoint<T extends OverlayButtonOffset | OverlayButtonPosition>(value: unknown): T | null {
     if (!value || typeof value !== "object") return null;
-    const candidate = value as Partial<OverlayButtonOffset>;
+    const candidate = value as Partial<T>;
     if (typeof candidate.x !== "number" || typeof candidate.y !== "number") return null;
     if (!Number.isFinite(candidate.x) || !Number.isFinite(candidate.y)) return null;
-    return { x: candidate.x, y: candidate.y };
+    return { x: candidate.x, y: candidate.y } as T;
   }
 
   function normalizeSettings(value: unknown): Settings {
     if (!value || typeof value !== "object") return defaultSettings();
     const candidate = value as Partial<Settings> & {
-      overlayPlacement?: { buttonOffset?: unknown };
+      overlayPlacement?: { buttonOffset?: unknown; buttonPosition?: unknown };
     };
     if (candidate.version !== 1 || !Array.isArray(candidate.blacklistedApps)) {
       return defaultSettings();
@@ -51,7 +57,8 @@ export function createSettingsStore(adapter: SettingsAdapter) {
         .filter((app) => app && typeof app.bundleId === "string" && typeof app.name === "string")
         .map((app) => ({ bundleId: app.bundleId, name: app.name })),
       overlayPlacement: {
-        buttonOffset: normalizeOffset(candidate.overlayPlacement?.buttonOffset)
+        buttonOffset: normalizePoint<OverlayButtonOffset>(candidate.overlayPlacement?.buttonOffset),
+        buttonPosition: normalizePoint<OverlayButtonPosition>(candidate.overlayPlacement?.buttonPosition)
       },
       floatingButton: {
         visible: candidate.floatingButton?.visible === false ? false : true
@@ -101,6 +108,13 @@ export function createSettingsStore(adapter: SettingsAdapter) {
     async setOverlayButtonOffset(offset: OverlayButtonOffset | null): Promise<void> {
       const settings = await load();
       settings.overlayPlacement.buttonOffset = offset;
+      await save(settings);
+    },
+
+    async setOverlayButtonPosition(position: OverlayButtonPosition | null): Promise<void> {
+      const settings = await load();
+      settings.overlayPlacement.buttonPosition = position;
+      settings.overlayPlacement.buttonOffset = null;
       await save(settings);
     },
 

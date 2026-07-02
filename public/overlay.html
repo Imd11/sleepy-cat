@@ -182,7 +182,7 @@ function showStatusBubble(payload) {
   window.clearTimeout(statusTimer);
   statusBubble.textContent = message;
   statusBubble.dataset.action = action;
-  statusBubble.title = action === 'open_accessibility_settings' ? 'Open Accessibility Settings' : '';
+  statusBubble.title = action ? 'Open Accessibility Permission Help' : '';
   statusBubble.className = `calico-status-bubble is-visible is-${kind}${action ? ' is-action' : ''}`;
   statusTimer = window.setTimeout(hideStatusBubble, action ? 3200 : 1800);
 }
@@ -301,7 +301,7 @@ btn.addEventListener('pointerup', async (event) => {
     }
   } else {
     setSprite('thinking', 900);
-    await invoke('current_input_target');
+    await invoke('begin_prompt_pick_session');
     await invoke('show_prompt_popover_from_button');
   }
   start = null;
@@ -321,7 +321,12 @@ btn.addEventListener('contextmenu', async (event) => {
 listenForAutosendStatus();
 
 statusBubble?.addEventListener('click', async () => {
-  if (statusBubble.dataset.action === 'open_accessibility_settings') {
+  if (statusBubble.dataset.action === 'request_accessibility_permission') {
+    const status = await invoke('request_accessibility_permission_cmd');
+    if (!status?.trusted) {
+      await invoke('open_accessibility_settings');
+    }
+  } else if (statusBubble.dataset.action === 'open_accessibility_settings') {
     await invoke('open_accessibility_settings');
   }
 });

@@ -42,12 +42,12 @@ describe("useInputTargetPolling", () => {
     vi.clearAllMocks();
   });
 
-  it("shows attached button when target exists", async () => {
+  it("keeps the floating button at a stable position when target exists", async () => {
     getFrontmostApp.mockResolvedValue({ name: "Finder", bundle_id: "com.apple.finder" });
     getCurrentInputTarget.mockResolvedValue({
       frame: { x: 100, y: 200, width: 300, height: 40 },
       window_frame: { x: 100, y: 200, width: 300, height: 40 },
-      button_position: [960, 700],
+      button_position: [320, 280],
       app: { name: "Finder", bundle_id: "com.apple.finder" },
     });
 
@@ -169,7 +169,7 @@ describe("useInputTargetPolling", () => {
     });
   });
 
-  it("applies saved overlay offset to attached button position", async () => {
+  it("uses saved absolute button position instead of target-driven placement", async () => {
     getFrontmostApp.mockResolvedValue({ name: "Finder", bundle_id: "com.apple.finder" });
     getCurrentInputTarget.mockResolvedValue({
       frame: { x: 100, y: 200, width: 300, height: 40 },
@@ -179,7 +179,12 @@ describe("useInputTargetPolling", () => {
     });
 
     void renderHook(() =>
-      useInputTargetPolling([], { buttonOffset: { x: 10, y: -5 } }, {}, true)
+      useInputTargetPolling(
+        [],
+        { buttonOffset: { x: 10, y: -5 }, buttonPosition: { x: 420, y: 260 } },
+        {},
+        true
+      )
     );
 
     await act(async () => {
@@ -187,7 +192,47 @@ describe("useInputTargetPolling", () => {
     });
 
     await waitFor(() => {
-      expect(showPromptButton).toHaveBeenCalledWith(970, 695);
+      expect(showPromptButton).toHaveBeenCalledWith(420, 260);
+    });
+  });
+
+  it("cancels the previous polling loop when saved position changes", async () => {
+    getFrontmostApp.mockResolvedValue({
+      name: "Prompt Picker",
+      bundle_id: "local.promptpicker.dev",
+    });
+    getCurrentInputTarget.mockResolvedValue(null);
+
+    const { rerender } = renderHook(
+      ({ position }: { position: { x: number; y: number } | null }) =>
+        useInputTargetPolling(
+          [],
+          { buttonOffset: null, buttonPosition: position },
+          {},
+          true
+        ),
+      { initialProps: { position: null as { x: number; y: number } | null } }
+    );
+
+    await act(async () => {
+      vi.advanceTimersByTime(1500);
+    });
+
+    await waitFor(() => {
+      expect(showPromptButton).toHaveBeenLastCalledWith(960, 700);
+    });
+
+    vi.clearAllMocks();
+    rerender({ position: { x: 1765, y: 419 } });
+
+    await act(async () => {
+      vi.advanceTimersByTime(4000);
+    });
+
+    await waitFor(() => {
+      expect(showPromptButton).toHaveBeenCalled();
+      expect(showPromptButton).not.toHaveBeenCalledWith(960, 700);
+      expect(showPromptButton).toHaveBeenLastCalledWith(1765, 419);
     });
   });
 

@@ -9,7 +9,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "sign:macos": "bash scripts/sign-macos-bundle.sh",
+    "tauri:build:signed": "tauri build && npm run sign:macos"
   },
   "keywords": [],
   "author": "",

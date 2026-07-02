@@ -23,7 +23,8 @@ type PromptButtonPosition = {
 };
 
 type OverlayPlacement = {
-  buttonOffset: { x: number; y: number } | null;
+  buttonOffset?: { x: number; y: number } | null;
+  buttonPosition?: { x: number; y: number } | null;
 };
 
 interface InputTargetPollingOptions {
@@ -36,9 +37,18 @@ interface InputTargetPollingOptions {
 
 const DEFAULT_BUTTON_POSITION: [number, number] = [960, 700];
 
+function savedButtonPosition(
+  overlayPlacement: OverlayPlacement
+): [number, number] | null {
+  const position = overlayPlacement.buttonPosition;
+  if (!position) return null;
+  if (!Number.isFinite(position.x) || !Number.isFinite(position.y)) return null;
+  return [position.x, position.y];
+}
+
 export function useInputTargetPolling(
   blacklist: string[] = [],
-  overlayPlacement: OverlayPlacement = { buttonOffset: null },
+  overlayPlacement: OverlayPlacement = { buttonOffset: null, buttonPosition: null },
   options: InputTargetPollingOptions = {},
   floatingButtonVisible = true
 ) {
@@ -47,11 +57,10 @@ export function useInputTargetPolling(
   const lastTargetAppRef = useRef<FrontmostApp | null>(null);
   const lastButtonPositionRef = useRef<[number, number] | null>(DEFAULT_BUTTON_POSITION);
   const lastTargetAtRef = useRef(0);
-  const pollingRef = useRef<boolean>(true);
-  const activeRef = useRef(true);
-  const prevVisibilityRef = useRef(floatingButtonVisible);
   const currentBasePositionRef = useRef<[number, number] | null>(null);
   const draggingRef = useRef(false);
+  const timeoutRef = useRef<number | null>(null);
+  const generationRef = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -101,49 +110,67 @@ export function useInputTargetPolling(
   }, [options.onButtonDragEnd]);
 
   useEffect(() => {
-    activeRef.current = true;
-    pollingRef.current = true;
+    const generation = generationRef.current + 1;
+    generationRef.current = generation;
+    let cancelled = false;
+
+    const isCurrent = () => !cancelled && generationRef.current === generation;
+
+    const clearScheduledPoll = () => {
+      if (timeoutRef.current) {
+        window.clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+    };
+
+    const schedulePoll = (delay: number) => {
+      if (!isCurrent()) return;
+      clearScheduledPoll();
+      timeoutRef.current = window.setTimeout(() => {
+        timeoutRef.current = null;
+        if (!isCurrent()) return;
+        void poll();
+      }, delay);
+    };
 
     const poll = async () => {
-      if (!activeRef.current) return;
+      if (!isCurrent()) return;
 
       if (!floatingButtonVisible) {
         setTarget(null);
         setShowAttached(false);
         await hidePromptButton();
         await hidePromptPopover();
-        pollingRef.current = false;
         return;
       }
 
       if (draggingRef.current) {
-        setTimeout(poll, 250);
+        schedulePoll(250);
         return;
       }
 
-      if (!pollingRef.current) {
-        pollingRef.current = true;
-      }
-
       try {
+        const fixedPosition = savedButtonPosition(overlayPlacement);
+        if (fixedPosition) {
+          lastButtonPositionRef.current = fixedPosition;
+        }
+        const displayPosition = lastButtonPositionRef.current ?? DEFAULT_BUTTON_POSITION;
         const app = await getFrontmostApp();
+        if (!isCurrent()) return;
 
         const inputTarget = (await getCurrentInputTarget()) as InputTarget | null;
+        if (!isCurrent()) return;
 
         if (inputTarget && app) {
           setTarget(inputTarget);
-          setShowAttached(true);
+          setShowAttached(false);
           lastTargetAppRef.current = inputTarget.app;
           const [x, y] = inputTarget.button_position;
           currentBasePositionRef.current = [x, y];
-          const offset = overlayPlacement.buttonOffset;
-          const displayX = offset ? x + offset.x : x;
-          const displayY = offset ? y + offset.y : y;
-          lastButtonPositionRef.current = [displayX, displayY];
           lastTargetAtRef.current = Date.now();
-          options.onBasePositionChange?.([displayX, displayY]);
-          await showPromptButton(displayX, displayY);
-          setTimeout(poll, 1000 + Math.random() * 1000);
+          options.onBasePositionChange?.(displayPosition);
+          await showPromptButton(displayPosition[0], displayPosition[1]);
+          schedulePoll(1000 + Math.random() * 1000);
           return;
         } else if (
           app &&
@@ -154,9 +181,9 @@ export function useInputTargetPolling(
           // Grace period during overlay self-interaction
           const recentlyHadTarget = Date.now() - lastTargetAtRef.current < 3000;
           if (recentlyHadTarget) {
-            const [x, y] = lastButtonPositionRef.current;
+            const [x, y] = displayPosition;
             await showPromptButton(x, y);
-            setTimeout(poll, 500 + Math.random() * 500);
+            schedulePoll(500 + Math.random() * 500);
             return;
           }
         }
@@ -165,18 +192,17 @@ export function useInputTargetPolling(
         // This ensures the button appears even on first run before any target is detected
         currentBasePositionRef.current = null;
         if (floatingButtonVisible && lastButtonPositionRef.current) {
-          const [x, y] = lastButtonPositionRef.current;
+          const [x, y] = displayPosition;
           await showPromptButton(x, y);
           setShowAttached(false);
         }
 
-        setTimeout(poll, 1000 + Math.random() * 1000);
+        schedulePoll(1000 + Math.random() * 1000);
       } catch {
-        setTimeout(poll, 2000);
+        schedulePoll(2000);
       }
     };
 
-    prevVisibilityRef.current = floatingButtonVisible;
     if (!floatingButtonVisible) {
       hidePromptButton().catch(console.error);
       hidePromptPopover().catch(console.error);
@@ -186,12 +212,13 @@ export function useInputTargetPolling(
     poll();
 
     return () => {
-      activeRef.current = false;
+      cancelled = true;
+      clearScheduledPoll();
     };
   }, [
     blacklist.join("\u0000"),
-    overlayPlacement.buttonOffset
-      ? `${overlayPlacement.buttonOffset.x}:${overlayPlacement.buttonOffset.y}`
+    overlayPlacement.buttonPosition
+      ? `${overlayPlacement.buttonPosition.x}:${overlayPlacement.buttonPosition.y}`
       : "none",
     floatingButtonVisible,
   ]);

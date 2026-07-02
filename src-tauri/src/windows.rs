@@ -22,6 +22,42 @@ fn prompt_button_window_position(x: f64, y: f64) -> tauri::Position {
     tauri::Position::Logical(tauri::LogicalPosition { x, y })
 }
 
+fn monitor_bounds(monitor: &tauri::Monitor) -> MonitorBounds {
+    let scale = monitor.scale_factor();
+    MonitorBounds {
+        x: monitor.position().x as f64 / scale,
+        y: monitor.position().y as f64 / scale,
+        width: monitor.size().width as f64 / scale,
+        height: monitor.size().height as f64 / scale,
+    }
+}
+
+fn clamp_button_position_in_bounds(x: f64, y: f64, bounds: Option<MonitorBounds>) -> (f64, f64) {
+    let Some(bounds) = bounds else {
+        return (x, y);
+    };
+
+    let margin = 8.0;
+    let min_x = bounds.x + margin;
+    let min_y = bounds.y + margin;
+    let max_x = bounds.x + bounds.width - BUTTON_WIDTH - margin;
+    let max_y = bounds.y + bounds.height - BUTTON_HEIGHT - margin;
+
+    (x.clamp(min_x, max_x), y.clamp(min_y, max_y))
+}
+
+fn clamp_button_position_for_monitor(
+    x: f64,
+    y: f64,
+    monitor: Option<&tauri::Monitor>,
+) -> (f64, f64) {
+    clamp_button_position_in_bounds(x, y, monitor.map(monitor_bounds))
+}
+
+fn positions_are_close(a: (f64, f64), b: (f64, f64)) -> bool {
+    (a.0 - b.0).abs() < 0.5 && (a.1 - b.1).abs() < 0.5
+}
+
 #[derive(serde::Serialize)]
 pub struct PromptButtonPosition {
     pub x: f64,
@@ -46,6 +82,11 @@ pub fn prompt_button_position_cmd(
 #[tauri::command]
 pub fn move_prompt_button_to(x: f64, y: f64, app: tauri::AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(BUTTON_WINDOW_LABEL) {
+        let monitor = window
+            .current_monitor()
+            .map_err(|e| e.to_string())?
+            .or(app.primary_monitor().map_err(|e| e.to_string())?);
+        let (x, y) = clamp_button_position_for_monitor(x, y, monitor.as_ref());
         window
             .set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }))
             .map_err(|e| e.to_string())?;
@@ -77,16 +118,32 @@ fn show_popover_mode(x: f64, y: f64, mode: &str, app: &tauri::AppHandle) -> Resu
 #[tauri::command]
 pub fn show_prompt_button(x: f64, y: f64, app: tauri::AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(BUTTON_WINDOW_LABEL) {
-        window
-            .set_position(prompt_button_window_position(x, y))
-            .map_err(|e| e.to_string())?;
-        window.show().map_err(|e| e.to_string())?;
-        if BUTTON_WINDOW_TRANSPARENT {
-            crate::macos_panels::configure_transparent_webview_window(&window)?;
+        let monitor = window
+            .current_monitor()
+            .map_err(|e| e.to_string())?
+            .or(app.primary_monitor().map_err(|e| e.to_string())?);
+        let (x, y) = clamp_button_position_for_monitor(x, y, monitor.as_ref());
+        let position = window.outer_position().map_err(|e| e.to_string())?;
+        let scale = window.scale_factor().unwrap_or(1.0);
+        let current = (position.x as f64 / scale, position.y as f64 / scale);
+        let visible = window.is_visible().unwrap_or(false);
+
+        if !positions_are_close(current, (x, y)) {
+            window
+                .set_position(prompt_button_window_position(x, y))
+                .map_err(|e| e.to_string())?;
         }
-        crate::macos_panels::configure_non_activating_panel(&window)?;
+        if !visible {
+            window.show().map_err(|e| e.to_string())?;
+            if BUTTON_WINDOW_TRANSPARENT {
+                crate::macos_panels::configure_transparent_webview_window(&window)?;
+            }
+            crate::macos_panels::configure_non_activating_panel(&window)?;
+        }
         Ok(())
     } else {
+        let monitor = app.primary_monitor().map_err(|e| e.to_string())?;
+        let (x, y) = clamp_button_position_for_monitor(x, y, monitor.as_ref());
         let window = WebviewWindowBuilder::new(
             &app,
             BUTTON_WINDOW_LABEL,
@@ -308,6 +365,20 @@ mod tests {
     #[test]
     fn calico_button_window_uses_native_transparency() {
         assert!(BUTTON_WINDOW_TRANSPARENT);
+    }
+
+    #[test]
+    fn clamps_calico_button_inside_monitor() {
+        let bounds = MonitorBounds {
+            x: 0.0,
+            y: 0.0,
+            width: 1440.0,
+            height: 900.0,
+        };
+
+        let position = clamp_button_position_in_bounds(2000.0, -100.0, Some(bounds));
+
+        assert_eq!(position, (1440.0 - BUTTON_WIDTH - 8.0, 8.0));
     }
 
     #[test]
