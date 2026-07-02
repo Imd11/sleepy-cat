@@ -196,6 +196,8 @@ pub fn paste_prompt_and_submit_to_app(body: &str, bundle_id: &str) -> Result<(),
 }
 
 pub fn type_or_paste_prompt_and_submit_to_app(body: &str, bundle_id: &str) -> Result<(), String> {
+    ensure_accessibility_trusted_for_autosend(is_accessibility_trusted())?;
+
     let mut direct_type_error = None;
     if should_direct_type(body) {
         let script = direct_type_and_submit_to_app_script(bundle_id, body);
@@ -220,6 +222,17 @@ pub fn type_or_paste_prompt_and_submit_to_app(body: &str, bundle_id: &str) -> Re
             paste_error
         }
     })
+}
+
+fn ensure_accessibility_trusted_for_autosend(trusted: bool) -> Result<(), String> {
+    if trusted {
+        Ok(())
+    } else {
+        Err(
+            "Accessibility permission required for autosend. Enable Prompt Picker in System Settings > Privacy & Security > Accessibility, then try again."
+                .to_string(),
+        )
+    }
 }
 
 #[allow(dead_code)]
@@ -703,6 +716,19 @@ mod tests {
         let err = format_autosend_error("direct-type", "");
 
         assert_eq!(err, "Autosend failed while using direct-type.");
+    }
+
+    #[test]
+    fn autosend_preflight_rejects_missing_accessibility_permission() {
+        let err = ensure_accessibility_trusted_for_autosend(false).unwrap_err();
+
+        assert!(err.contains("Accessibility permission required"));
+        assert!(err.contains("System Settings"));
+    }
+
+    #[test]
+    fn autosend_preflight_allows_trusted_accessibility_permission() {
+        assert!(ensure_accessibility_trusted_for_autosend(true).is_ok());
     }
 
     #[test]
