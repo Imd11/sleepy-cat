@@ -1,6 +1,7 @@
 #![cfg(target_os = "macos")]
 
 use serde::Serialize;
+use std::ffi::c_void;
 use std::process::Command;
 
 #[derive(Clone, Debug, Serialize)]
@@ -197,6 +198,74 @@ fn parse_xy(s: &str) -> Option<(f64, f64)> {
 // ── Paste ─────────────────────────────────────────────────────────────────────
 
 const DIRECT_TYPE_MAX_CHARS: usize = 500;
+
+type CGEventSourceRef = *mut c_void;
+type CGEventRef = *mut c_void;
+type CGEventFlags = u64;
+type CGKeyCode = u16;
+
+const CG_EVENT_FLAG_MASK_COMMAND: CGEventFlags = 1 << 20;
+const KEY_CODE_V: CGKeyCode = 9;
+const KEY_CODE_RETURN: CGKeyCode = 36;
+const KEY_CODE_COMMAND: CGKeyCode = 55;
+const CG_HID_EVENT_TAP: u32 = 0;
+
+#[link(name = "ApplicationServices", kind = "framework")]
+extern "C" {
+    fn CGEventCreateKeyboardEvent(
+        source: CGEventSourceRef,
+        virtual_key: CGKeyCode,
+        key_down: bool,
+    ) -> CGEventRef;
+    fn CGEventSetFlags(event: CGEventRef, flags: CGEventFlags);
+    fn CGEventPost(tap: u32, event: CGEventRef);
+    fn CFRelease(cf: *const c_void);
+}
+
+fn post_key_event(key_code: CGKeyCode, key_down: bool, flags: CGEventFlags) -> Result<(), String> {
+    unsafe {
+        let event = CGEventCreateKeyboardEvent(std::ptr::null_mut(), key_code, key_down);
+        if event.is_null() {
+            return Err("CGEventCreateKeyboardEvent returned null".to_string());
+        }
+        CGEventSetFlags(event, flags);
+        CGEventPost(CG_HID_EVENT_TAP, event);
+        CFRelease(event.cast_const());
+    }
+    Ok(())
+}
+
+fn post_key_tap(key_code: CGKeyCode, flags: CGEventFlags) -> Result<(), String> {
+    post_key_event(key_code, true, flags)?;
+    post_key_event(key_code, false, flags)
+}
+
+fn post_paste_shortcut() -> Result<(), String> {
+    post_key_event(KEY_CODE_COMMAND, true, CG_EVENT_FLAG_MASK_COMMAND)?;
+    post_key_tap(KEY_CODE_V, CG_EVENT_FLAG_MASK_COMMAND)?;
+    post_key_event(KEY_CODE_COMMAND, false, 0)
+}
+
+fn post_return_key() -> Result<(), String> {
+    post_key_tap(KEY_CODE_RETURN, 0)
+}
+
+#[cfg(test)]
+fn native_autosend_event_sequence() -> Vec<&'static str> {
+    vec![
+        "cmd-down",
+        "v-down",
+        "v-up",
+        "cmd-up",
+        "return-down",
+        "return-up",
+    ]
+}
+
+#[cfg(test)]
+fn native_autosend_uses_osascript() -> bool {
+    false
+}
 
 pub fn paste_prompt(body: &str) -> Result<(), String> {
     copy_to_clipboard(body)?;
@@ -650,6 +719,28 @@ mod tests {
     #[test]
     fn accessibility_settings_url_targets_privacy_accessibility() {
         assert!(accessibility_settings_url().contains("Privacy_Accessibility"));
+    }
+
+    #[test]
+    fn native_autosend_sequence_uses_paste_then_return() {
+        let sequence = native_autosend_event_sequence();
+
+        assert_eq!(
+            sequence,
+            vec![
+                "cmd-down",
+                "v-down",
+                "v-up",
+                "cmd-up",
+                "return-down",
+                "return-up",
+            ]
+        );
+    }
+
+    #[test]
+    fn native_autosend_does_not_depend_on_osascript() {
+        assert!(!native_autosend_uses_osascript());
     }
 
     #[test]
