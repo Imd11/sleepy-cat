@@ -85,10 +85,22 @@ fn paste_prompt_and_submit_to_last_target_impl(
     body: &str,
     state: &LastInputTargetState,
 ) -> Result<(), String> {
-    let Some(target) = state.get() else {
-        return Err("Click into a text field first, then choose a prompt.".to_string());
-    };
-    platform::macos::type_or_paste_prompt_and_submit_to_app(body, &target.app.bundle_id)
+    paste_prompt_and_submit_to_last_target_with_sender(
+        body,
+        state,
+        platform::macos::paste_prompt_and_submit_to_foreground,
+    )
+}
+
+fn paste_prompt_and_submit_to_last_target_with_sender<F>(
+    body: &str,
+    _state: &LastInputTargetState,
+    sender: F,
+) -> Result<(), String>
+where
+    F: FnOnce(&str) -> Result<(), String>,
+{
+    sender(body)
 }
 
 #[cfg(test)]
@@ -447,14 +459,24 @@ mod last_input_target_tests {
     }
 
     #[test]
-    fn missing_last_target_returns_clear_autosend_error() {
+    fn autosend_attempts_foreground_sender_without_last_target() {
         let state = LastInputTargetState::default();
-        let result = last_target_bundle_id(&state);
+        let result = paste_prompt_and_submit_to_last_target_with_sender("hello", &state, |body| {
+            assert_eq!(body, "hello");
+            Ok(())
+        });
 
-        assert_eq!(
-            result.unwrap_err(),
-            "Click into a text field first, then choose a prompt."
-        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn autosend_propagates_foreground_sender_errors() {
+        let state = LastInputTargetState::default();
+        let result = paste_prompt_and_submit_to_last_target_with_sender("hello", &state, |_| {
+            Err("foreground keyboard failed".to_string())
+        });
+
+        assert_eq!(result.unwrap_err(), "foreground keyboard failed");
     }
 
     #[test]
@@ -587,9 +609,9 @@ mod menu_bar_app_tests {
     }
 
     #[test]
-    fn tauri_capabilities_allow_message_dialogs() {
+    fn tauri_capabilities_do_not_allow_blocking_message_dialogs() {
         let capabilities = include_str!("../capabilities/default.json");
 
-        assert!(capabilities.contains("\"dialog:allow-message\""));
+        assert!(!capabilities.contains("\"dialog:allow-message\""));
     }
 }

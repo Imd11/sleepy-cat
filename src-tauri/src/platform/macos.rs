@@ -178,6 +178,7 @@ pub fn paste_prompt_to_app(body: &str, bundle_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn paste_prompt_and_submit_to_app(body: &str, bundle_id: &str) -> Result<(), String> {
     copy_to_clipboard(body)?;
     let script = paste_and_submit_to_app_script(bundle_id);
@@ -195,9 +196,9 @@ pub fn paste_prompt_and_submit_to_app(body: &str, bundle_id: &str) -> Result<(),
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn type_or_paste_prompt_and_submit_to_app(body: &str, bundle_id: &str) -> Result<(), String> {
-    ensure_accessibility_trusted_for_autosend(is_accessibility_trusted())?;
-    restore_focus_before_autosend(bundle_id)?;
+    restore_focus_before_autosend(bundle_id);
 
     let mut direct_type_error = None;
     if should_direct_type(body) {
@@ -225,15 +226,23 @@ pub fn type_or_paste_prompt_and_submit_to_app(body: &str, bundle_id: &str) -> Re
     })
 }
 
-fn ensure_accessibility_trusted_for_autosend(trusted: bool) -> Result<(), String> {
-    if trusted {
-        Ok(())
-    } else {
-        Err(
-            "Accessibility permission required for autosend. Enable Prompt Picker in System Settings > Privacy & Security > Accessibility, then try again."
-                .to_string(),
-        )
+pub fn paste_prompt_and_submit_to_foreground(body: &str) -> Result<(), String> {
+    copy_to_clipboard(body)?;
+    refocus_previous_app_if_prompt_picker_frontmost();
+
+    let script = foreground_paste_and_submit_script();
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        return Err(format_autosend_error(
+            "foreground-paste-and-submit",
+            String::from_utf8_lossy(&output.stderr).as_ref(),
+        ));
     }
+    Ok(())
 }
 
 #[allow(dead_code)]
@@ -281,6 +290,14 @@ end tell"#,
     )
 }
 
+fn foreground_paste_and_submit_script() -> &'static str {
+    r#"tell application "System Events"
+    keystroke "v" using command down
+    delay 0.1
+    key code 36
+end tell"#
+}
+
 fn should_direct_type(body: &str) -> bool {
     !body.contains('\n') && body.chars().count() <= DIRECT_TYPE_MAX_CHARS
 }
@@ -326,37 +343,44 @@ fn cmd_tab_refocus_previous_app_script() -> &'static str {
 end tell"#
 }
 
-fn restore_focus_before_autosend(bundle_id: &str) -> Result<(), String> {
+fn refocus_previous_app_if_prompt_picker_frontmost() {
     let frontmost = frontmost_app();
     if should_cmd_tab_refocus_before_autosend(frontmost.as_ref()) {
-        let output = Command::new("osascript")
+        match Command::new("osascript")
             .arg("-e")
             .arg(cmd_tab_refocus_previous_app_script())
             .output()
-            .map_err(|e| e.to_string())?;
-        if !output.status.success() {
-            return Err(format_autosend_error(
-                "cmd-tab-refocus",
-                String::from_utf8_lossy(&output.stderr).as_ref(),
-            ));
+        {
+            Ok(output) if output.status.success() => {}
+            Ok(output) => eprintln!(
+                "{}",
+                format_autosend_error(
+                    "cmd-tab-refocus",
+                    String::from_utf8_lossy(&output.stderr).as_ref(),
+                )
+            ),
+            Err(err) => eprintln!("Autosend failed while using cmd-tab-refocus: {}", err),
         }
     }
+}
 
+#[allow(dead_code)]
+fn restore_focus_before_autosend(bundle_id: &str) {
+    refocus_previous_app_if_prompt_picker_frontmost();
     let script = format!(r#"tell application id "{}" to activate"#, bundle_id);
-    let output = Command::new("osascript")
-        .arg("-e")
-        .arg(script)
-        .output()
-        .map_err(|e| e.to_string())?;
-    if !output.status.success() {
-        return Err(format_autosend_error(
-            "activate-target",
-            String::from_utf8_lossy(&output.stderr).as_ref(),
-        ));
+    match Command::new("osascript").arg("-e").arg(script).output() {
+        Ok(output) if output.status.success() => {}
+        Ok(output) => eprintln!(
+            "{}",
+            format_autosend_error(
+                "activate-target",
+                String::from_utf8_lossy(&output.stderr).as_ref(),
+            )
+        ),
+        Err(err) => eprintln!("Autosend failed while using activate-target: {}", err),
     }
 
     std::thread::sleep(std::time::Duration::from_millis(120));
-    Ok(())
 }
 
 fn paste_and_submit_to_app_at_point_script(bundle_id: &str, x: f64, y: f64) -> String {
@@ -752,6 +776,17 @@ mod tests {
     }
 
     #[test]
+    fn foreground_paste_and_submit_script_matches_openwhip_focus_model() {
+        let script = foreground_paste_and_submit_script();
+
+        assert!(script.contains("tell application \"System Events\""));
+        assert!(script.contains("keystroke \"v\" using command down"));
+        assert!(script.contains("key code 36"));
+        assert!(!script.contains("tell application id"));
+        assert!(!script.contains("click at"));
+    }
+
+    #[test]
     fn autosend_error_includes_stderr_when_osascript_fails() {
         let err = format_autosend_error("direct-type", "System Events got an error");
 
@@ -764,19 +799,6 @@ mod tests {
         let err = format_autosend_error("direct-type", "");
 
         assert_eq!(err, "Autosend failed while using direct-type.");
-    }
-
-    #[test]
-    fn autosend_preflight_rejects_missing_accessibility_permission() {
-        let err = ensure_accessibility_trusted_for_autosend(false).unwrap_err();
-
-        assert!(err.contains("Accessibility permission required"));
-        assert!(err.contains("System Settings"));
-    }
-
-    #[test]
-    fn autosend_preflight_allows_trusted_accessibility_permission() {
-        assert!(ensure_accessibility_trusted_for_autosend(true).is_ok());
     }
 
     #[test]

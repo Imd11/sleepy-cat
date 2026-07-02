@@ -9,7 +9,6 @@
     "clipboard-manager:allow-read-text",
     "dialog:allow-open",
     "dialog:allow-save",
-    "dialog:allow-message",
     "fs:allow-app-read-recursive",
     "fs:allow-app-write-recursive",
     "shell:allow-open"

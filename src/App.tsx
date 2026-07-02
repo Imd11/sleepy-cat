@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { save, open, message } from "@tauri-apps/plugin-dialog";
+import { save, open } from "@tauri-apps/plugin-dialog";
 import { writeTextFile, readTextFile } from "@tauri-apps/plugin-fs";
 import type { PromptItem } from "./shared/promptTypes";
 import type { Settings } from "./shared/settingsStore";
@@ -99,13 +99,7 @@ export function App({
       await waitForWindowHide();
       await pastePromptAndSubmitToLastTarget(prompt.body);
     } catch (e) {
-      console.error("Failed to paste prompt:", e);
-      const messageText = e instanceof Error ? e.message : String(e);
-      await message(
-        messageText ||
-          "Autosend failed. Click into a target input field, confirm Accessibility permission, then try again.",
-        { title: "Prompt Picker", kind: "error" }
-      );
+      console.warn("Prompt autosend failed without blocking the picker:", e);
     } finally {
       setSubmittingPromptId(null);
     }
