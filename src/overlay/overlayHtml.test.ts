@@ -73,4 +73,14 @@ describe("overlay button html", () => {
 
     expect(html).not.toContain("可手动 Cmd+V");
   });
+
+  it("opens Accessibility settings from actionable autosend status bubbles", () => {
+    const html = readFileSync("public/overlay.html", "utf8");
+
+    expect(html).toContain("open_accessibility_settings");
+    expect(html).toContain("statusBubble.dataset.action");
+    expect(html).toContain("is-action");
+    expect(html).toContain("Open Accessibility Settings");
+    expect(html).not.toContain("payload.kind || 'copied'");
+  });
 });

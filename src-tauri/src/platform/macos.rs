@@ -15,11 +15,22 @@ pub struct AccessibilityStatus {
     pub trusted: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AutosendFailureReason {
+    CopyFailed,
+    MissingAccessibilityPermission,
+    PasteEventFailed,
+    ReturnEventFailed,
+    TargetFocusFailed,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct AutosendOutcome {
     pub copied: bool,
     pub sent: bool,
     pub error: Option<String>,
+    pub reason: Option<AutosendFailureReason>,
 }
 
 impl AutosendOutcome {
@@ -28,6 +39,7 @@ impl AutosendOutcome {
             copied: true,
             sent: true,
             error: None,
+            reason: None,
         }
     }
 
@@ -36,14 +48,38 @@ impl AutosendOutcome {
             copied: false,
             sent: false,
             error: Some(error),
+            reason: Some(AutosendFailureReason::CopyFailed),
         }
     }
 
     pub fn keyboard_failed(error: String) -> Self {
+        Self::paste_event_failed(error)
+    }
+
+    pub fn missing_accessibility_permission() -> Self {
+        Self {
+            copied: true,
+            sent: false,
+            error: Some("Accessibility permission required for autosend.".to_string()),
+            reason: Some(AutosendFailureReason::MissingAccessibilityPermission),
+        }
+    }
+
+    pub fn paste_event_failed(error: String) -> Self {
         Self {
             copied: true,
             sent: false,
             error: Some(error),
+            reason: Some(AutosendFailureReason::PasteEventFailed),
+        }
+    }
+
+    pub fn return_event_failed(error: String) -> Self {
+        Self {
+            copied: true,
+            sent: false,
+            error: Some(error),
+            reason: Some(AutosendFailureReason::ReturnEventFailed),
         }
     }
 }
@@ -349,15 +385,13 @@ pub fn paste_prompt_and_submit_to_foreground(body: &str) -> Result<AutosendOutco
         return Ok(AutosendOutcome::copy_failed(error));
     }
     if !is_accessibility_trusted() {
-        return Ok(AutosendOutcome::keyboard_failed(
-            "Accessibility permission required for autosend.".to_string(),
-        ));
+        return Ok(AutosendOutcome::missing_accessibility_permission());
     }
     refocus_previous_app_if_prompt_picker_frontmost();
     std::thread::sleep(std::time::Duration::from_millis(280));
 
     if let Err(error) = post_paste_shortcut() {
-        return Ok(AutosendOutcome::keyboard_failed(format_autosend_error(
+        return Ok(AutosendOutcome::paste_event_failed(format_autosend_error(
             "Native paste event failed",
             &error,
         )));
@@ -366,7 +400,7 @@ pub fn paste_prompt_and_submit_to_foreground(body: &str) -> Result<AutosendOutco
     std::thread::sleep(std::time::Duration::from_millis(320));
 
     if let Err(error) = post_return_key() {
-        return Ok(AutosendOutcome::keyboard_failed(format_autosend_error(
+        return Ok(AutosendOutcome::return_event_failed(format_autosend_error(
             "Native return event failed",
             &error,
         )));
@@ -707,6 +741,7 @@ mod tests {
         assert!(!outcome.copied);
         assert!(!outcome.sent);
         assert_eq!(outcome.error.as_deref(), Some("pbcopy failed"));
+        assert_eq!(outcome.reason, Some(AutosendFailureReason::CopyFailed));
     }
 
     #[test]
@@ -716,6 +751,10 @@ mod tests {
         assert!(outcome.copied);
         assert!(!outcome.sent);
         assert_eq!(outcome.error.as_deref(), Some("System Events denied"));
+        assert_eq!(
+            outcome.reason,
+            Some(AutosendFailureReason::PasteEventFailed)
+        );
     }
 
     #[test]
@@ -725,6 +764,34 @@ mod tests {
         assert!(outcome.copied);
         assert!(!outcome.sent);
         assert_eq!(outcome.error.as_deref(), Some("native key event failed"));
+        assert_eq!(
+            outcome.reason,
+            Some(AutosendFailureReason::PasteEventFailed)
+        );
+    }
+
+    #[test]
+    fn autosend_outcome_reports_missing_accessibility_permission() {
+        let outcome = AutosendOutcome::missing_accessibility_permission();
+
+        assert!(outcome.copied);
+        assert!(!outcome.sent);
+        assert_eq!(
+            outcome.reason,
+            Some(AutosendFailureReason::MissingAccessibilityPermission)
+        );
+    }
+
+    #[test]
+    fn autosend_outcome_reports_return_key_failure_after_copy() {
+        let outcome = AutosendOutcome::return_event_failed("return failed".to_string());
+
+        assert!(outcome.copied);
+        assert!(!outcome.sent);
+        assert_eq!(
+            outcome.reason,
+            Some(AutosendFailureReason::ReturnEventFailed)
+        );
     }
 
     #[test]
@@ -734,6 +801,7 @@ mod tests {
         assert!(outcome.copied);
         assert!(outcome.sent);
         assert!(outcome.error.is_none());
+        assert!(outcome.reason.is_none());
     }
 
     #[test]

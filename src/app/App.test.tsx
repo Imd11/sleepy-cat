@@ -206,11 +206,16 @@ describe("app", () => {
     });
   });
 
-  it("emits a failed status when autosend copies but keyboard automation fails", async () => {
+  it("emits an actionable permission status when autosend lacks accessibility permission", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockImplementation(async (command: string) => {
       if (command === "paste_prompt_and_submit_to_last_target") {
-        return { copied: true, sent: false, error: "Native paste event failed" };
+        return {
+          copied: true,
+          sent: false,
+          error: "Accessibility permission required for autosend.",
+          reason: "missing_accessibility_permission",
+        };
       }
       return undefined;
     });
@@ -228,13 +233,46 @@ describe("app", () => {
     await waitFor(() => {
       expect(emitMock).toHaveBeenCalledWith("prompt-autosend-status", {
         kind: "failed",
-        message: "未能自动发送，请检查权限",
+        message: "开启辅助功能",
+        action: "open_accessibility_settings",
       });
     });
     expect(emitMock).not.toHaveBeenCalledWith(
       "prompt-autosend-status",
       expect.objectContaining({ message: "已复制，可手动 Cmd+V" })
     );
+  });
+
+  it("emits a distinct status when autosend pastes but cannot press return", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === "paste_prompt_and_submit_to_last_target") {
+        return {
+          copied: true,
+          sent: false,
+          error: "Native return event failed",
+          reason: "return_event_failed",
+        };
+      }
+      return undefined;
+    });
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      JSON.stringify({ version: 1, prompts: mockPrompts })
+    );
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    fireEvent.click(await screen.findByText("Test Prompt"));
+
+    await waitFor(() => {
+      expect(emitMock).toHaveBeenCalledWith("prompt-autosend-status", {
+        kind: "failed",
+        message: "已粘贴，未发送",
+      });
+    });
   });
 
   it("hides the prompt popover before autosending the selected prompt", async () => {
@@ -616,6 +654,36 @@ describe("app", () => {
     );
 
     expect(vi.mocked(invoke)).toHaveBeenCalledWith("open_accessibility_settings");
+  });
+
+  it("rechecks Accessibility status from the main window", async () => {
+    currentWindowLabel = "main";
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === "accessibility_status_cmd") return { trusted: false };
+      return undefined;
+    });
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValue(
+      JSON.stringify({ version: 1, prompts: mockPrompts })
+    );
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Recheck Accessibility" })
+    );
+
+    await waitFor(() => {
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith("accessibility_status_cmd");
+      expect(
+        vi.mocked(invoke).mock.calls.filter(
+          ([command]) => command === "accessibility_status_cmd"
+        ).length
+      ).toBeGreaterThanOrEqual(2);
+    });
   });
 
   it("renders button controls mode without prompt management UI", async () => {

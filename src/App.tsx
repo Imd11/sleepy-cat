@@ -18,6 +18,7 @@ import {
   openMainWindow,
   pastePromptAndSubmitToLastTarget,
 } from "./platform/platformApi";
+import type { AutosendOutcome } from "./platform/platformApi";
 import { useInputTargetPolling } from "./overlay/useInputTargetPolling";
 import { PromptQuickList } from "./ui/PromptQuickList";
 import { PromptManager } from "./ui/PromptManager";
@@ -39,13 +40,51 @@ const DEFAULT_SETTINGS: Settings = {
 
 const waitForWindowHide = () => new Promise((resolve) => window.setTimeout(resolve, 260));
 
-type AutosendStatusKind = "sent" | "copied" | "failed";
+type AutosendStatusKind = "sent" | "failed";
+type AutosendStatusAction = "open_accessibility_settings";
 
-async function emitAutosendStatus(kind: AutosendStatusKind, message: string) {
+async function emitAutosendStatus(
+  kind: AutosendStatusKind,
+  message: string,
+  action?: AutosendStatusAction
+) {
   try {
-    await emit("prompt-autosend-status", { kind, message });
+    const payload = action ? { kind, message, action } : { kind, message };
+    await emit("prompt-autosend-status", payload);
   } catch (error) {
     console.warn("Failed to emit autosend status:", error);
+  }
+}
+
+function statusForAutosendOutcome(outcome: AutosendOutcome): {
+  kind: AutosendStatusKind;
+  message: string;
+  action?: AutosendStatusAction;
+} {
+  if (outcome.sent) {
+    return { kind: "sent", message: "已发送" };
+  }
+
+  switch (outcome.reason) {
+    case "missing_accessibility_permission":
+      return {
+        kind: "failed",
+        message: "开启辅助功能",
+        action: "open_accessibility_settings",
+      };
+    case "copy_failed":
+      return { kind: "failed", message: "未能复制" };
+    case "paste_event_failed":
+      return { kind: "failed", message: "未能粘贴" };
+    case "return_event_failed":
+      return { kind: "failed", message: "已粘贴，未发送" };
+    case "target_focus_failed":
+      return { kind: "failed", message: "未找到输入框" };
+    default:
+      return {
+        kind: "failed",
+        message: outcome.copied ? "未能自动发送" : "未能复制",
+      };
   }
 }
 
@@ -95,6 +134,16 @@ export function App({
   const storeRef = useRef(createPromptStore(createTauriPromptStorage()));
   const settingsStoreRef = useRef(createSettingsStore(createTauriSettingsStorage()));
 
+  const refreshAccessibilityStatus = useCallback(async () => {
+    setAccessibilityTrusted(null);
+    try {
+      const status = await getAccessibilityStatus();
+      setAccessibilityTrusted(status.trusted);
+    } catch {
+      setAccessibilityTrusted(null);
+    }
+  }, []);
+
   useEffect(() => {
     storeRef.current.list().then(setPrompts);
     settingsStoreRef.current.get().then(setActiveSettings);
@@ -106,11 +155,9 @@ export function App({
     }
     setWindowLabel(label);
     if (label === "main") {
-      getAccessibilityStatus()
-        .then((status) => setAccessibilityTrusted(status.trusted))
-        .catch(() => setAccessibilityTrusted(null));
+      refreshAccessibilityStatus();
     }
-  }, []);
+  }, [refreshAccessibilityStatus]);
 
   const handleSelect = async (prompt: PromptItem) => {
     if (submittingPromptId) return;
@@ -119,13 +166,8 @@ export function App({
       await hidePromptPopover();
       await waitForWindowHide();
       const outcome = await pastePromptAndSubmitToLastTarget(prompt.body);
-      if (outcome.sent) {
-        await emitAutosendStatus("sent", "已发送");
-      } else if (outcome.copied) {
-        await emitAutosendStatus("failed", "未能自动发送，请检查权限");
-      } else {
-        await emitAutosendStatus("failed", "未能复制，请重试");
-      }
+      const status = statusForAutosendOutcome(outcome);
+      await emitAutosendStatus(status.kind, status.message, status.action);
     } catch (e) {
       console.warn("Prompt autosend failed without blocking the picker:", e);
       await emitAutosendStatus("failed", "未能发送，请重试");
@@ -177,6 +219,7 @@ export function App({
           onManage={handleManage}
           onSettings={handleSettings}
           onOpenAccessibilitySettings={openAccessibilitySettings}
+          onRefreshAccessibilityStatus={refreshAccessibilityStatus}
           onShowFloatingButton={async () => {
             await settingsStoreRef.current.setFloatingButtonVisible(true);
             setActiveSettings(await settingsStoreRef.current.get());
@@ -338,6 +381,7 @@ function MainWindow({
   onManage,
   onSettings,
   onOpenAccessibilitySettings,
+  onRefreshAccessibilityStatus,
   onShowFloatingButton,
   onHideFloatingButton,
 }: {
@@ -346,6 +390,7 @@ function MainWindow({
   onManage: () => void;
   onSettings: () => void;
   onOpenAccessibilitySettings: () => void;
+  onRefreshAccessibilityStatus: () => void;
   onShowFloatingButton: () => void;
   onHideFloatingButton: () => void;
 }) {
@@ -361,13 +406,22 @@ function MainWindow({
             Status: {floatingButtonVisible ? "Visible" : "Hidden"}
           </span>
           {accessibilityTrusted === false ? (
-            <button
-              className="status-pill status-action"
-              aria-label="Open Accessibility Settings"
-              onClick={onOpenAccessibilitySettings}
-            >
-              Autosend: Needs Accessibility
-            </button>
+            <>
+              <button
+                className="status-pill status-action"
+                aria-label="Open Accessibility Settings"
+                onClick={onOpenAccessibilitySettings}
+              >
+                Autosend: Needs Accessibility
+              </button>
+              <button
+                className="status-pill status-action"
+                aria-label="Recheck Accessibility"
+                onClick={onRefreshAccessibilityStatus}
+              >
+                Recheck
+              </button>
+            </>
           ) : (
             <span className="status-pill is-on">
               Autosend: {accessibilityTrusted ? "Ready" : "Checking"}

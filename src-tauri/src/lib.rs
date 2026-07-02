@@ -199,6 +199,7 @@ const TRAY_ID: &str = "prompt-picker-tray";
 const TRAY_OPEN_MAIN_ID: &str = "open-main-window";
 const TRAY_SHOW_BUTTON_ID: &str = "show-floating-button";
 const TRAY_HIDE_BUTTON_ID: &str = "hide-floating-button";
+const TRAY_OPEN_ACCESSIBILITY_ID: &str = "open-accessibility-settings";
 const TRAY_QUIT_ID: &str = "quit";
 
 #[derive(Debug, PartialEq, Eq)]
@@ -206,6 +207,7 @@ enum TrayMenuAction {
     OpenMainWindow,
     ShowFloatingButton,
     HideFloatingButton,
+    OpenAccessibilitySettings,
     Quit,
     Unknown,
 }
@@ -215,6 +217,7 @@ fn tray_menu_action(id: &str) -> TrayMenuAction {
         TRAY_OPEN_MAIN_ID => TrayMenuAction::OpenMainWindow,
         TRAY_SHOW_BUTTON_ID => TrayMenuAction::ShowFloatingButton,
         TRAY_HIDE_BUTTON_ID => TrayMenuAction::HideFloatingButton,
+        TRAY_OPEN_ACCESSIBILITY_ID => TrayMenuAction::OpenAccessibilitySettings,
         TRAY_QUIT_ID => TrayMenuAction::Quit,
         _ => TrayMenuAction::Unknown,
     }
@@ -245,6 +248,14 @@ fn setup_menu_bar_app(app_handle: &tauri::AppHandle) -> Result<(), String> {
         None::<&str>,
     )
     .map_err(|e| e.to_string())?;
+    let open_accessibility = MenuItem::with_id(
+        app_handle,
+        TRAY_OPEN_ACCESSIBILITY_ID,
+        "Open Accessibility Settings",
+        true,
+        None::<&str>,
+    )
+    .map_err(|e| e.to_string())?;
     let separator = PredefinedMenuItem::separator(app_handle).map_err(|e| e.to_string())?;
     let quit = MenuItem::with_id(
         app_handle,
@@ -256,7 +267,14 @@ fn setup_menu_bar_app(app_handle: &tauri::AppHandle) -> Result<(), String> {
     .map_err(|e| e.to_string())?;
     let menu = Menu::with_items(
         app_handle,
-        &[&open_main, &show_button, &hide_button, &separator, &quit],
+        &[
+            &open_main,
+            &show_button,
+            &hide_button,
+            &open_accessibility,
+            &separator,
+            &quit,
+        ],
     )
     .map_err(|e| e.to_string())?;
 
@@ -279,6 +297,9 @@ fn setup_menu_bar_app(app_handle: &tauri::AppHandle) -> Result<(), String> {
             TrayMenuAction::HideFloatingButton => {
                 let _ = hide_prompt_popover(app.clone());
                 let _ = hide_prompt_button(app.clone());
+            }
+            TrayMenuAction::OpenAccessibilitySettings => {
+                let _ = platform::macos::open_accessibility_settings();
             }
             TrayMenuAction::Quit => app.exit(0),
             TrayMenuAction::Unknown => {}
@@ -616,6 +637,10 @@ mod menu_bar_app_tests {
         assert_eq!(
             tray_menu_action(TRAY_HIDE_BUTTON_ID),
             TrayMenuAction::HideFloatingButton
+        );
+        assert_eq!(
+            tray_menu_action(TRAY_OPEN_ACCESSIBILITY_ID),
+            TrayMenuAction::OpenAccessibilitySettings
         );
         assert_eq!(tray_menu_action(TRAY_QUIT_ID), TrayMenuAction::Quit);
     }

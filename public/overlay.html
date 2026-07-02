@@ -100,6 +100,11 @@ body {
   color: #92400e;
   border-color: rgba(253, 186, 116, 0.9);
 }
+
+.calico-status-bubble.is-action {
+  cursor: pointer;
+  pointer-events: auto;
+}
 </style></head>
 <body>
 <div id="statusBubble" class="calico-status-bubble" aria-live="polite"></div>
@@ -171,12 +176,15 @@ function hideStatusBubble() {
 
 function showStatusBubble(payload) {
   if (!statusBubble || !payload) return;
-  const kind = payload.kind || 'copied';
+  const kind = payload.kind || 'failed';
   const message = payload.message || '未能自动发送';
+  const action = payload.action || '';
   window.clearTimeout(statusTimer);
   statusBubble.textContent = message;
-  statusBubble.className = `calico-status-bubble is-visible is-${kind}`;
-  statusTimer = window.setTimeout(hideStatusBubble, 1800);
+  statusBubble.dataset.action = action;
+  statusBubble.title = action === 'open_accessibility_settings' ? 'Open Accessibility Settings' : '';
+  statusBubble.className = `calico-status-bubble is-visible is-${kind}${action ? ' is-action' : ''}`;
+  statusTimer = window.setTimeout(hideStatusBubble, action ? 3200 : 1800);
 }
 
 function listenForAutosendStatus() {
@@ -311,6 +319,12 @@ btn.addEventListener('contextmenu', async (event) => {
 });
 
 listenForAutosendStatus();
+
+statusBubble?.addEventListener('click', async () => {
+  if (statusBubble.dataset.action === 'open_accessibility_settings') {
+    await invoke('open_accessibility_settings');
+  }
+});
 </script>
 </body>
 </html>

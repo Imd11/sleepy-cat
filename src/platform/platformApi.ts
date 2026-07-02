@@ -14,10 +14,18 @@ export interface PromptButtonPosition {
   y: number;
 }
 
+export type AutosendFailureReason =
+  | "copy_failed"
+  | "missing_accessibility_permission"
+  | "paste_event_failed"
+  | "return_event_failed"
+  | "target_focus_failed";
+
 export interface AutosendOutcome {
   copied: boolean;
   sent: boolean;
   error: string | null;
+  reason: AutosendFailureReason | null;
 }
 
 export async function getAccessibilityStatus(): Promise<AccessibilityStatus> {
