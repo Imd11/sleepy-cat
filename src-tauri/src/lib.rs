@@ -567,4 +567,11 @@ mod menu_bar_app_tests {
         assert!(info_plist.contains("<key>LSUIElement</key>"));
         assert!(info_plist.contains("<true/>"));
     }
+
+    #[test]
+    fn tauri_capabilities_allow_message_dialogs() {
+        let capabilities = include_str!("../capabilities/default.json");
+
+        assert!(capabilities.contains("\"dialog:allow-message\""));
+    }
 }
