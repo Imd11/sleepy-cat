@@ -1,9 +1,12 @@
-import type { PromptItem } from "../shared/promptTypes";
-import { getPromptPreview } from "../shared/promptTypes";
+import type { PromptContainer } from "../shared/promptTypes";
+import {
+  getPromptContainerMeta,
+  getPromptContainerPreview,
+} from "../shared/promptTypes";
 
 interface PromptQuickListProps {
-  prompts: PromptItem[];
-  onSelect: (prompt: PromptItem) => void;
+  prompts: PromptContainer[];
+  onSelect: (prompt: PromptContainer) => void;
   submittingPromptId?: string | null;
 }
 
@@ -23,13 +26,20 @@ export function PromptQuickList({
         prompts.map((prompt) => (
           <button
             key={prompt.id}
-            className="prompt-quick-item"
+            className={`prompt-quick-item ${
+              prompt.type === "group" ? "prompt-quick-item-group" : ""
+            }`}
             type="button"
             disabled={submittingPromptId === prompt.id}
             onClick={() => onSelect(prompt)}
           >
-            <span className="prompt-quick-title">{prompt.title}</span>
-            <span className="prompt-quick-preview">{getPromptPreview(prompt.body)}</span>
+            <span className="prompt-quick-title-row">
+              <span className="prompt-quick-title">{prompt.title}</span>
+              <span className="prompt-quick-meta">{getPromptContainerMeta(prompt)}</span>
+            </span>
+            <span className="prompt-quick-preview">
+              {getPromptContainerPreview(prompt)}
+            </span>
           </button>
         ))
       )}

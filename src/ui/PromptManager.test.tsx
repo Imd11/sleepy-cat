@@ -1,66 +1,109 @@
 import { describe, expect, it } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { PromptManager } from "./PromptManager";
-import type { PromptItem } from "../shared/promptTypes";
+import type { PromptContainer } from "../shared/promptTypes";
 
 describe("prompt manager", () => {
-  const mockPrompts: PromptItem[] = [
+  const mockPrompts: PromptContainer[] = [
     {
       id: "1",
       title: "Code Review",
-      body: "Review this code for bugs.",
+      type: "single",
+      prompts: [{ id: "1-entry", body: "Review this code for bugs.", order: 0 }],
+      intervalMs: 700,
       order: 0,
       createdAt: "2026-05-26T00:00:00.000Z",
       updatedAt: "2026-05-26T00:00:00.000Z"
     },
     {
       id: "2",
-      title: "Refactor",
-      body: "Suggest improvements.",
+      title: "Repair Group",
+      type: "group",
+      prompts: [
+        { id: "2-entry-1", body: "Analyze root cause.", order: 0 },
+        { id: "2-entry-2", body: "Execute the fix.", order: 1 },
+      ],
+      intervalMs: 700,
       order: 1,
       createdAt: "2026-05-26T00:00:00.000Z",
       updatedAt: "2026-05-26T00:00:00.000Z"
     }
   ];
 
-  it("renders prompt list", () => {
-    const onCreate = () => {};
-    const onUpdate = () => {};
-    const onDelete = () => {};
-    const onReorder = () => {};
-    const onImport = () => {};
-    const onExport = () => {};
+  function renderManager(overrides: Partial<Parameters<typeof PromptManager>[0]> = {}) {
+    const props = {
+      prompts: mockPrompts,
+      onCreate: () => {},
+      onCreateGroup: () => {},
+      onUpdate: () => {},
+      onDelete: () => {},
+      onReorder: () => {},
+      onImport: () => {},
+      onExport: () => {},
+      ...overrides,
+    };
+    render(<PromptManager {...props} />);
+    return props;
+  }
 
-    render(
-      <PromptManager
-        prompts={mockPrompts}
-        onCreate={onCreate}
-        onUpdate={onUpdate}
-        onDelete={onDelete}
-        onReorder={onReorder}
-        onImport={onImport}
-        onExport={onExport}
-      />
-    );
+  it("renders prompt containers with group distinction", () => {
+    renderManager();
 
     expect(screen.getByText("Code Review")).toBeTruthy();
-    expect(screen.getByText("Refactor")).toBeTruthy();
+    expect(screen.getByText("Repair Group")).toBeTruthy();
+    expect(screen.getByText("Single · 1 prompt")).toBeTruthy();
+    expect(screen.getByText("Group · 2 prompts · 700ms")).toBeTruthy();
+  });
+
+  it("creates a single prompt container", () => {
+    let created: { title: string; body: string } | null = null;
+    renderManager({ onCreate: (input) => { created = input; } });
+
+    fireEvent.change(screen.getByPlaceholderText("Title"), {
+      target: { value: "New Single" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("Prompt body..."), {
+      target: { value: "Single body" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add Prompt" }));
+
+    expect(created).toEqual({ title: "New Single", body: "Single body" });
+  });
+
+  it("creates a group with numbered prompts", () => {
+    let createdGroup: {
+      title: string;
+      prompts: Array<{ body: string }>;
+      intervalMs: number;
+    } | null = null;
+    renderManager({ onCreateGroup: (input) => { createdGroup = input; } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Group" }));
+    fireEvent.change(screen.getByPlaceholderText("Title"), {
+      target: { value: "Codex Flow" },
+    });
+    const promptFields = screen.getAllByRole("textbox").filter((field) => {
+      return field.getAttribute("placeholder") !== "Title";
+    });
+    fireEvent.change(promptFields[0], { target: { value: "First grouped prompt" } });
+    fireEvent.change(promptFields[1], { target: { value: "Second grouped prompt" } });
+
+    expect(screen.getByText("Prompt 1")).toBeTruthy();
+    expect(screen.queryByText(/Step/i)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Add Group" }));
+
+    expect(createdGroup).toEqual({
+      title: "Codex Flow",
+      prompts: [
+        { body: "First grouped prompt", order: 0 },
+        { body: "Second grouped prompt", order: 1 },
+      ],
+      intervalMs: 700,
+    });
   });
 
   it("asks for confirmation before delete", () => {
-    const onDelete = () => {};
-
-    render(
-      <PromptManager
-        prompts={mockPrompts}
-        onCreate={() => {}}
-        onUpdate={() => {}}
-        onDelete={onDelete}
-        onReorder={() => {}}
-        onImport={() => {}}
-        onExport={() => {}}
-      />
-    );
+    renderManager();
 
     const deleteBtn = screen.getAllByText("Delete")[0];
     fireEvent.click(deleteBtn);
@@ -70,19 +113,7 @@ describe("prompt manager", () => {
 
   it("deletes after confirmation", () => {
     let deleteId: string | null = null;
-    const onDelete = (id: string) => { deleteId = id; };
-
-    render(
-      <PromptManager
-        prompts={mockPrompts}
-        onCreate={() => {}}
-        onUpdate={() => {}}
-        onDelete={onDelete}
-        onReorder={() => {}}
-        onImport={() => {}}
-        onExport={() => {}}
-      />
-    );
+    renderManager({ onDelete: (id: string) => { deleteId = id; } });
 
     fireEvent.click(screen.getAllByText("Delete")[0]);
     fireEvent.click(screen.getByText("Confirm"));
@@ -92,21 +123,8 @@ describe("prompt manager", () => {
 
   it("calls reorder with new order when moving down", () => {
     let reorderIds: string[] | null = null;
-    const onReorder = (ids: string[]) => { reorderIds = ids; };
+    renderManager({ onReorder: (ids: string[]) => { reorderIds = ids; } });
 
-    render(
-      <PromptManager
-        prompts={mockPrompts}
-        onCreate={() => {}}
-        onUpdate={() => {}}
-        onDelete={() => {}}
-        onReorder={onReorder}
-        onImport={() => {}}
-        onExport={() => {}}
-      />
-    );
-
-    // Move first item (Code Review) down
     const moveDownBtn = screen.getAllByText("↓")[0];
     fireEvent.click(moveDownBtn);
 
@@ -114,17 +132,7 @@ describe("prompt manager", () => {
   });
 
   it("exposes import and export actions", () => {
-    render(
-      <PromptManager
-        prompts={mockPrompts}
-        onCreate={() => {}}
-        onUpdate={() => {}}
-        onDelete={() => {}}
-        onReorder={() => {}}
-        onImport={() => {}}
-        onExport={() => {}}
-      />
-    );
+    renderManager();
 
     expect(screen.getByText("Import")).toBeTruthy();
     expect(screen.getByText("Export")).toBeTruthy();

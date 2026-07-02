@@ -1,24 +1,25 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { save, open } from "@tauri-apps/plugin-dialog";
 import { writeTextFile, readTextFile } from "@tauri-apps/plugin-fs";
-import type { PromptItem } from "./shared/promptTypes";
+import type { PromptContainer } from "./shared/promptTypes";
+import { getPromptContainerBodies } from "./shared/promptTypes";
 import type { Settings } from "./shared/settingsStore";
 import { createSettingsStore } from "./shared/settingsStore";
 import { createPromptStore } from "./shared/promptStore";
 import { createTauriPromptStorage } from "./storage/tauriPromptStorage";
 import { createTauriSettingsStorage } from "./storage/tauriSettingsStorage";
 import {
-  getAccessibilityStatus,
   hidePromptButton,
   hidePromptPopover,
   openAccessibilitySettings,
   openMainWindow,
   pastePromptAndSubmitToLastTarget,
+  pastePromptSequenceAndSubmitToLastTarget,
+  quitPromptPicker,
 } from "./platform/platformApi";
-import type { AutosendOutcome } from "./platform/platformApi";
+import type { AutosendOutcome, AutosendSequenceOutcome } from "./platform/platformApi";
 import { useInputTargetPolling } from "./overlay/useInputTargetPolling";
 import { PromptQuickList } from "./ui/PromptQuickList";
 import { PromptManager } from "./ui/PromptManager";
@@ -34,14 +35,14 @@ interface AppProps {
 const DEFAULT_SETTINGS: Settings = {
   version: 1,
   blacklistedApps: [],
-  overlayPlacement: { buttonOffset: null },
+  overlayPlacement: { buttonOffset: null, buttonPosition: null },
   floatingButton: { visible: true },
 };
 
 const waitForWindowHide = () => new Promise((resolve) => window.setTimeout(resolve, 260));
 
 type AutosendStatusKind = "sent" | "failed";
-type AutosendStatusAction = "open_accessibility_settings";
+type AutosendStatusAction = "open_accessibility_settings" | "request_accessibility_permission";
 
 async function emitAutosendStatus(
   kind: AutosendStatusKind,
@@ -62,16 +63,18 @@ function statusForAutosendOutcome(outcome: AutosendOutcome): {
   action?: AutosendStatusAction;
 } {
   if (outcome.sent) {
-    return { kind: "sent", message: "已发送" };
+    return { kind: "sent", message: "已粘贴并回车" };
   }
 
   switch (outcome.reason) {
     case "missing_accessibility_permission":
       return {
         kind: "failed",
-        message: "开启辅助功能",
-        action: "open_accessibility_settings",
+        message: "点击授权",
+        action: "request_accessibility_permission",
       };
+    case "no_safe_target":
+      return { kind: "failed", message: "已复制，未发送" };
     case "copy_failed":
       return { kind: "failed", message: "未能复制" };
     case "paste_event_failed":
@@ -79,13 +82,34 @@ function statusForAutosendOutcome(outcome: AutosendOutcome): {
     case "return_event_failed":
       return { kind: "failed", message: "已粘贴，未发送" };
     case "target_focus_failed":
-      return { kind: "failed", message: "未找到输入框" };
+      return { kind: "failed", message: "请先切到输入页" };
     default:
       return {
         kind: "failed",
         message: outcome.copied ? "未能自动发送" : "未能复制",
       };
   }
+}
+
+function statusForAutosendSequenceOutcome(outcome: AutosendSequenceOutcome): {
+  kind: AutosendStatusKind;
+  message: string;
+  action?: AutosendStatusAction;
+} {
+  if (outcome.sent) {
+    return { kind: "sent", message: "已粘贴并回车" };
+  }
+  if (outcome.reason === "missing_accessibility_permission") {
+    return {
+      kind: "failed",
+      message: "点击授权",
+      action: "request_accessibility_permission",
+    };
+  }
+  return {
+    kind: "failed",
+    message: `第 ${outcome.failed_index ?? 1} 条失败`,
+  };
 }
 
 interface InputTargetPollingControllerProps {
@@ -116,6 +140,14 @@ function initialWindowLabel() {
     : "main";
 }
 
+function currentWindowLabel() {
+  try {
+    return getCurrentWindow().label;
+  } catch {
+    return initialWindowLabel();
+  }
+}
+
 export function App({
   settings = DEFAULT_SETTINGS,
 }: AppProps) {
@@ -124,49 +156,52 @@ export function App({
     if (initialMode === "manager") return "manager";
     if (initialMode === "settings") return "settings";
     if (initialMode === "button-controls") return "button-controls";
-    return "popover";
+    return currentWindowLabel() === "main" ? "manager" : "popover";
   });
-  const [windowLabel, setWindowLabel] = useState(initialWindowLabel);
-  const [prompts, setPrompts] = useState<PromptItem[]>([]);
+  const [windowLabel, setWindowLabel] = useState(currentWindowLabel);
+  const [prompts, setPrompts] = useState<PromptContainer[]>([]);
   const [submittingPromptId, setSubmittingPromptId] = useState<string | null>(null);
   const [activeSettings, setActiveSettings] = useState<Settings>(settings);
-  const [accessibilityTrusted, setAccessibilityTrusted] = useState<boolean | null>(null);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
   const storeRef = useRef(createPromptStore(createTauriPromptStorage()));
   const settingsStoreRef = useRef(createSettingsStore(createTauriSettingsStorage()));
 
-  const refreshAccessibilityStatus = useCallback(async () => {
-    setAccessibilityTrusted(null);
-    try {
-      const status = await getAccessibilityStatus();
-      setAccessibilityTrusted(status.trusted);
-    } catch {
-      setAccessibilityTrusted(null);
-    }
+  useEffect(() => {
+    let active = true;
+    storeRef.current.list().then((items) => {
+      if (active) setPrompts(items);
+    });
+    settingsStoreRef.current.get().then((loadedSettings) => {
+      if (!active) return;
+      setActiveSettings(loadedSettings);
+      setSettingsLoaded(true);
+    });
+    const label = currentWindowLabel();
+    setWindowLabel(label);
+
+    return () => {
+      active = false;
+    };
   }, []);
 
-  useEffect(() => {
-    storeRef.current.list().then(setPrompts);
-    settingsStoreRef.current.get().then(setActiveSettings);
-    let label = initialWindowLabel();
-    try {
-      label = getCurrentWindow().label;
-    } catch {
-      label = initialWindowLabel();
-    }
-    setWindowLabel(label);
-    if (label === "main") {
-      refreshAccessibilityStatus();
-    }
-  }, [refreshAccessibilityStatus]);
-
-  const handleSelect = async (prompt: PromptItem) => {
+  const handleSelect = async (prompt: PromptContainer) => {
     if (submittingPromptId) return;
     setSubmittingPromptId(prompt.id);
     try {
       await hidePromptPopover();
       await waitForWindowHide();
-      const outcome = await pastePromptAndSubmitToLastTarget(prompt.body);
-      const status = statusForAutosendOutcome(outcome);
+      const bodies = getPromptContainerBodies(prompt);
+      if (bodies.length === 0) {
+        await emitAutosendStatus("failed", "未能发送，请重试");
+        return;
+      }
+      const status = prompt.type === "group"
+        ? statusForAutosendSequenceOutcome(
+          await pastePromptSequenceAndSubmitToLastTarget(bodies, prompt.intervalMs)
+        )
+        : statusForAutosendOutcome(
+          await pastePromptAndSubmitToLastTarget(bodies[0])
+        );
       await emitAutosendStatus(status.kind, status.message, status.action);
     } catch (e) {
       console.warn("Prompt autosend failed without blocking the picker:", e);
@@ -176,20 +211,14 @@ export function App({
     }
   };
 
-  const handleManage = () => setMode("manager");
-  const handleSettings = () => setMode("settings");
   const handleBackToPopover = () => setMode("popover");
 
   const handleButtonDragEnd = useCallback(
     async (
       position: { x: number; y: number },
-      basePosition: [number, number] | null
+      _basePosition: [number, number] | null
     ) => {
-      if (!basePosition) return;
-      await settingsStoreRef.current.setOverlayButtonOffset({
-        x: position.x - basePosition[0],
-        y: position.y - basePosition[1],
-      });
+      await settingsStoreRef.current.setOverlayButtonPosition(position);
       setActiveSettings(await settingsStoreRef.current.get());
     },
     []
@@ -201,45 +230,12 @@ export function App({
   };
 
   const pollingController =
-    windowLabel === "main" ? (
+    windowLabel === "main" && settingsLoaded ? (
       <InputTargetPollingController
         settings={activeSettings}
         onButtonDragEnd={handleButtonDragEnd}
       />
     ) : null;
-
-  // ── Main window: show/hide floating button controls ────────────────────
-  if (windowLabel === "main" && mode === "popover") {
-    return (
-      <>
-        {pollingController}
-        <MainWindow
-          floatingButtonVisible={activeSettings.floatingButton.visible}
-          accessibilityTrusted={accessibilityTrusted}
-          onManage={handleManage}
-          onSettings={handleSettings}
-          onOpenAccessibilitySettings={openAccessibilitySettings}
-          onRefreshAccessibilityStatus={refreshAccessibilityStatus}
-          onShowFloatingButton={async () => {
-            await settingsStoreRef.current.setFloatingButtonVisible(true);
-            setActiveSettings(await settingsStoreRef.current.get());
-            const pos =
-              await invoke<{ x: number; y: number }>("prompt_button_position_cmd");
-            if (pos) {
-              await invoke("show_prompt_button", { x: pos.x, y: pos.y });
-            } else {
-              await invoke("show_prompt_button", { x: 960, y: 700 });
-            }
-          }}
-          onHideFloatingButton={async () => {
-            await settingsStoreRef.current.setFloatingButtonVisible(false);
-            setActiveSettings(await settingsStoreRef.current.get());
-            await invoke("hide_prompt_button");
-          }}
-        />
-      </>
-    );
-  }
 
   // ── Manager ─────────────────────────────────────────────────────────
   if (mode === "manager") {
@@ -251,6 +247,10 @@ export function App({
             prompts={prompts}
             onCreate={async (input) => {
               await storeRef.current.create(input);
+              setPrompts(await storeRef.current.list());
+            }}
+            onCreateGroup={async (input) => {
+              await storeRef.current.createGroup(input);
               setPrompts(await storeRef.current.list());
             }}
             onUpdate={async (id, input) => {
@@ -297,11 +297,13 @@ export function App({
               }
             }}
           />
-          <div className="page-footer">
-            <button className="button button-secondary" onClick={handleBackToPopover}>
-              Back
-            </button>
-          </div>
+          {windowLabel !== "main" ? (
+            <div className="page-footer">
+              <button className="button button-secondary" onClick={handleBackToPopover}>
+                Back
+              </button>
+            </div>
+          ) : null}
         </div>
       </>
     );
@@ -334,7 +336,16 @@ export function App({
         {pollingController}
         <div className="button-controls">
           <button
-            className="button button-danger"
+            className="button button-primary"
+            onClick={async () => {
+              await openMainWindow();
+              await hidePromptPopover();
+            }}
+          >
+            Manage Prompts...
+          </button>
+          <button
+            className="button button-secondary"
             onClick={async () => {
               await settingsStoreRef.current.setFloatingButtonVisible(false);
               setActiveSettings(await settingsStoreRef.current.get());
@@ -342,16 +353,24 @@ export function App({
               await hidePromptPopover();
             }}
           >
-            Hide Button
+            Hide Calico
           </button>
           <button
             className="button button-secondary"
             onClick={async () => {
-              await openMainWindow();
+              await openAccessibilitySettings();
               await hidePromptPopover();
             }}
           >
-            Open Prompt Picker
+            Open Accessibility Settings
+          </button>
+          <button
+            className="button button-danger"
+            onClick={async () => {
+              await quitPromptPicker();
+            }}
+          >
+            Quit Prompt Picker
           </button>
         </div>
       </>
@@ -374,100 +393,3 @@ export function App({
 }
 
 // ── Sub-components ────────────────────────────────────────────────────
-
-function MainWindow({
-  floatingButtonVisible,
-  accessibilityTrusted,
-  onManage,
-  onSettings,
-  onOpenAccessibilitySettings,
-  onRefreshAccessibilityStatus,
-  onShowFloatingButton,
-  onHideFloatingButton,
-}: {
-  floatingButtonVisible: boolean;
-  accessibilityTrusted: boolean | null;
-  onManage: () => void;
-  onSettings: () => void;
-  onOpenAccessibilitySettings: () => void;
-  onRefreshAccessibilityStatus: () => void;
-  onShowFloatingButton: () => void;
-  onHideFloatingButton: () => void;
-}) {
-  return (
-    <div className="app-window app-window-main home-view">
-      <header className="app-header">
-        <div>
-          <h1>Prompt Picker</h1>
-          <p>Manage reusable prompts and insert them from the floating picker.</p>
-        </div>
-        <div className="status-row">
-          <span className={floatingButtonVisible ? "status-pill is-on" : "status-pill"}>
-            Status: {floatingButtonVisible ? "Visible" : "Hidden"}
-          </span>
-          {accessibilityTrusted === false ? (
-            <>
-              <button
-                className="status-pill status-action"
-                aria-label="Open Accessibility Settings"
-                onClick={onOpenAccessibilitySettings}
-              >
-                Autosend: Needs Accessibility
-              </button>
-              <button
-                className="status-pill status-action"
-                aria-label="Recheck Accessibility"
-                onClick={onRefreshAccessibilityStatus}
-              >
-                Recheck
-              </button>
-            </>
-          ) : (
-            <span className="status-pill is-on">
-              Autosend: {accessibilityTrusted ? "Ready" : "Checking"}
-            </span>
-          )}
-        </div>
-      </header>
-
-      <div className="home-grid">
-        <section className="panel">
-          <div className="panel-icon panel-icon-calico">
-            <img src="/calico/calico-idle.apng" alt="" />
-          </div>
-          <div>
-            <h2>Floating Button</h2>
-            <p>
-              Keep the lightweight prompt button available above other apps.
-            </p>
-          </div>
-          {floatingButtonVisible ? (
-            <button className="button button-secondary" onClick={onHideFloatingButton}>
-              Hide Floating Button
-            </button>
-          ) : (
-            <button className="button button-primary" onClick={onShowFloatingButton}>
-              Show Floating Button
-            </button>
-          )}
-        </section>
-
-        <section className="panel">
-          <h2>Library</h2>
-          <p>Create, edit, import, and reorder the prompts shown in the picker.</p>
-          <button className="button button-primary" onClick={onManage}>
-            Manage Prompts
-          </button>
-        </section>
-
-        <section className="panel">
-          <h2>Settings</h2>
-          <p>Review apps where the floating picker should stay out of the way.</p>
-          <button className="button button-secondary" onClick={onSettings}>
-            Settings
-          </button>
-        </section>
-      </div>
-    </div>
-  );
-}

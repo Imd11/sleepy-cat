@@ -133,7 +133,7 @@ describe("app", () => {
       render(<App />);
     });
 
-    await screen.findByRole("button", { name: "Hide Button" });
+    await screen.findByRole("button", { name: "Hide Calico" });
     expect(inputTargetPollingMock).not.toHaveBeenCalled();
   });
 
@@ -148,7 +148,7 @@ describe("app", () => {
       render(<App />);
     });
 
-    await screen.findByText("Prompt Picker");
+    await screen.findByRole("heading", { name: "Manage Prompts" });
     expect(inputTargetPollingMock).toHaveBeenCalled();
   });
 
@@ -179,6 +179,65 @@ describe("app", () => {
     });
   });
 
+  it("autosends grouped prompts through the sequence backend command", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockClear();
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === "paste_prompt_sequence_and_submit_to_last_target") {
+        return {
+          copied: true,
+          sent: true,
+          sent_count: 2,
+          failed_index: null,
+          error: null,
+          reason: null,
+        };
+      }
+      return undefined;
+    });
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      JSON.stringify({
+        version: 2,
+        containers: [
+          {
+            id: "group-1",
+            title: "Repair Group",
+            type: "group",
+            prompts: [
+              { id: "entry-1", body: "First prompt", order: 0 },
+              { id: "entry-2", body: "Second prompt", order: 1 },
+            ],
+            intervalMs: 700,
+            order: 0,
+            createdAt: "2026-07-03T00:00:00.000Z",
+            updatedAt: "2026-07-03T00:00:00.000Z",
+          },
+        ],
+      })
+    );
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    fireEvent.click(await screen.findByText("Repair Group"));
+
+    await waitFor(() => {
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith(
+        "paste_prompt_sequence_and_submit_to_last_target",
+        {
+          bodies: ["First prompt", "Second prompt"],
+          interval_ms: 700,
+        }
+      );
+    });
+    expect(vi.mocked(invoke)).not.toHaveBeenCalledWith(
+      "paste_prompt_and_submit_to_last_target",
+      expect.anything()
+    );
+  });
+
   it("emits a sent status when autosend reports keyboard success", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockImplementation(async (command: string) => {
@@ -201,7 +260,7 @@ describe("app", () => {
     await waitFor(() => {
       expect(emitMock).toHaveBeenCalledWith("prompt-autosend-status", {
         kind: "sent",
-        message: "已发送",
+        message: "已粘贴并回车",
       });
     });
   });
@@ -233,8 +292,8 @@ describe("app", () => {
     await waitFor(() => {
       expect(emitMock).toHaveBeenCalledWith("prompt-autosend-status", {
         kind: "failed",
-        message: "开启辅助功能",
-        action: "open_accessibility_settings",
+        message: "点击授权",
+        action: "request_accessibility_permission",
       });
     });
     expect(emitMock).not.toHaveBeenCalledWith(
@@ -512,7 +571,7 @@ describe("app", () => {
     warn.mockRestore();
   });
 
-  it("opens prompt manager from the main app window", async () => {
+  it("opens the main app window directly on prompt management", async () => {
     currentWindowLabel = "main";
     const { readTextFile } = await import("@tauri-apps/plugin-fs");
     (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValue(
@@ -523,18 +582,15 @@ describe("app", () => {
       render(<App />);
     });
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Manage Prompts" }));
-    });
-
     await waitFor(() => {
       expect(
         screen.getByRole("heading", { name: "Manage Prompts" })
       ).toBeTruthy();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Add Prompt" }));
-
+    expect(screen.queryByText("Floating Button")).toBeNull();
+    expect(screen.queryByText("Hide Floating Button")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Settings" })).toBeNull();
     expect(screen.getByPlaceholderText("Title")).toBeTruthy();
   });
 
@@ -561,7 +617,6 @@ describe("app", () => {
       render(<App />);
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Manage Prompts" }));
     fireEvent.click(screen.getByRole("button", { name: "Add Prompt" }));
     // Editor is always visible; fill title and body
     fireEvent.change(screen.getByPlaceholderText("Title"), {
@@ -577,50 +632,8 @@ describe("app", () => {
     });
   });
 
-  it("shows floating button status and can hide or show it from the main window", async () => {
+  it("does not show floating button controls on the main prompt management page", async () => {
     currentWindowLabel = "main";
-    const files = new Map<string, string>();
-    const { readTextFile, writeTextFile } = await import(
-      "@tauri-apps/plugin-fs"
-    );
-    (readTextFile as ReturnType<typeof vi.fn>).mockImplementation(
-      async (path: string) => {
-        const value = files.get(path);
-        if (!value) throw new Error("missing file");
-        return value;
-      }
-    );
-    (writeTextFile as ReturnType<typeof vi.fn>).mockImplementation(
-      async (path: string, value: string) => {
-        files.set(path, value);
-      }
-    );
-
-    await act(async () => {
-      render(<App />);
-    });
-
-    expect(await screen.findByText("Prompt Picker")).toBeTruthy();
-    expect(screen.getByText("Status: Visible")).toBeTruthy();
-
-    fireEvent.click(screen.getByRole("button", { name: "Hide Floating Button" }));
-    await waitFor(() => {
-      expect(screen.getByText("Status: Hidden")).toBeTruthy();
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Show Floating Button" }));
-    await waitFor(() => {
-      expect(screen.getByText("Status: Visible")).toBeTruthy();
-    });
-  });
-
-  it("shows autosend accessibility readiness in the main window", async () => {
-    currentWindowLabel = "main";
-    const { invoke } = await import("@tauri-apps/api/core");
-    vi.mocked(invoke).mockImplementation(async (command: string) => {
-      if (command === "accessibility_status_cmd") return { trusted: false };
-      return undefined;
-    });
     const { readTextFile } = await import("@tauri-apps/plugin-fs");
     (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValue(
       JSON.stringify({ version: 1, prompts: mockPrompts })
@@ -630,60 +643,10 @@ describe("app", () => {
       render(<App />);
     });
 
-    expect(await screen.findByText("Autosend: Needs Accessibility")).toBeTruthy();
-  });
-
-  it("opens Accessibility settings from the main window status control", async () => {
-    currentWindowLabel = "main";
-    const { invoke } = await import("@tauri-apps/api/core");
-    vi.mocked(invoke).mockImplementation(async (command: string) => {
-      if (command === "accessibility_status_cmd") return { trusted: false };
-      return undefined;
-    });
-    const { readTextFile } = await import("@tauri-apps/plugin-fs");
-    (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValue(
-      JSON.stringify({ version: 1, prompts: mockPrompts })
-    );
-
-    await act(async () => {
-      render(<App />);
-    });
-
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Open Accessibility Settings" })
-    );
-
-    expect(vi.mocked(invoke)).toHaveBeenCalledWith("open_accessibility_settings");
-  });
-
-  it("rechecks Accessibility status from the main window", async () => {
-    currentWindowLabel = "main";
-    const { invoke } = await import("@tauri-apps/api/core");
-    vi.mocked(invoke).mockImplementation(async (command: string) => {
-      if (command === "accessibility_status_cmd") return { trusted: false };
-      return undefined;
-    });
-    const { readTextFile } = await import("@tauri-apps/plugin-fs");
-    (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValue(
-      JSON.stringify({ version: 1, prompts: mockPrompts })
-    );
-
-    await act(async () => {
-      render(<App />);
-    });
-
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Recheck Accessibility" })
-    );
-
-    await waitFor(() => {
-      expect(vi.mocked(invoke)).toHaveBeenCalledWith("accessibility_status_cmd");
-      expect(
-        vi.mocked(invoke).mock.calls.filter(
-          ([command]) => command === "accessibility_status_cmd"
-        ).length
-      ).toBeGreaterThanOrEqual(2);
-    });
+    expect(await screen.findByRole("heading", { name: "Manage Prompts" })).toBeTruthy();
+    expect(screen.queryByText("Status: Visible")).toBeNull();
+    expect(screen.queryByText("Autosend: Ready")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Hide Floating Button" })).toBeNull();
   });
 
   it("renders button controls mode without prompt management UI", async () => {
@@ -710,12 +673,17 @@ describe("app", () => {
     });
 
     expect(
-      await screen.findByRole("button", { name: "Hide Button" })
+      await screen.findByRole("button", { name: "Hide Calico" })
     ).toBeTruthy();
     expect(
-      screen.getByRole("button", { name: "Open Prompt Picker" })
+      screen.getByRole("button", { name: "Manage Prompts..." })
     ).toBeTruthy();
-    expect(screen.queryByText("Manage Prompts")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Open Accessibility Settings" })
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Quit Prompt Picker" })
+    ).toBeTruthy();
     expect(screen.queryByText("Import")).toBeNull();
     expect(screen.queryByText("Export")).toBeNull();
   });
@@ -740,8 +708,8 @@ describe("app", () => {
       render(<App />);
     });
 
-    await screen.findByRole("button", { name: "Hide Button" });
-    fireEvent.click(screen.getByRole("button", { name: "Hide Button" }));
+    await screen.findByRole("button", { name: "Hide Calico" });
+    fireEvent.click(screen.getByRole("button", { name: "Hide Calico" }));
 
     await waitFor(() => {
       expect(vi.mocked(invoke)).toHaveBeenCalledWith("hide_prompt_button");
@@ -753,7 +721,7 @@ describe("app", () => {
     expect(allCalls).not.toContain("open_main_window");
   });
 
-  it("open prompt picker calls open_main_window", async () => {
+  it("manage prompts from button controls calls open_main_window", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockResolvedValue(undefined);
     currentWindowLabel = "prompt-popover";
@@ -768,11 +736,55 @@ describe("app", () => {
 
     await act(async () => { render(<App />); });
 
-    await screen.findByRole("button", { name: "Open Prompt Picker" });
-    fireEvent.click(screen.getByRole("button", { name: "Open Prompt Picker" }));
+    await screen.findByRole("button", { name: "Manage Prompts..." });
+    fireEvent.click(screen.getByRole("button", { name: "Manage Prompts..." }));
 
     await waitFor(() => {
       expect(vi.mocked(invoke)).toHaveBeenCalledWith("open_main_window");
+    });
+  });
+
+  it("button controls can open Accessibility settings", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    currentWindowLabel = "prompt-popover";
+    window.history.pushState({}, "", "/?mode=button-controls");
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockImplementation(async (path: string) => {
+      if (path.includes("prompts")) return JSON.stringify({ version: 1, prompts: mockPrompts });
+      if (path.includes("settings")) return JSON.stringify({ version: 1, blacklistedApps: [], overlayPlacement: { buttonOffset: null }, floatingButton: { visible: true } });
+      throw new Error("missing file");
+    });
+
+    await act(async () => { render(<App />); });
+
+    await screen.findByRole("button", { name: "Open Accessibility Settings" });
+    fireEvent.click(screen.getByRole("button", { name: "Open Accessibility Settings" }));
+
+    await waitFor(() => {
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith("open_accessibility_settings");
+    });
+  });
+
+  it("button controls can quit Prompt Picker", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    currentWindowLabel = "prompt-popover";
+    window.history.pushState({}, "", "/?mode=button-controls");
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockImplementation(async (path: string) => {
+      if (path.includes("prompts")) return JSON.stringify({ version: 1, prompts: mockPrompts });
+      if (path.includes("settings")) return JSON.stringify({ version: 1, blacklistedApps: [], overlayPlacement: { buttonOffset: null }, floatingButton: { visible: true } });
+      throw new Error("missing file");
+    });
+
+    await act(async () => { render(<App />); });
+
+    await screen.findByRole("button", { name: "Quit Prompt Picker" });
+    fireEvent.click(screen.getByRole("button", { name: "Quit Prompt Picker" }));
+
+    await waitFor(() => {
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith("quit_prompt_picker");
     });
   });
 
@@ -788,9 +800,10 @@ describe("app", () => {
 
     await act(async () => { render(<App />); });
 
-    expect(screen.queryByRole("button", { name: "Hide Button" })).not.toBeNull();
-    expect(screen.queryByRole("button", { name: "Open Prompt Picker" })).not.toBeNull();
-    expect(screen.queryByText("Manage Prompts")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Hide Calico" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Manage Prompts..." })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Open Accessibility Settings" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Quit Prompt Picker" })).not.toBeNull();
     expect(screen.queryByText("Settings")).toBeNull();
   });
 });

@@ -17,6 +17,7 @@ export interface PromptButtonPosition {
 export type AutosendFailureReason =
   | "copy_failed"
   | "missing_accessibility_permission"
+  | "no_safe_target"
   | "paste_event_failed"
   | "return_event_failed"
   | "target_focus_failed";
@@ -28,8 +29,17 @@ export interface AutosendOutcome {
   reason: AutosendFailureReason | null;
 }
 
+export interface AutosendSequenceOutcome extends AutosendOutcome {
+  sent_count: number;
+  failed_index: number | null;
+}
+
 export async function getAccessibilityStatus(): Promise<AccessibilityStatus> {
   return invoke<AccessibilityStatus>("accessibility_status_cmd");
+}
+
+export async function requestAccessibilityPermission(): Promise<AccessibilityStatus> {
+  return invoke<AccessibilityStatus>("request_accessibility_permission_cmd");
 }
 
 export async function openAccessibilitySettings(): Promise<void> {
@@ -52,6 +62,16 @@ export async function pastePromptAndSubmitToLastTarget(
   body: string
 ): Promise<AutosendOutcome> {
   return invoke<AutosendOutcome>("paste_prompt_and_submit_to_last_target", { body });
+}
+
+export async function pastePromptSequenceAndSubmitToLastTarget(
+  bodies: string[],
+  intervalMs: number
+): Promise<AutosendSequenceOutcome> {
+  return invoke<AutosendSequenceOutcome>(
+    "paste_prompt_sequence_and_submit_to_last_target",
+    { bodies, interval_ms: intervalMs }
+  );
 }
 
 export async function getCurrentInputTarget(): Promise<unknown> {
@@ -91,4 +111,8 @@ export async function pastePromptToApp(body: string, bundle_id: string): Promise
 }
 export async function openMainWindow(): Promise<void> {
   return invoke("open_main_window");
+}
+
+export async function quitPromptPicker(): Promise<void> {
+  return invoke("quit_prompt_picker");
 }
