@@ -39,4 +39,19 @@ describe("PromptQuickList", () => {
 
     expect(selected).toEqual(prompts[0]);
   });
+
+  it("disables the prompt currently being submitted", () => {
+    render(
+      <PromptQuickList
+        prompts={prompts}
+        onSelect={() => {}}
+        submittingPromptId="1"
+      />
+    );
+
+    expect(
+      (screen.getByRole("button", { name: /讨论方案/i }) as HTMLButtonElement)
+        .disabled
+    ).toBe(true);
+  });
 });

@@ -75,6 +75,7 @@ export function App({
   });
   const [windowLabel, setWindowLabel] = useState(initialWindowLabel);
   const [prompts, setPrompts] = useState<PromptItem[]>([]);
+  const [submittingPromptId, setSubmittingPromptId] = useState<string | null>(null);
   const [activeSettings, setActiveSettings] = useState<Settings>(settings);
   const storeRef = useRef(createPromptStore(createTauriPromptStorage()));
   const settingsStoreRef = useRef(createSettingsStore(createTauriSettingsStorage()));
@@ -90,6 +91,8 @@ export function App({
   }, []);
 
   const handleSelect = async (prompt: PromptItem) => {
+    if (submittingPromptId) return;
+    setSubmittingPromptId(prompt.id);
     try {
       const status = await getAccessibilityStatus();
       if (status?.trusted === false) {
@@ -104,6 +107,8 @@ export function App({
       console.error("Failed to paste prompt:", e);
       const message = e instanceof Error ? e.message : String(e);
       alert(message || "Failed to paste prompt. Please try again.");
+    } finally {
+      setSubmittingPromptId(null);
     }
   };
 
@@ -291,7 +296,11 @@ export function App({
     <>
       {pollingController}
       <div className="popover-window">
-        <PromptQuickList prompts={prompts} onSelect={handleSelect} />
+        <PromptQuickList
+          prompts={prompts}
+          onSelect={handleSelect}
+          submittingPromptId={submittingPromptId}
+        />
       </div>
     </>
   );

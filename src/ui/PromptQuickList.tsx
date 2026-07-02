@@ -4,9 +4,14 @@ import { getPromptPreview } from "../shared/promptTypes";
 interface PromptQuickListProps {
   prompts: PromptItem[];
   onSelect: (prompt: PromptItem) => void;
+  submittingPromptId?: string | null;
 }
 
-export function PromptQuickList({ prompts, onSelect }: PromptQuickListProps) {
+export function PromptQuickList({
+  prompts,
+  onSelect,
+  submittingPromptId = null,
+}: PromptQuickListProps) {
   return (
     <div className="prompt-quick-list" role="listbox" aria-label="Prompts">
       {prompts.length === 0 ? (
@@ -20,6 +25,7 @@ export function PromptQuickList({ prompts, onSelect }: PromptQuickListProps) {
             key={prompt.id}
             className="prompt-quick-item"
             type="button"
+            disabled={submittingPromptId === prompt.id}
             onClick={() => onSelect(prompt)}
           >
             <span className="prompt-quick-title">{prompt.title}</span>
