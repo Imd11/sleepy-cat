@@ -31,6 +31,7 @@ vi.mock("@tauri-apps/plugin-fs", () => ({
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   save: vi.fn(),
   open: vi.fn(),
+  message: vi.fn().mockResolvedValue("Ok"),
 }));
 
 const mockPrompts: PromptItem[] = [
@@ -193,6 +194,69 @@ describe("app", () => {
     });
   });
 
+  it("does not run a frontend accessibility preflight before autosend", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockClear();
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      JSON.stringify({ version: 1, prompts: mockPrompts })
+    );
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    fireEvent.click(await screen.findByText("Test Prompt"));
+
+    await waitFor(() => {
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith("hide_prompt_popover");
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith(
+        "paste_prompt_and_submit_to_last_target",
+        { body: "Test body" }
+      );
+    });
+
+    expect(vi.mocked(invoke)).not.toHaveBeenCalledWith("accessibility_status_cmd");
+  });
+
+  it("hides the prompt popover before surfacing an autosend failure", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const { message } = await import("@tauri-apps/plugin-dialog");
+    const calls: string[] = [];
+    vi.mocked(invoke).mockClear();
+    vi.mocked(message).mockClear();
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === "hide_prompt_popover") {
+        calls.push("hide");
+        return undefined;
+      }
+      if (command === "paste_prompt_and_submit_to_last_target") {
+        calls.push("autosend");
+        throw new Error("Accessibility permission required for autosend.");
+      }
+      return undefined;
+    });
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      JSON.stringify({ version: 1, prompts: mockPrompts })
+    );
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    fireEvent.click(await screen.findByText("Test Prompt"));
+
+    await waitFor(() => {
+      expect(calls).toEqual(["hide", "autosend"]);
+      expect(vi.mocked(message)).toHaveBeenCalledWith(
+        "Accessibility permission required for autosend.",
+        { title: "Prompt Picker", kind: "error" }
+      );
+    });
+  });
+
   it("does not move the floating button when selecting a prompt from the popover", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockClear();
@@ -226,13 +290,14 @@ describe("app", () => {
 
   it("does not fall back to blind paste when no input target is recorded", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
+    const { message } = await import("@tauri-apps/plugin-dialog");
+    vi.mocked(message).mockClear();
     vi.mocked(invoke).mockImplementation(async (command) => {
       if (command === "paste_prompt_and_submit_to_last_target") {
         throw new Error("Click into a text field first, then choose a prompt.");
       }
       return undefined;
     });
-    window.alert = vi.fn();
     const { readTextFile } = await import("@tauri-apps/plugin-fs");
     (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
       JSON.stringify({ version: 1, prompts: mockPrompts })
@@ -245,8 +310,9 @@ describe("app", () => {
     fireEvent.click(await screen.findByText("Test Prompt"));
 
     await waitFor(() => {
-      expect(window.alert).toHaveBeenCalledWith(
-        "Click into a text field first, then choose a prompt."
+      expect(vi.mocked(message)).toHaveBeenCalledWith(
+        "Click into a text field first, then choose a prompt.",
+        { title: "Prompt Picker", kind: "error" }
       );
     });
     expect(vi.mocked(invoke)).not.toHaveBeenCalledWith("paste_prompt", {

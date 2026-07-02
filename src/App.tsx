@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { save, open } from "@tauri-apps/plugin-dialog";
+import { save, open, message } from "@tauri-apps/plugin-dialog";
 import { writeTextFile, readTextFile } from "@tauri-apps/plugin-fs";
 import type { PromptItem } from "./shared/promptTypes";
 import type { Settings } from "./shared/settingsStore";
@@ -10,7 +10,6 @@ import { createPromptStore } from "./shared/promptStore";
 import { createTauriPromptStorage } from "./storage/tauriPromptStorage";
 import { createTauriSettingsStorage } from "./storage/tauriSettingsStorage";
 import {
-  getAccessibilityStatus,
   hidePromptButton,
   hidePromptPopover,
   openMainWindow,
@@ -96,22 +95,16 @@ export function App({
     if (submittingPromptId) return;
     setSubmittingPromptId(prompt.id);
     try {
-      const status = await getAccessibilityStatus();
-      if (status?.trusted === false) {
-        alert(
-          "Accessibility permission required. Please grant permission in System Settings > Privacy & Security > Accessibility."
-        );
-        return;
-      }
       await hidePromptPopover();
       await waitForWindowHide();
       await pastePromptAndSubmitToLastTarget(prompt.body);
     } catch (e) {
       console.error("Failed to paste prompt:", e);
-      const message = e instanceof Error ? e.message : String(e);
-      alert(
-        message ||
-          "Autosend failed. Click into a target input field, confirm Accessibility permission, then try again."
+      const messageText = e instanceof Error ? e.message : String(e);
+      await message(
+        messageText ||
+          "Autosend failed. Click into a target input field, confirm Accessibility permission, then try again.",
+        { title: "Prompt Picker", kind: "error" }
       );
     } finally {
       setSubmittingPromptId(null);
