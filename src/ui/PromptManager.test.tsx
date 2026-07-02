@@ -102,6 +102,71 @@ describe("prompt manager", () => {
     });
   });
 
+  it("inserts and removes group prompts from row controls", () => {
+    renderManager();
+
+    fireEvent.click(screen.getByRole("button", { name: "Group" }));
+    expect(screen.getAllByLabelText(/Prompt \d+ body/i)).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole("button", { name: "Insert prompt after Prompt 1" }));
+    expect(screen.getAllByLabelText(/Prompt \d+ body/i)).toHaveLength(3);
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove Prompt 2" }));
+    expect(screen.getAllByLabelText(/Prompt \d+ body/i)).toHaveLength(2);
+  });
+
+  it("reorders group prompts from row controls", () => {
+    renderManager();
+
+    fireEvent.click(screen.getByRole("button", { name: "Group" }));
+    const promptFields = screen.getAllByLabelText(/Prompt \d+ body/i);
+    fireEvent.change(promptFields[0], { target: { value: "First grouped prompt" } });
+    fireEvent.change(promptFields[1], { target: { value: "Second grouped prompt" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Move Prompt 2 up" }));
+
+    const reorderedFields = screen.getAllByLabelText(/Prompt \d+ body/i);
+    expect((reorderedFields[0] as HTMLTextAreaElement).value).toBe("Second grouped prompt");
+    expect((reorderedFields[1] as HTMLTextAreaElement).value).toBe("First grouped prompt");
+  });
+
+  it("does not remove the last group prompt row", () => {
+    renderManager();
+
+    fireEvent.click(screen.getByRole("button", { name: "Group" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove Prompt 2" }));
+
+    expect((screen.getByRole("button", { name: "Remove Prompt 1" }) as HTMLButtonElement).disabled)
+      .toBe(true);
+    expect(screen.getAllByLabelText(/Prompt \d+ body/i)).toHaveLength(1);
+  });
+
+  it("reorders group prompts by dragging the row handle", () => {
+    renderManager();
+
+    fireEvent.click(screen.getByRole("button", { name: "Group" }));
+    const promptFields = screen.getAllByLabelText(/Prompt \d+ body/i);
+    fireEvent.change(promptFields[0], { target: { value: "First grouped prompt" } });
+    fireEvent.change(promptFields[1], { target: { value: "Second grouped prompt" } });
+
+    const dataTransfer = {
+      effectAllowed: "",
+      dropEffect: "",
+      setData: () => {},
+      getData: () => "",
+    };
+
+    fireEvent.dragStart(screen.getByRole("button", { name: "Drag Prompt 1" }), {
+      dataTransfer,
+    });
+    fireEvent.dragOver(screen.getByLabelText("Prompt 2 body"), { dataTransfer });
+    fireEvent.drop(screen.getByLabelText("Prompt 2 body"), { dataTransfer });
+
+    const reorderedFields = screen.getAllByLabelText(/Prompt \d+ body/i);
+    expect((reorderedFields[0] as HTMLTextAreaElement).value).toBe("Second grouped prompt");
+    expect((reorderedFields[1] as HTMLTextAreaElement).value).toBe("First grouped prompt");
+  });
+
   it("asks for confirmation before delete", () => {
     renderManager();
 

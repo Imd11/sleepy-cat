@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useState, type DragEvent } from "react";
 import type { PromptContainer } from "../shared/promptTypes";
 import {
   DEFAULT_GROUP_INTERVAL_MS,
   getPromptContainerMeta,
-  getPromptContainerPreview,
+  getPromptContainerPreviewLines,
 } from "../shared/promptTypes";
 
 type EditorMode = "single" | "group";
@@ -72,6 +72,16 @@ function hasValidDraft(draft: Draft): boolean {
   if (!draft.title.trim()) return false;
   if (draft.type === "single") return Boolean(draft.body.trim());
   return cleanBodies(draft.prompts).length > 0;
+}
+
+function moveArrayItem<T>(items: T[], from: number, to: number): T[] {
+  if (from === to || from < 0 || to < 0 || from >= items.length || to >= items.length) {
+    return items;
+  }
+  const next = [...items];
+  const [item] = next.splice(from, 1);
+  next.splice(to, 0, item);
+  return next;
 }
 
 export function PromptManager({
@@ -207,15 +217,17 @@ export function PromptManager({
             intervalMs={draft.intervalMs}
             onIntervalChange={(intervalMs) => setDraft({ ...draft, intervalMs })}
             onPromptChange={setDraftPrompt}
-            onAddPrompt={() => setDraft({ ...draft, prompts: [...draft.prompts, ""] })}
+            onInsertPrompt={(index) => {
+              const next = [...draft.prompts];
+              next.splice(index + 1, 0, "");
+              setDraft({ ...draft, prompts: next });
+            }}
             onRemovePrompt={(index) => {
               const next = draft.prompts.filter((_, i) => i !== index);
               setDraft({ ...draft, prompts: next.length ? next : [""] });
             }}
             onMovePrompt={(from, to) => {
-              const next = [...draft.prompts];
-              [next[from], next[to]] = [next[to], next[from]];
-              setDraft({ ...draft, prompts: next });
+              setDraft({ ...draft, prompts: moveArrayItem(draft.prompts, from, to) });
             }}
           />
         )}
@@ -273,17 +285,20 @@ export function PromptManager({
                       intervalMs={editDraft.intervalMs}
                       onIntervalChange={(intervalMs) => setEditDraft({ ...editDraft, intervalMs })}
                       onPromptChange={setEditPrompt}
-                      onAddPrompt={() =>
-                        setEditDraft({ ...editDraft, prompts: [...editDraft.prompts, ""] })
-                      }
+                      onInsertPrompt={(entryIndex) => {
+                        const next = [...editDraft.prompts];
+                        next.splice(entryIndex + 1, 0, "");
+                        setEditDraft({ ...editDraft, prompts: next });
+                      }}
                       onRemovePrompt={(entryIndex) => {
                         const next = editDraft.prompts.filter((_, i) => i !== entryIndex);
                         setEditDraft({ ...editDraft, prompts: next.length ? next : [""] });
                       }}
                       onMovePrompt={(from, to) => {
-                        const next = [...editDraft.prompts];
-                        [next[from], next[to]] = [next[to], next[from]];
-                        setEditDraft({ ...editDraft, prompts: next });
+                        setEditDraft({
+                          ...editDraft,
+                          prompts: moveArrayItem(editDraft.prompts, from, to),
+                        });
                       }}
                     />
                   )}
@@ -327,8 +342,12 @@ export function PromptManager({
                       <strong>{prompt.title}</strong>
                       <span className="prompt-kind-badge">{getPromptContainerMeta(prompt)}</span>
                     </div>
-                    <span className="prompt-preview">
-                      {getPromptContainerPreview(prompt, 140)}
+                    <span className="prompt-preview-lines">
+                      {getPromptContainerPreviewLines(prompt).map((line) => (
+                        <span className="prompt-preview-line" key={line}>
+                          {line}
+                        </span>
+                      ))}
                     </span>
                   </div>
                   <div className="prompt-actions">
@@ -377,7 +396,7 @@ interface GroupFieldsProps {
   intervalMs: number;
   onIntervalChange: (intervalMs: number) => void;
   onPromptChange: (index: number, value: string) => void;
-  onAddPrompt: () => void;
+  onInsertPrompt: (index: number) => void;
   onRemovePrompt: (index: number) => void;
   onMovePrompt: (from: number, to: number) => void;
 }
@@ -387,10 +406,26 @@ function GroupFields({
   intervalMs,
   onIntervalChange,
   onPromptChange,
-  onAddPrompt,
+  onInsertPrompt,
   onRemovePrompt,
   onMovePrompt,
 }: GroupFieldsProps) {
+  const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
+
+  const handleDragStart = (event: DragEvent<HTMLButtonElement>, index: number) => {
+    setDraggingIndex(index);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", String(index));
+  };
+
+  const handleDrop = (event: DragEvent<HTMLDivElement>, targetIndex: number) => {
+    event.preventDefault();
+    const sourceIndex = draggingIndex;
+    setDraggingIndex(null);
+    if (sourceIndex === null || sourceIndex === targetIndex) return;
+    onMovePrompt(sourceIndex, targetIndex);
+  };
+
   return (
     <div className="group-editor">
       <label className="interval-field">
@@ -408,16 +443,50 @@ function GroupFields({
       </label>
       <div className="group-prompt-list">
         {prompts.map((body, index) => (
-          <div className="group-prompt-row" key={index}>
-            <label>Prompt {index + 1}</label>
+          <div
+            className={`group-prompt-row ${draggingIndex === index ? "is-dragging" : ""}`}
+            key={index}
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => handleDrop(event, index)}
+          >
+            <button
+              aria-label={`Drag Prompt ${index + 1}`}
+              className="group-prompt-handle"
+              draggable
+              type="button"
+              onDragStart={(event) => handleDragStart(event, index)}
+              onDragEnd={() => setDraggingIndex(null)}
+            >
+              <span aria-hidden="true">⋮⋮</span>
+              Prompt {index + 1}
+            </button>
             <textarea
+              aria-label={`Prompt ${index + 1} body`}
               className="field prompt-body-field"
               value={body}
               onChange={(e) => onPromptChange(index, e.target.value)}
             />
             <div className="group-prompt-actions">
               <button
-                className="button icon-button"
+                aria-label={`Insert prompt after Prompt ${index + 1}`}
+                className="button icon-button group-icon-button"
+                type="button"
+                onClick={() => onInsertPrompt(index)}
+              >
+                +
+              </button>
+              <button
+                aria-label={`Remove Prompt ${index + 1}`}
+                className="button icon-button group-icon-button"
+                type="button"
+                disabled={prompts.length === 1}
+                onClick={() => onRemovePrompt(index)}
+              >
+                -
+              </button>
+              <button
+                aria-label={`Move Prompt ${index + 1} up`}
+                className="button icon-button group-icon-button"
                 type="button"
                 disabled={index === 0}
                 onClick={() => onMovePrompt(index, index - 1)}
@@ -425,27 +494,18 @@ function GroupFields({
                 ↑
               </button>
               <button
-                className="button icon-button"
+                aria-label={`Move Prompt ${index + 1} down`}
+                className="button icon-button group-icon-button"
                 type="button"
                 disabled={index === prompts.length - 1}
                 onClick={() => onMovePrompt(index, index + 1)}
               >
                 ↓
               </button>
-              <button
-                className="button button-secondary"
-                type="button"
-                onClick={() => onRemovePrompt(index)}
-              >
-                Remove
-              </button>
             </div>
           </div>
         ))}
       </div>
-      <button className="button button-secondary" type="button" onClick={onAddPrompt}>
-        Add Prompt
-      </button>
     </div>
   );
 }
