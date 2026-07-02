@@ -35,6 +35,8 @@ const DEFAULT_SETTINGS: Settings = {
   floatingButton: { visible: true },
 };
 
+const waitForWindowHide = () => new Promise((resolve) => window.setTimeout(resolve, 120));
+
 interface InputTargetPollingControllerProps {
   settings: Settings;
   onButtonDragEnd: (
@@ -102,11 +104,15 @@ export function App({
         return;
       }
       await hidePromptPopover();
+      await waitForWindowHide();
       await pastePromptAndSubmitToLastTarget(prompt.body);
     } catch (e) {
       console.error("Failed to paste prompt:", e);
       const message = e instanceof Error ? e.message : String(e);
-      alert(message || "Failed to paste prompt. Please try again.");
+      alert(
+        message ||
+          "Autosend failed. Click into a target input field, confirm Accessibility permission, then try again."
+      );
     } finally {
       setSubmittingPromptId(null);
     }

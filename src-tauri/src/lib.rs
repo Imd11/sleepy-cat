@@ -88,15 +88,7 @@ fn paste_prompt_and_submit_to_last_target_impl(
     let Some(target) = state.get() else {
         return Err("Click into a text field first, then choose a prompt.".to_string());
     };
-    if let Some(point) = target.click_point {
-        return platform::macos::paste_prompt_and_submit_to_app_at_point(
-            body,
-            &target.app.bundle_id,
-            point.x,
-            point.y,
-        );
-    }
-    platform::macos::paste_prompt_and_submit_to_app(body, &target.app.bundle_id)
+    platform::macos::type_or_paste_prompt_and_submit_to_app(body, &target.app.bundle_id)
 }
 
 #[cfg(test)]
@@ -485,6 +477,21 @@ mod last_input_target_tests {
 
     #[test]
     fn accepts_codex_target_for_autosend() {
+        let state = LastInputTargetState::default();
+        state.set(LastInputTarget {
+            app: FrontmostApp {
+                name: "Codex".to_string(),
+                bundle_id: "com.openai.codex".to_string(),
+            },
+            observed_at_ms: 123,
+            click_point: None,
+        });
+
+        assert_eq!(last_target_bundle_id(&state).unwrap(), "com.openai.codex");
+    }
+
+    #[test]
+    fn autosend_does_not_require_click_point_for_codex() {
         let state = LastInputTargetState::default();
         state.set(LastInputTarget {
             app: FrontmostApp {

@@ -147,6 +147,8 @@ fn parse_xy(s: &str) -> Option<(f64, f64)> {
 
 // ── Paste ─────────────────────────────────────────────────────────────────────
 
+const DIRECT_TYPE_MAX_CHARS: usize = 500;
+
 pub fn paste_prompt(body: &str) -> Result<(), String> {
     copy_to_clipboard(body)?;
     Command::new("osascript")
@@ -168,7 +170,10 @@ pub fn paste_prompt_to_app(body: &str, bundle_id: &str) -> Result<(), String> {
         .output()
         .map_err(|e| e.to_string())?;
     if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+        return Err(format_autosend_error(
+            "paste",
+            String::from_utf8_lossy(&output.stderr).as_ref(),
+        ));
     }
     Ok(())
 }
@@ -182,11 +187,42 @@ pub fn paste_prompt_and_submit_to_app(body: &str, bundle_id: &str) -> Result<(),
         .output()
         .map_err(|e| e.to_string())?;
     if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+        return Err(format_autosend_error(
+            "paste-and-submit",
+            String::from_utf8_lossy(&output.stderr).as_ref(),
+        ));
     }
     Ok(())
 }
 
+pub fn type_or_paste_prompt_and_submit_to_app(body: &str, bundle_id: &str) -> Result<(), String> {
+    let mut direct_type_error = None;
+    if should_direct_type(body) {
+        let script = direct_type_and_submit_to_app_script(bundle_id, body);
+        let output = Command::new("osascript")
+            .arg("-e")
+            .arg(&script)
+            .output()
+            .map_err(|e| e.to_string())?;
+        if output.status.success() {
+            return Ok(());
+        }
+        direct_type_error = Some(format_autosend_error(
+            "direct-type",
+            String::from_utf8_lossy(&output.stderr).as_ref(),
+        ));
+    }
+
+    paste_prompt_and_submit_to_app(body, bundle_id).map_err(|paste_error| {
+        if let Some(direct_error) = direct_type_error {
+            format!("{} Fallback also failed: {}", direct_error, paste_error)
+        } else {
+            paste_error
+        }
+    })
+}
+
+#[allow(dead_code)]
 pub fn paste_prompt_and_submit_to_app_at_point(
     body: &str,
     bundle_id: &str,
@@ -201,7 +237,10 @@ pub fn paste_prompt_and_submit_to_app_at_point(
         .output()
         .map_err(|e| e.to_string())?;
     if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+        return Err(format_autosend_error(
+            "paste-and-submit-at-point",
+            String::from_utf8_lossy(&output.stderr).as_ref(),
+        ));
     }
     Ok(())
 }
@@ -226,6 +265,37 @@ tell application "System Events"
 end tell"#,
         bundle_id
     )
+}
+
+fn should_direct_type(body: &str) -> bool {
+    !body.contains('\n') && body.chars().count() <= DIRECT_TYPE_MAX_CHARS
+}
+
+fn escape_applescript_string(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn direct_type_and_submit_to_app_script(bundle_id: &str, body: &str) -> String {
+    let escaped = escape_applescript_string(body);
+    format!(
+        r#"tell application id "{}" to activate
+delay 0.15
+tell application "System Events"
+    keystroke "{}"
+    delay 0.08
+    key code 36
+end tell"#,
+        bundle_id, escaped
+    )
+}
+
+fn format_autosend_error(method: &str, stderr: &str) -> String {
+    let trimmed = stderr.trim();
+    if trimmed.is_empty() {
+        format!("Autosend failed while using {}.", method)
+    } else {
+        format!("Autosend failed while using {}: {}", method, trimmed)
+    }
 }
 
 fn paste_and_submit_to_app_at_point_script(bundle_id: &str, x: f64, y: f64) -> String {
@@ -565,6 +635,74 @@ mod tests {
 
         assert!(!script.contains("keystroke \"{body}\""));
         assert!(!script.contains("Test body"));
+    }
+
+    #[test]
+    fn direct_type_and_submit_script_activates_target_before_typing() {
+        let script = direct_type_and_submit_to_app_script("com.openai.codex", "讨论方案");
+
+        assert!(script.contains("tell application id \"com.openai.codex\" to activate"));
+        assert!(script.contains("tell application \"System Events\""));
+        assert!(script.contains("keystroke \"讨论方案\""));
+        assert!(script.contains("key code 36"));
+    }
+
+    #[test]
+    fn direct_type_and_submit_script_escapes_quotes_and_backslashes() {
+        let script = direct_type_and_submit_to_app_script("com.test.App", "say \"hi\" \\ ok");
+
+        assert!(script.contains("keystroke \"say \\\"hi\\\" \\\\ ok\""));
+    }
+
+    #[test]
+    fn direct_type_strategy_prefers_paste_for_multiline_text() {
+        assert!(!should_direct_type("line 1\nline 2"));
+    }
+
+    #[test]
+    fn direct_type_strategy_prefers_paste_for_long_text() {
+        let long = "x".repeat(700);
+
+        assert!(!should_direct_type(&long));
+    }
+
+    #[test]
+    fn direct_type_strategy_allows_short_single_line_text() {
+        assert!(should_direct_type(
+            "使用 brainstorming skill，先和我讨论方案。"
+        ));
+    }
+
+    #[test]
+    fn autosend_direct_script_does_not_click_coordinates() {
+        let script = direct_type_and_submit_to_app_script("com.tencent.xinWeChat", "讨论方案");
+
+        assert!(!script.contains("click at"));
+        assert!(script.contains("keystroke \"讨论方案\""));
+        assert!(script.contains("key code 36"));
+    }
+
+    #[test]
+    fn paste_and_submit_script_remains_available_as_fallback() {
+        let script = paste_and_submit_to_app_script("com.tencent.xinWeChat");
+
+        assert!(script.contains("keystroke \"v\" using command down"));
+        assert!(script.contains("key code 36"));
+    }
+
+    #[test]
+    fn autosend_error_includes_stderr_when_osascript_fails() {
+        let err = format_autosend_error("direct-type", "System Events got an error");
+
+        assert!(err.contains("direct-type"));
+        assert!(err.contains("System Events got an error"));
+    }
+
+    #[test]
+    fn autosend_error_handles_empty_stderr() {
+        let err = format_autosend_error("direct-type", "");
+
+        assert_eq!(err, "Autosend failed while using direct-type.");
     }
 
     #[test]
