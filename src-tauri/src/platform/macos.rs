@@ -420,6 +420,7 @@ end tell"#,
     )
 }
 
+#[cfg(test)]
 fn foreground_paste_and_submit_script() -> &'static str {
     r#"tell application "System Events"
     keystroke "v" using command down
