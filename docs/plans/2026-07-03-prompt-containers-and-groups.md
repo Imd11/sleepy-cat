@@ -10,6 +10,18 @@
 
 ---
 
+## Review Addendum: Hidden Risk Controls
+
+This plan is executable only if these gates are kept in scope:
+
+- **Clean-source gate:** Verify the source files required by autosend are committed with the group feature. The group command in `src-tauri/src/lib.rs` depends on macOS support in `src-tauri/src/platform/macos.rs`, platform exports in `src-tauri/src/platform/mod.rs`, overlay session capture in `public/overlay.html`, and window stability in `src-tauri/src/windows.rs`.
+- **No partial-push gate:** Before pushing, run `git status --short` and specifically confirm all source/test files touched by the current runtime are either committed or intentionally unrelated build artifacts. A narrow status check over only prompt group files is not enough.
+- **Clean-verification gate:** Run `npm test -- --run`, `cd src-tauri && cargo test`, and `npm run tauri build` after all source support files are committed, not only before the final commit.
+- **Signing gate:** After packaging, run `npm run sign:macos` so the built app has the stable bundle identifier `local.promptpicker.dev`; this reduces macOS Accessibility permission churn.
+- **Runtime boundary gate:** Keep group execution backend-owned. The frontend must not loop over the single-prompt command because `PromptPickSessionState.take()` consumes the target after the first send.
+
+These controls are not extra product features. They are required to prevent a locally-working but remotely-incomplete build.
+
 ### Task 1: Add Prompt Container Types
 
 **Files:**
@@ -330,7 +342,7 @@ Expected: macOS app and DMG are produced in `src-tauri/target/release/bundle/`.
 
 Run: `git status --short && git diff --stat`
 
-Expected: only prompt group feature files and plan are changed.
+Expected: all runtime source/test files needed by the prompt group and autosend path are committed or staged for commit. Local build outputs such as `dist/`, `node_modules/`, and `src-tauri/target/` may be dirty after packaging but must not be confused with uncommitted source dependencies.
 
 **Step 5: Push to GitHub main**
 
