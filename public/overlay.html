@@ -40,67 +40,255 @@ body {
   border-radius: 20px;
 }
 
-.calico-sprite {
+.calico-rig {
   width: 126px;
   height: 126px;
-  object-fit: contain;
+  position: relative;
   pointer-events: none;
-  transform-origin: 50% 72%;
-  transition: transform 140ms ease;
+  transform-origin: 50% 76%;
+  transition: transform 160ms ease;
 }
 
-.calico-entry:hover .calico-sprite {
+.calico-svg {
+  width: 126px;
+  height: 126px;
+  overflow: visible;
+}
+
+.calico-shadow {
+  fill: rgba(15, 23, 42, 0.1);
+  transform-origin: 66px 103px;
+}
+
+.calico-body,
+.calico-head,
+.calico-tail,
+.calico-front-paw,
+.calico-back-paw,
+.calico-throw-paw,
+.calico-projectile {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.calico-body,
+.calico-head,
+.calico-front-paw,
+.calico-back-paw,
+.calico-throw-paw {
+  fill: #fff3df;
+  stroke: #8a4b2d;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.calico-tail {
+  fill: #f2a34b;
+  stroke: #8a4b2d;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transform-origin: 22% 72%;
+}
+
+.calico-tail-tip,
+.calico-body-patch-left,
+.calico-body-patch-right,
+.calico-head-patch-left,
+.calico-head-patch-right {
+  fill: #e99a48;
+  stroke: none;
+}
+
+.calico-eye-left,
+.calico-eye-right {
+  fill: #5a2d22;
+  stroke: none;
+}
+
+.calico-mouth,
+.calico-whisker-left,
+.calico-whisker-right {
+  fill: none;
+  stroke: #5a2d22;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.calico-cheek-left,
+.calico-cheek-right {
+  fill: #f6b6a5;
+  opacity: 0.75;
+  stroke: none;
+}
+
+.calico-projectile {
+  opacity: 0;
+  fill: #f8fafc;
+  stroke: #334155;
+  stroke-width: 2;
+  transform-origin: 0 0;
+  filter: drop-shadow(0 4px 8px rgba(15, 23, 42, 0.14));
+}
+
+.calico-projectile-fold {
+  fill: #dbeafe;
+  stroke: none;
+}
+
+.calico-entry:hover .calico-rig {
   transform: translateY(-2px) scale(1.03);
 }
 
-.calico-entry.is-pressing .calico-sprite {
+.calico-entry.is-pressing .calico-rig {
   transform: translateY(1px) scale(0.98);
 }
 
-.calico-entry.is-dragging .calico-sprite {
+.calico-entry[data-motion-state="dragging"] .calico-rig,
+.calico-entry.is-dragging .calico-rig {
   transform: rotate(-2deg) scale(1.03);
 }
 
-.calico-plane {
-  position: absolute;
-  left: 66px;
-  top: 50px;
-  width: 30px;
-  height: 24px;
-  opacity: 0;
-  pointer-events: none;
-  transform: translate(-50%, -50%) rotate(-18deg) scale(0.72);
-  transform-origin: 50% 50%;
-  filter: drop-shadow(0 4px 8px rgba(15, 23, 42, 0.16));
+.calico-entry[data-motion-state="idle"] .calico-rig {
+  animation: calico-idle-breath 1800ms ease-in-out infinite alternate;
 }
 
-.calico-entry[data-sprite-state="throwReady"] .calico-sprite {
-  transform: translateY(-1px) rotate(-4deg) scale(1.02);
+.calico-entry[data-motion-state="idle"] .calico-tail {
+  animation: calico-idle-tail 2200ms ease-in-out infinite alternate;
 }
 
-.calico-entry[data-sprite-state="throwReady"] .calico-plane {
+.calico-entry[data-motion-state="ready"] .calico-rig {
+  animation: calico-ready-breath 1100ms ease-in-out infinite alternate;
+}
+
+.calico-entry[data-motion-state="ready"] .calico-body {
+  transform: translate(-3px, 5px) rotate(-8deg) scaleX(1.03);
+}
+
+.calico-entry[data-motion-state="ready"] .calico-head {
+  transform: translate(-4px, 1px) rotate(-6deg);
+}
+
+.calico-entry[data-motion-state="ready"] .calico-tail {
+  transform: translate(2px, -4px) rotate(18deg);
+}
+
+.calico-entry[data-motion-state="ready"] .calico-support-paw {
+  transform: translate(-2px, 3px) rotate(-5deg);
+}
+
+.calico-entry[data-motion-state="ready"] .calico-throw-paw {
+  transform: translate(10px, -24px) rotate(-44deg);
+}
+
+.calico-entry[data-motion-state="ready"] .calico-projectile {
   opacity: 1;
-  animation: paper-ready-bob 900ms ease-in-out infinite alternate;
+  transform: translate(91px, 54px) rotate(-28deg) scale(0.9);
 }
 
-.calico-entry[data-sprite-state="throwSend"] .calico-sprite {
-  transform: translateX(-2px) rotate(-8deg) scale(1.04);
+.calico-entry[data-motion-state="throwing"] .calico-rig {
+  animation: calico-throw-body 620ms cubic-bezier(0.2, 0.85, 0.22, 1) both;
 }
 
-.calico-entry[data-sprite-state="throwSend"] .calico-plane {
-  opacity: 1;
-  animation: paper-local-throw 680ms cubic-bezier(0.2, 0.85, 0.25, 1) forwards;
+.calico-entry[data-motion-state="throwing"] .calico-body {
+  animation: calico-throw-body-part 620ms cubic-bezier(0.2, 0.85, 0.22, 1) both;
 }
 
-@keyframes paper-ready-bob {
-  from { transform: translate(-50%, -50%) rotate(-18deg) scale(0.72); }
-  to { transform: translate(-48%, -55%) rotate(-12deg) scale(0.76); }
+.calico-entry[data-motion-state="throwing"] .calico-head {
+  animation: calico-throw-head 620ms cubic-bezier(0.2, 0.85, 0.22, 1) both;
 }
 
-@keyframes paper-local-throw {
-  0% { opacity: 1; transform: translate(-50%, -50%) rotate(-18deg) scale(0.72); }
-  45% { opacity: 1; transform: translate(-86px, -86px) rotate(-32deg) scale(0.82); }
-  100% { opacity: 0; transform: translate(-124px, -118px) rotate(-46deg) scale(0.7); }
+.calico-entry[data-motion-state="throwing"] .calico-tail {
+  animation: calico-throw-tail 620ms cubic-bezier(0.2, 0.85, 0.22, 1) both;
+}
+
+.calico-entry[data-motion-state="throwing"] .calico-throw-paw {
+  animation: calico-throw-paw 620ms cubic-bezier(0.16, 0.9, 0.22, 1) both;
+}
+
+.calico-entry[data-motion-state="throwing"] .calico-projectile {
+  animation: calico-held-projectile-release 620ms cubic-bezier(0.16, 0.9, 0.22, 1) both;
+}
+
+.calico-entry[data-motion-state="recovering"] .calico-rig {
+  animation: calico-recover 260ms cubic-bezier(0.2, 0.9, 0.25, 1) both;
+}
+
+@keyframes calico-idle-breath {
+  from { transform: translateY(0) scale(1); }
+  to { transform: translateY(-1px) scale(1.008); }
+}
+
+@keyframes calico-idle-tail {
+  from { transform: rotate(-2deg); }
+  to { transform: rotate(5deg); }
+}
+
+@keyframes calico-ready-breath {
+  from { transform: translateY(0) rotate(-1deg); }
+  to { transform: translateY(-2px) rotate(-2.5deg); }
+}
+
+@keyframes calico-throw-body {
+  0% { transform: translateY(0) rotate(-2deg); }
+  22% { transform: translate(-4px, 3px) rotate(-8deg) scale(1.02); }
+  45% { transform: translate(5px, -2px) rotate(7deg) scale(1.03); }
+  100% { transform: translateY(0) rotate(0deg) scale(1); }
+}
+
+@keyframes calico-throw-body-part {
+  0% { transform: translate(-3px, 5px) rotate(-8deg) scaleX(1.03); }
+  35% { transform: translate(-5px, 6px) rotate(-12deg) scaleX(1.04); }
+  58% { transform: translate(4px, 2px) rotate(8deg) scaleX(1.01); }
+  100% { transform: translate(0, 0) rotate(0deg) scaleX(1); }
+}
+
+@keyframes calico-throw-head {
+  0% { transform: translate(-4px, 1px) rotate(-6deg); }
+  35% { transform: translate(-5px, 1px) rotate(-10deg); }
+  58% { transform: translate(4px, -1px) rotate(7deg); }
+  100% { transform: translate(0, 0) rotate(0deg); }
+}
+
+@keyframes calico-throw-tail {
+  0% { transform: translate(2px, -4px) rotate(18deg); }
+  35% { transform: translate(4px, -5px) rotate(28deg); }
+  58% { transform: translate(-2px, -1px) rotate(-16deg); }
+  100% { transform: translate(0, 0) rotate(0deg); }
+}
+
+@keyframes calico-throw-paw {
+  0% { transform: translate(10px, -24px) rotate(-44deg); }
+  30% { transform: translate(5px, -29px) rotate(-66deg); }
+  48% { transform: translate(19px, -12px) rotate(34deg); }
+  100% { transform: translate(0, 0) rotate(0deg); }
+}
+
+@keyframes calico-held-projectile-release {
+  0% {
+    opacity: 1;
+    transform: translate(91px, 54px) rotate(-28deg) scale(0.9);
+  }
+  34% {
+    opacity: 1;
+    transform: translate(86px, 47px) rotate(-38deg) scale(0.92);
+  }
+  46% {
+    opacity: 0;
+    transform: translate(102px, 45px) rotate(-18deg) scale(0.86);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(102px, 45px) rotate(-18deg) scale(0.86);
+  }
+}
+
+@keyframes calico-recover {
+  0% { transform: translate(3px, -1px) rotate(4deg) scale(1.01); }
+  65% { transform: translate(-1px, 1px) rotate(-2deg) scale(0.995); }
+  100% { transform: translate(0, 0) rotate(0deg) scale(1); }
 }
 
 .calico-status-bubble {
@@ -151,23 +339,64 @@ body {
 </style></head>
 <body>
 <div id="statusBubble" class="calico-status-bubble" aria-live="polite"></div>
-<button id="btn" class="calico-entry" title="Open Prompt Picker" aria-label="Open Prompt Picker">
-  <img id="calicoSprite" class="calico-sprite" src="/calico/calico-idle.apng" alt="" draggable="false" />
-  <img id="paperPlane" class="calico-plane" src="/calico/paper-plane.svg" alt="" draggable="false" />
+<button
+  id="btn"
+  class="calico-entry"
+  title="Open Prompt Picker"
+  aria-label="Open Prompt Picker"
+  data-motion-state="idle"
+>
+  <div class="calico-rig" aria-hidden="true">
+    <svg class="calico-svg" viewBox="0 0 132 132" role="img">
+      <g class="calico-shadow">
+        <ellipse cx="66" cy="103" rx="42" ry="10" />
+      </g>
+      <g class="calico-tail">
+        <path d="M93 79 C116 67 119 91 100 95 C91 97 88 88 93 79Z" />
+        <path class="calico-tail-tip" d="M104 79 C116 75 116 91 103 91 C98 91 99 82 104 79Z" />
+      </g>
+      <g class="calico-body">
+        <ellipse cx="61" cy="82" rx="42" ry="26" />
+        <path class="calico-body-patch-left" d="M32 70 C39 50 61 49 66 70 C56 76 44 77 32 70Z" />
+        <path class="calico-body-patch-right" d="M73 59 C88 54 103 62 102 79 C91 78 80 72 73 59Z" />
+      </g>
+      <g class="calico-back-paw">
+        <ellipse cx="83" cy="101" rx="11" ry="7" />
+      </g>
+      <g class="calico-front-paw calico-support-paw">
+        <ellipse cx="42" cy="99" rx="11" ry="7" />
+      </g>
+      <g class="calico-head">
+        <path class="calico-ear-left" d="M31 48 L40 22 L54 49Z" />
+        <path class="calico-ear-right" d="M79 48 L95 22 L101 51Z" />
+        <ellipse cx="65" cy="58" rx="38" ry="30" />
+        <path class="calico-head-patch-left" d="M34 45 C40 27 58 30 62 51 C51 53 42 51 34 45Z" />
+        <path class="calico-head-patch-right" d="M70 48 C77 27 94 27 99 49 C89 54 79 54 70 48Z" />
+        <circle class="calico-eye-left" cx="51" cy="61" r="5" />
+        <circle class="calico-eye-right" cx="78" cy="61" r="5" />
+        <ellipse class="calico-cheek-left" cx="39" cy="68" rx="6" ry="3" />
+        <ellipse class="calico-cheek-right" cx="92" cy="68" rx="6" ry="3" />
+        <path class="calico-mouth" d="M62 68 Q66 73 70 68" />
+        <path class="calico-whisker-left" d="M39 66 L25 63 M39 70 L25 72" />
+        <path class="calico-whisker-right" d="M91 66 L106 63 M91 70 L106 72" />
+      </g>
+      <g class="calico-throw-paw">
+        <ellipse cx="82" cy="86" rx="10" ry="15" />
+      </g>
+      <g class="calico-projectile">
+        <path class="calico-projectile-body" d="M0 -9 L16 -2 L0 8 L4 0Z" />
+        <path class="calico-projectile-fold" d="M4 0 L16 -2 L5 4Z" />
+      </g>
+    </svg>
+  </div>
 </button>
 <script type="module">
 const btn = document.getElementById('btn');
-const sprite = document.getElementById('calicoSprite');
 const statusBubble = document.getElementById('statusBubble');
 const tauri = window.__TAURI__;
-const sprites = {
-  idle: '/calico/calico-idle.apng',
-  poke: '/calico/calico-react-poke.apng',
-  drag: '/calico/calico-react-drag.apng',
-  thinking: '/calico/calico-thinking.apng',
-  throwReady: '/calico/calico-idle.apng',
-  throwSend: '/calico/calico-react-poke.apng'
-};
+const THROW_RELEASE_MS = 170;
+const THROW_RECOVER_MS = 760;
+const READY_TIMEOUT_MS = 30000;
 let start = null;
 let dragging = false;
 let lastMove = null;
@@ -175,19 +404,28 @@ let animationFrame = 0;
 let contextMenuOpened = false;
 let pointerSequence = 0;
 let dragStartedEmitted = false;
-let spriteResetTimer = 0;
+let motionResetTimer = 0;
+let throwReleaseTimer = 0;
+let throwRecoverTimer = 0;
 let statusTimer = 0;
 
-function setSprite(state, resetMs = 0) {
-  if (!sprite || !sprites[state]) return;
-  window.clearTimeout(spriteResetTimer);
-  btn.dataset.spriteState = state;
-  if (!sprite.src.endsWith(sprites[state])) {
-    sprite.src = sprites[state];
-  }
+function clearMotionTimers() {
+  window.clearTimeout(motionResetTimer);
+  window.clearTimeout(throwReleaseTimer);
+  window.clearTimeout(throwRecoverTimer);
+}
+
+function setMotionState(state, resetMs = 0) {
+  window.clearTimeout(motionResetTimer);
+  btn.dataset.motionState = state;
   if (resetMs > 0) {
-    spriteResetTimer = window.setTimeout(() => setSprite('idle'), resetMs);
+    motionResetTimer = window.setTimeout(resetCalicoMotion, resetMs);
   }
+}
+
+function resetCalicoMotion() {
+  clearMotionTimers();
+  btn.dataset.motionState = 'idle';
 }
 
 function distance(a, b) {
@@ -243,6 +481,15 @@ function listenForAutosendStatus() {
   });
 }
 
+function listenForPromptPopoverDismissed() {
+  if (!tauri?.event?.listen) return;
+  tauri.event.listen('prompt-popover-dismissed', () => {
+    resetCalicoMotion();
+  }).catch((error) => {
+    console.error('Tauri event listen failed: prompt-popover-dismissed', error);
+  });
+}
+
 async function openButtonControls(event) {
   event.preventDefault();
   contextMenuOpened = true;
@@ -250,7 +497,7 @@ async function openButtonControls(event) {
   dragging = false;
   lastMove = null;
   btn.classList.remove('is-pressing', 'is-dragging');
-  setSprite('idle');
+  resetCalicoMotion();
   await invoke('show_prompt_button_controls_from_button');
 }
 
@@ -285,7 +532,6 @@ btn.addEventListener('pointerdown', (event) => {
   contextMenuOpened = false;
   dragStartedEmitted = false;
   btn.classList.add('is-pressing');
-  setSprite('poke', 1200);
   try {
     btn.setPointerCapture(event.pointerId);
   } catch {}
@@ -315,7 +561,9 @@ btn.addEventListener('pointermove', (event) => {
   dragging = true;
   btn.classList.remove('is-pressing');
   btn.classList.add('is-dragging');
-  setSprite('drag');
+  if (btn.dataset.motionState !== 'dragging') {
+    setMotionState('dragging');
+  }
   lastMove = current;
   if (!animationFrame) {
     animationFrame = requestAnimationFrame(flushMove);
@@ -329,7 +577,7 @@ btn.addEventListener('pointerup', async (event) => {
     dragging = false;
     lastMove = null;
     btn.classList.remove('is-pressing', 'is-dragging');
-    setSprite('idle');
+    resetCalicoMotion();
     return;
   }
   if (!start) return;
@@ -347,7 +595,7 @@ btn.addEventListener('pointerup', async (event) => {
       await emit('prompt-button-drag-ended', position);
     }
   } else {
-    setSprite('throwReady', 30000);
+    setMotionState('ready', READY_TIMEOUT_MS);
     await invoke('begin_prompt_pick_session');
     await invoke('show_prompt_popover_from_button');
   }
@@ -357,7 +605,7 @@ btn.addEventListener('pointerup', async (event) => {
   dragStartedEmitted = false;
   btn.classList.remove('is-pressing', 'is-dragging');
   if (wasDragging) {
-    setSprite('idle');
+    resetCalicoMotion();
   }
 });
 
@@ -366,22 +614,29 @@ btn.addEventListener('contextmenu', async (event) => {
 });
 
 listenForAutosendStatus();
+listenForPromptPopoverDismissed();
 
-function playPaperPlaneThrow() {
-  setSprite('throwSend', 900);
-  invoke('show_paper_plane_flight_from_button').catch(() => {});
+function playCalicoThrow() {
+  clearMotionTimers();
+  setMotionState('throwing');
+  throwReleaseTimer = window.setTimeout(() => {
+    invoke('show_paper_plane_flight_from_button').catch(() => {});
+  }, THROW_RELEASE_MS);
+  throwRecoverTimer = window.setTimeout(() => {
+    setMotionState('recovering', 280);
+  }, THROW_RECOVER_MS);
 }
 
-function listenForPaperPlaneThrow() {
+function listenForCalicoThrow() {
   if (!tauri?.event?.listen) return;
   tauri.event.listen('prompt-throw-send', () => {
-    playPaperPlaneThrow();
+    playCalicoThrow();
   }).catch((error) => {
     console.error('Tauri event listen failed: prompt-throw-send', error);
   });
 }
 
-listenForPaperPlaneThrow();
+listenForCalicoThrow();
 
 statusBubble?.addEventListener('click', async () => {
   if (statusBubble.dataset.action === 'request_accessibility_permission') {

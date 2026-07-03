@@ -30,9 +30,13 @@ describe("overlay button html", () => {
     const html = readFileSync("public/overlay.html", "utf8");
 
     expect(html).toContain("calico-entry");
-    expect(html).toContain("calico-idle.apng");
-    expect(html).toContain("calico-react-poke.apng");
-    expect(html).toContain("calico-react-drag.apng");
+    expect(html).toContain("calico-rig");
+    expect(html).toContain("calico-body");
+    expect(html).toContain("calico-head");
+    expect(html).toContain("calico-tail");
+    expect(html).toContain("calico-throw-paw");
+    expect(html).toContain("calico-projectile");
+    expect(html).toContain('data-motion-state="idle"');
     expect(html).toContain('aria-label="Open Prompt Picker"');
     expect(html).not.toContain("<span>Prompts</span>");
   });
@@ -86,13 +90,14 @@ describe("overlay button html", () => {
     expect(html).not.toContain("payload.kind || 'copied'");
   });
 
-  it("switches Calico into a paper-plane ready state before opening prompts", () => {
+  it("switches Calico into a real throw-ready character pose before opening prompts", () => {
     const html = readFileSync("public/overlay.html", "utf8");
 
-    expect(html).toContain("throwReady");
-    expect(html).toContain("calico-plane");
-    expect(html).toContain("setSprite('throwReady'");
-    expect(html.indexOf("setSprite('throwReady'")).toBeLessThan(
+    expect(html).toContain("setMotionState('ready'");
+    expect(html).toContain('[data-motion-state="ready"]');
+    expect(html).toContain("calico-ready-breath");
+    expect(html).not.toContain("throwReady: '/calico/calico-idle.apng'");
+    expect(html.indexOf("setMotionState('ready'")).toBeLessThan(
       html.indexOf("begin_prompt_pick_session")
     );
   });
@@ -101,9 +106,19 @@ describe("overlay button html", () => {
     const html = readFileSync("public/overlay.html", "utf8");
 
     expect(html).toContain("prompt-throw-send");
-    expect(html).toContain("playPaperPlaneThrow");
+    expect(html).toContain("playCalicoThrow");
     expect(html).toContain("show_paper_plane_flight_from_button");
-    expect(html).toContain("setSprite('throwSend'");
+    expect(html).toContain("setMotionState('throwing'");
+    expect(html).toContain("setMotionState('recovering'");
+    expect(html).toContain("THROW_RELEASE_MS");
+  });
+
+  it("resets Calico from ready when the popover is dismissed without sending", () => {
+    const html = readFileSync("public/overlay.html", "utf8");
+
+    expect(html).toContain("prompt-popover-dismissed");
+    expect(html).toContain("resetCalicoMotion");
+    expect(html).toContain("motionResetTimer");
   });
 
   it("grants only minimal IPC access to the paper-plane flight window", () => {

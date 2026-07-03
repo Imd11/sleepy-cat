@@ -65,6 +65,14 @@ async function emitPromptThrowSend(kind: "single" | "group") {
   }
 }
 
+async function emitPromptPopoverDismissed() {
+  try {
+    await emit("prompt-popover-dismissed");
+  } catch (error) {
+    console.warn("Failed to emit prompt popover dismissal:", error);
+  }
+}
+
 function statusForAutosendOutcome(outcome: AutosendOutcome): {
   kind: AutosendStatusKind;
   message: string;
@@ -349,6 +357,7 @@ export function App({
             onClick={async () => {
               await openMainWindow();
               await hidePromptPopover();
+              await emitPromptPopoverDismissed();
             }}
           >
             Manage Prompts...
@@ -360,6 +369,7 @@ export function App({
               setActiveSettings(await settingsStoreRef.current.get());
               await hidePromptButton();
               await hidePromptPopover();
+              await emitPromptPopoverDismissed();
             }}
           >
             Hide Calico
@@ -369,6 +379,7 @@ export function App({
             onClick={async () => {
               await openAccessibilitySettings();
               await hidePromptPopover();
+              await emitPromptPopoverDismissed();
             }}
           >
             Open Accessibility Settings

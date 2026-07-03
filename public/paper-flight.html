@@ -13,7 +13,7 @@
       pointer-events: none;
     }
 
-    .paper {
+    .projectile {
       position: absolute;
       left: var(--start-x);
       top: var(--start-y);
@@ -22,10 +22,10 @@
       opacity: 0;
       filter: drop-shadow(0 10px 18px rgba(15, 23, 42, 0.22));
       transform: translate(-50%, -50%) rotate(-18deg) scale(0.8);
-      animation: fly 720ms cubic-bezier(0.18, 0.82, 0.22, 1) forwards;
+      animation: projectile-fly 720ms cubic-bezier(0.18, 0.82, 0.22, 1) forwards;
     }
 
-    @keyframes fly {
+    @keyframes projectile-fly {
       0% {
         opacity: 0;
         transform: translate(-50%, -50%) rotate(-18deg) scale(0.74);
@@ -60,7 +60,7 @@
   </style>
 </head>
 <body>
-  <img class="paper" src="/calico/paper-plane.svg" alt="" />
+  <img class="projectile" src="/calico/paper-plane.svg" alt="" />
   <script type="module">
     const params = new URLSearchParams(window.location.search);
     const startX = Number(params.get("startX") || 0);

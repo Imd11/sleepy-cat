@@ -67,8 +67,8 @@ fn paper_flight_points(
     monitor_x: f64,
     monitor_y: f64,
 ) -> (f64, f64, f64, f64) {
-    let start_x = button_x + 72.0 - monitor_x;
-    let start_y = button_y + 56.0 - monitor_y;
+    let start_x = button_x + 102.0 - monitor_x;
+    let start_y = button_y + 45.0 - monitor_y;
     let end_x = (start_x - 460.0).clamp(48.0, monitor_width - 48.0);
     let end_y = (start_y - 120.0).clamp(48.0, monitor_height - 48.0);
     (start_x, start_y, end_x, end_y)
@@ -239,8 +239,9 @@ pub fn show_paper_plane_flight_from_button(app: tauri::AppHandle) -> Result<(), 
     let button_scale = button.scale_factor().unwrap_or(1.0);
     let button_x = position.x as f64 / button_scale;
     let button_y = position.y as f64 / button_scale;
-    let (start_x, start_y, end_x, end_y) =
-        paper_flight_points(monitor_w, monitor_h, button_x, button_y, monitor_x, monitor_y);
+    let (start_x, start_y, end_x, end_y) = paper_flight_points(
+        monitor_w, monitor_h, button_x, button_y, monitor_x, monitor_y,
+    );
 
     if let Some(window) = app.get_webview_window(PAPER_FLIGHT_WINDOW_LABEL) {
         let _ = window.close();
@@ -250,23 +251,20 @@ pub fn show_paper_plane_flight_from_button(app: tauri::AppHandle) -> Result<(), 
         "paper-flight.html?startX={:.0}&startY={:.0}&endX={:.0}&endY={:.0}",
         start_x, start_y, end_x, end_y
     );
-    let window = WebviewWindowBuilder::new(
-        &app,
-        PAPER_FLIGHT_WINDOW_LABEL,
-        WebviewUrl::App(url.into()),
-    )
-    .title("Paper Plane")
-    .inner_size(monitor_w, monitor_h)
-    .resizable(false)
-    .decorations(false)
-    .always_on_top(true)
-    .skip_taskbar(true)
-    .visible(false)
-    .focused(false)
-    .focusable(false)
-    .position(monitor_x, monitor_y)
-    .build()
-    .map_err(|e| e.to_string())?;
+    let window =
+        WebviewWindowBuilder::new(&app, PAPER_FLIGHT_WINDOW_LABEL, WebviewUrl::App(url.into()))
+            .title("Paper Plane")
+            .inner_size(monitor_w, monitor_h)
+            .resizable(false)
+            .decorations(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .visible(false)
+            .focused(false)
+            .focusable(false)
+            .position(monitor_x, monitor_y)
+            .build()
+            .map_err(|e| e.to_string())?;
 
     crate::macos_panels::configure_transparent_webview_window(&window)?;
     crate::macos_panels::configure_non_activating_panel(&window)?;
@@ -488,18 +486,15 @@ mod tests {
 
     #[test]
     fn paper_flight_points_move_left_and_up_when_space_allows() {
-        let (sx, sy, ex, ey) =
-            paper_flight_points(1440.0, 900.0, 1000.0, 600.0, 0.0, 0.0);
-        assert_eq!(sx, 1072.0);
-        assert_eq!(sy, 656.0);
+        let (sx, sy, ex, ey) = paper_flight_points(1440.0, 900.0, 1000.0, 600.0, 0.0, 0.0);
+        assert_eq!((sx, sy), (1102.0, 645.0));
         assert!(ex < sx);
         assert!(ey < sy);
     }
 
     #[test]
     fn paper_flight_points_stay_inside_monitor_bounds() {
-        let (_sx, _sy, ex, ey) =
-            paper_flight_points(500.0, 320.0, 40.0, 30.0, 0.0, 0.0);
+        let (_sx, _sy, ex, ey) = paper_flight_points(500.0, 320.0, 40.0, 30.0, 0.0, 0.0);
         assert!((48.0..=452.0).contains(&ex));
         assert!((48.0..=272.0).contains(&ey));
     }

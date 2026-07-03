@@ -823,6 +823,34 @@ describe("app", () => {
     expect(allCalls).not.toContain("open_main_window");
   });
 
+  it("emits prompt-popover-dismissed when hiding Calico from button controls", async () => {
+    currentWindowLabel = "prompt-popover";
+    window.history.pushState({}, "", "/?mode=button-controls");
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockImplementation(async (path: string) => {
+      if (path.includes("prompts")) return JSON.stringify({ version: 1, prompts: mockPrompts });
+      if (path.includes("settings")) {
+        return JSON.stringify({
+          version: 1,
+          blacklistedApps: [],
+          overlayPlacement: { buttonOffset: null },
+          floatingButton: { visible: true },
+        });
+      }
+      throw new Error("unexpected path: " + path);
+    });
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Hide Calico" }));
+
+    await waitFor(() => {
+      expect(emitMock).toHaveBeenCalledWith("prompt-popover-dismissed");
+    });
+  });
+
   it("manage prompts from button controls calls open_main_window", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockResolvedValue(undefined);
@@ -846,6 +874,34 @@ describe("app", () => {
     });
   });
 
+  it("emits prompt-popover-dismissed when button controls open the manager without sending", async () => {
+    currentWindowLabel = "prompt-popover";
+    window.history.pushState({}, "", "/?mode=button-controls");
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockImplementation(async (path: string) => {
+      if (path.includes("prompts")) return JSON.stringify({ version: 1, prompts: mockPrompts });
+      if (path.includes("settings")) {
+        return JSON.stringify({
+          version: 1,
+          blacklistedApps: [],
+          overlayPlacement: { buttonOffset: null },
+          floatingButton: { visible: true },
+        });
+      }
+      throw new Error("unexpected path: " + path);
+    });
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Manage Prompts..." }));
+
+    await waitFor(() => {
+      expect(emitMock).toHaveBeenCalledWith("prompt-popover-dismissed");
+    });
+  });
+
   it("button controls can open Accessibility settings", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockResolvedValue(undefined);
@@ -866,6 +922,7 @@ describe("app", () => {
     await waitFor(() => {
       expect(vi.mocked(invoke)).toHaveBeenCalledWith("open_accessibility_settings");
     });
+    expect(emitMock).toHaveBeenCalledWith("prompt-popover-dismissed");
   });
 
   it("button controls can quit Prompt Picker", async () => {
