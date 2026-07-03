@@ -5,6 +5,10 @@ import type { PromptItem } from "../shared/promptTypes";
 
 const inputTargetPollingMock = vi.hoisted(() => vi.fn());
 const emitMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+const listenMock = vi.hoisted(() => vi.fn());
+const eventHandlers = vi.hoisted(
+  () => new Map<string, (event: { payload: unknown }) => unknown>()
+);
 
 vi.mock("../overlay/useInputTargetPolling", () => ({
   useInputTargetPolling: inputTargetPollingMock,
@@ -17,6 +21,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 vi.mock("@tauri-apps/api/event", () => ({
   emit: emitMock,
+  listen: listenMock,
 }));
 
 // Mock getCurrentWindow
@@ -56,6 +61,14 @@ describe("app", () => {
     inputTargetPollingMock.mockClear();
     emitMock.mockReset();
     emitMock.mockResolvedValue(undefined);
+    eventHandlers.clear();
+    listenMock.mockReset();
+    listenMock.mockImplementation(
+      async (event: string, handler: (event: { payload: unknown }) => unknown) => {
+        eventHandlers.set(event, handler);
+        return () => eventHandlers.delete(event);
+      }
+    );
   });
 
   it("shows prompt list in popover mode by default", async () => {
@@ -71,6 +84,53 @@ describe("app", () => {
     await waitFor(() => {
       expect(screen.getByText("Test Prompt")).toBeTruthy();
     });
+  });
+
+  it("refreshes prompt data when a reused popover is opened", async () => {
+    currentWindowLabel = "prompt-popover";
+    window.history.pushState({}, "", "/?mode=popover");
+    const initialPrompts = JSON.stringify({ version: 1, prompts: mockPrompts });
+    const refreshedPrompts = JSON.stringify({
+      version: 1,
+      prompts: [
+        {
+          ...mockPrompts[0],
+          id: "2",
+          title: "Fresh Prompt",
+          body: "Fresh body",
+        },
+      ],
+    });
+    let promptData = initialPrompts;
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockImplementation(
+      async (path: string) => {
+        if (path.includes("prompts")) return promptData;
+        throw new Error("missing file");
+      }
+    );
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    expect(await screen.findByText("Test Prompt")).toBeTruthy();
+    await waitFor(() => {
+      expect(listenMock).toHaveBeenCalledWith(
+        "prompt-popover-opened",
+        expect.any(Function)
+      );
+    });
+
+    promptData = refreshedPrompts;
+    const handler = eventHandlers.get("prompt-popover-opened");
+    expect(handler).toBeTruthy();
+    await act(async () => {
+      await handler?.({ payload: "popover" });
+    });
+
+    expect(await screen.findByText("Fresh Prompt")).toBeTruthy();
+    expect(screen.queryByText("Test Prompt")).toBeNull();
   });
 
   it("shows only prompt choices in popover mode", async () => {

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { emit } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { save, open } from "@tauri-apps/plugin-dialog";
 import { writeTextFile, readTextFile } from "@tauri-apps/plugin-fs";
@@ -181,6 +181,9 @@ export function App({
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const storeRef = useRef(createPromptStore(createTauriPromptStorage()));
   const settingsStoreRef = useRef(createSettingsStore(createTauriSettingsStorage()));
+  const reloadPrompts = useCallback(async () => {
+    setPrompts(await storeRef.current.list());
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -199,6 +202,33 @@ export function App({
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (windowLabel !== "prompt-popover") return;
+
+    let active = true;
+    let dispose: (() => void) | undefined;
+
+    listen<string>("prompt-popover-opened", async (event) => {
+      if (!active || event.payload !== "popover") return;
+      await reloadPrompts();
+    })
+      .then((unlisten) => {
+        if (active) {
+          dispose = unlisten;
+          return;
+        }
+        unlisten();
+      })
+      .catch((error) => {
+        console.warn("Failed to listen for prompt popover refresh:", error);
+      });
+
+    return () => {
+      active = false;
+      dispose?.();
+    };
+  }, [reloadPrompts, windowLabel]);
 
   const handleSelect = async (prompt: PromptContainer) => {
     if (submittingPromptId) return;
