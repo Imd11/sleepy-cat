@@ -120,9 +120,15 @@ where
 fn paste_prompt_and_submit_to_last_target(
     body: String,
     session_state: tauri::State<PromptPickSessionState>,
+    recent_state: tauri::State<LastInputTargetState>,
     app: tauri::AppHandle,
 ) -> Result<AutosendOutcome, String> {
-    paste_prompt_and_submit_to_last_target_impl(&body, session_state.inner(), &app)
+    paste_prompt_and_submit_to_last_target_impl(
+        &body,
+        session_state.inner(),
+        recent_state.inner(),
+        &app,
+    )
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -164,12 +170,14 @@ fn paste_prompt_sequence_and_submit_to_last_target(
     bodies: Vec<String>,
     interval_ms: u64,
     session_state: tauri::State<PromptPickSessionState>,
+    recent_state: tauri::State<LastInputTargetState>,
     app: tauri::AppHandle,
 ) -> Result<AutosendSequenceOutcome, String> {
     paste_prompt_sequence_and_submit_to_last_target_impl(
         &bodies,
         interval_ms,
         session_state.inner(),
+        recent_state.inner(),
         &app,
     )
 }
@@ -178,6 +186,7 @@ fn paste_prompt_sequence_and_submit_to_last_target_impl(
     bodies: &[String],
     interval_ms: u64,
     state: &PromptPickSessionState,
+    recent_state: &LastInputTargetState,
     app: &tauri::AppHandle,
 ) -> Result<AutosendSequenceOutcome, String> {
     let clipboard_app = app.clone();
@@ -185,6 +194,7 @@ fn paste_prompt_sequence_and_submit_to_last_target_impl(
         bodies,
         interval_ms,
         state,
+        Some(recent_state),
         |body, bundle_id, click_point| {
             platform::macos::paste_prompt_and_submit_to_app_clipboard_with_copier(
                 body,
@@ -201,12 +211,14 @@ fn paste_prompt_sequence_and_submit_to_last_target_impl(
 fn paste_prompt_and_submit_to_last_target_impl(
     body: &str,
     state: &PromptPickSessionState,
+    recent_state: &LastInputTargetState,
     app: &tauri::AppHandle,
 ) -> Result<AutosendOutcome, String> {
     let clipboard_app = app.clone();
     paste_prompt_and_submit_to_session_target_with_senders(
         body,
         state,
+        Some(recent_state),
         |body, bundle_id, click_point| {
             platform::macos::paste_prompt_and_submit_to_app_clipboard_with_copier(
                 body,
@@ -232,9 +244,29 @@ fn clamp_sequence_interval_ms(interval_ms: u64) -> u64 {
     interval_ms.clamp(MIN_SEQUENCE_INTERVAL_MS, MAX_SEQUENCE_INTERVAL_MS)
 }
 
+fn prompt_pick_target_or_recent(
+    session_state: &PromptPickSessionState,
+    recent_state: Option<&LastInputTargetState>,
+) -> Option<PromptPickSessionTarget> {
+    if let Some(target) = session_state.take() {
+        return Some(target);
+    }
+
+    recent_state
+        .and_then(LastInputTargetState::get)
+        .filter(is_recent_prompt_target)
+        .filter(|target| is_usable_autosend_app(&target.app))
+        .map(|target| PromptPickSessionTarget {
+            app: target.app,
+            observed_at_ms: now_ms(),
+            click_point: target.click_point,
+        })
+}
+
 fn paste_prompt_and_submit_to_session_target_with_senders<A, C>(
     body: &str,
     state: &PromptPickSessionState,
+    recent_state: Option<&LastInputTargetState>,
     app_sender: A,
     copy_sender: C,
 ) -> Result<AutosendOutcome, String>
@@ -242,7 +274,7 @@ where
     A: FnOnce(&str, &str, Option<TargetClickPoint>) -> AutosendOutcome,
     C: FnOnce(&str) -> Result<(), String>,
 {
-    let Some(target) = state.take() else {
+    let Some(target) = prompt_pick_target_or_recent(state, recent_state) else {
         return Ok(copy_without_sending(
             body,
             copy_sender,
@@ -273,6 +305,7 @@ fn paste_prompt_sequence_and_submit_to_session_target_with_senders<A, C, S>(
     bodies: &[String],
     interval_ms: u64,
     state: &PromptPickSessionState,
+    recent_state: Option<&LastInputTargetState>,
     mut app_sender: A,
     copy_sender: C,
     mut sleeper: S,
@@ -295,7 +328,7 @@ where
         ));
     };
 
-    let Some(target) = state.take() else {
+    let Some(target) = prompt_pick_target_or_recent(state, recent_state) else {
         let outcome = copy_without_sending(
             first_body,
             copy_sender,
@@ -1233,6 +1266,7 @@ mod last_input_target_tests {
         let result = paste_prompt_and_submit_to_session_target_with_senders(
             "hello",
             &state,
+            None,
             |_, _, _| panic!("app sender must not run without a target"),
             |body| {
                 assert_eq!(body, "hello");
@@ -1244,6 +1278,37 @@ mod last_input_target_tests {
         assert!(outcome.copied);
         assert!(!outcome.sent);
         assert_eq!(outcome.reason, Some(AutosendFailureReason::NoSafeTarget));
+    }
+
+    #[test]
+    fn autosend_falls_back_to_recent_target_when_prompt_session_is_not_ready() {
+        let session_state = PromptPickSessionState::default();
+        let recent_state = LastInputTargetState::default();
+        recent_state.set(LastInputTarget {
+            app: FrontmostApp {
+                name: "Codex".to_string(),
+                bundle_id: "com.openai.codex".to_string(),
+            },
+            observed_at_ms: now_ms(),
+            click_point: Some(TargetClickPoint { x: 640.0, y: 720.0 }),
+        });
+
+        let result = paste_prompt_and_submit_to_session_target_with_senders(
+            "hello",
+            &session_state,
+            Some(&recent_state),
+            |body, bundle_id, click_point| {
+                assert_eq!(body, "hello");
+                assert_eq!(bundle_id, "com.openai.codex");
+                assert_eq!(click_point.unwrap().x, 640.0);
+                AutosendOutcome::sent()
+            },
+            |_| panic!("copy sender must not run when recent target is usable"),
+        );
+
+        let outcome = result.unwrap();
+        assert!(outcome.sent);
+        assert!(session_state.get().is_none());
     }
 
     #[test]
@@ -1261,6 +1326,7 @@ mod last_input_target_tests {
         let result = paste_prompt_and_submit_to_session_target_with_senders(
             "hello",
             &state,
+            None,
             |body, bundle_id, click_point| {
                 assert_eq!(body, "hello");
                 assert_eq!(bundle_id, "com.tencent.xinWeChat");
@@ -1291,6 +1357,7 @@ mod last_input_target_tests {
         let result = paste_prompt_and_submit_to_session_target_with_senders(
             "hello",
             &state,
+            None,
             |body, bundle_id, click_point| {
                 assert_eq!(body, "hello");
                 assert_eq!(bundle_id, "com.openai.codex");
@@ -1320,6 +1387,7 @@ mod last_input_target_tests {
         let result = paste_prompt_and_submit_to_session_target_with_senders(
             "hello",
             &state,
+            None,
             |_, _, _| AutosendOutcome::paste_event_failed("app paste failed".to_string()),
             |_| panic!("copy sender must not run when a click point exists"),
         );
@@ -1353,6 +1421,7 @@ mod last_input_target_tests {
             &bodies,
             700,
             &state,
+            None,
             |body, bundle_id, _| {
                 sent.push((body.to_string(), bundle_id.to_string()));
                 AutosendOutcome::sent()
@@ -1394,6 +1463,7 @@ mod last_input_target_tests {
             &bodies,
             10,
             &state,
+            None,
             |_, _, _| AutosendOutcome::sent(),
             |_| panic!("copy sender must not run when target exists"),
             |delay_ms| sleeps.push(delay_ms),
@@ -1422,6 +1492,7 @@ mod last_input_target_tests {
             &bodies,
             700,
             &state,
+            None,
             |body, _, _| {
                 sent.push(body.to_string());
                 if body == "two" {
@@ -1451,6 +1522,7 @@ mod last_input_target_tests {
             &bodies,
             700,
             &state,
+            None,
             |_, _, _| panic!("app sender must not run without target"),
             |body| {
                 copied = body.to_string();
@@ -1465,6 +1537,42 @@ mod last_input_target_tests {
         assert_eq!(result.sent_count, 0);
         assert_eq!(result.failed_index, Some(1));
         assert_eq!(result.reason, Some(AutosendFailureReason::NoSafeTarget));
+    }
+
+    #[test]
+    fn autosend_sequence_falls_back_to_recent_target_when_prompt_session_is_not_ready() {
+        let session_state = PromptPickSessionState::default();
+        let recent_state = LastInputTargetState::default();
+        recent_state.set(LastInputTarget {
+            app: FrontmostApp {
+                name: "WeChat".to_string(),
+                bundle_id: "com.tencent.xinWeChat".to_string(),
+            },
+            observed_at_ms: now_ms(),
+            click_point: None,
+        });
+        let bodies = vec!["one".to_string(), "two".to_string()];
+        let mut sent = Vec::new();
+
+        let result = paste_prompt_sequence_and_submit_to_session_target_with_senders(
+            &bodies,
+            700,
+            &session_state,
+            Some(&recent_state),
+            |body, bundle_id, click_point| {
+                sent.push((body.to_string(), bundle_id.to_string(), click_point));
+                AutosendOutcome::sent()
+            },
+            |_| panic!("copy sender must not run when recent target is usable"),
+            |_| {},
+        )
+        .unwrap();
+
+        assert!(result.sent);
+        assert_eq!(result.sent_count, 2);
+        assert_eq!(sent.len(), 2);
+        assert_eq!(sent[0].1, "com.tencent.xinWeChat");
+        assert!(sent[0].2.is_none());
     }
 
     #[test]
