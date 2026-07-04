@@ -173,6 +173,70 @@ describe("Calico idle director", () => {
     vi.useRealTimers();
   });
 
+  it("restarts idle tiers from light motions after user activity resets the clock", async () => {
+    const { createCalicoIdleDirector } = await loadDirectorModule();
+    const applied: Array<{ state: string; priority?: number; reason?: string }> = [];
+    const timers: Array<{ id: number; at: number; callback: () => void; cancelled: boolean }> = [];
+    let now = 0;
+    let timerId = 1;
+
+    const setScheduledTimeout = ((callback: TimerHandler, delay?: number) => {
+      const id = timerId++;
+      const callbackFn = typeof callback === "function" ? callback : () => undefined;
+      timers.push({
+        id,
+        at: now + Number(delay ?? 0),
+        callback: callbackFn as () => void,
+        cancelled: false,
+      });
+      return id;
+    }) as typeof window.setTimeout;
+
+    const clearScheduledTimeout = ((id?: number) => {
+      const timer = timers.find((item) => item.id === id);
+      if (timer) timer.cancelled = true;
+    }) as typeof window.clearTimeout;
+
+    function runNextTimer() {
+      const timer = timers
+        .filter((item) => !item.cancelled)
+        .sort((first, second) => first.at - second.at)[0];
+      if (!timer) throw new Error("Expected a scheduled idle timer");
+      timer.cancelled = true;
+      now = timer.at;
+      timer.callback();
+    }
+
+    const director = createCalicoIdleDirector({
+      applyMotion: (payload) => {
+        applied.push(payload);
+        return true;
+      },
+      resetMotion: vi.fn(),
+      getCurrentState: () => "idle-follow",
+      isUserActive: () => false,
+      random: () => 0.95,
+      setTimeout: setScheduledTimeout,
+      clearTimeout: clearScheduledTimeout,
+      now: () => now,
+    });
+
+    director.start();
+    now = 70_000;
+    director.resetIdleClock();
+    director.pause(6_000);
+
+    runNextTimer();
+    expect(applied).toEqual([]);
+
+    runNextTimer();
+    expect(applied[0]).toMatchObject({
+      state: "mini-peek",
+      reason: "idle-director",
+      priority: 1,
+    });
+  });
+
   it("does not treat a rejected idle flourish as played", async () => {
     vi.useFakeTimers();
     const { createCalicoIdleDirector } = await loadDirectorModule();

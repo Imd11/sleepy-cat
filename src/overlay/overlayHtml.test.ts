@@ -81,6 +81,7 @@ describe("overlay button html", () => {
     expect(html).toContain("pauseIdleForExternalMotion(event.payload);");
     expect(html).toContain("pauseIdleForPointerInteraction(5_000);");
     expect(html).toContain("pauseIdleForPointerInteraction(6_000);");
+    expect(html).toContain("calicoIdleDirector?.resetIdleClock();");
     expect(html).toContain("calicoIdleDirector?.pause(4_000);");
     expect(html).toContain("calicoIdleDirector.resetToBaseline();");
   });

@@ -12,15 +12,18 @@ Results:
 - Initial sprite loaded: `/calico/calico-idle-follow.svg`, natural size `1536x1152`
 - Deterministic idle check with `Math.random = () => 0`: state became `idle` after the first idle delay
 - Idle sprite loaded: `/calico/calico-idle.apng`, natural size `266x200`
-- Representative visual states loaded with valid layout bounds:
-  - `idle`
-  - `yawning`
-  - `dozing`
+- Plan-required mini and sleep-family states loaded with valid layout bounds:
   - `sleeping`
+  - `waking`
+  - `mini-enter`
+  - `mini-idle`
   - `mini-peek`
+  - `mini-happy`
+  - `mini-crabwalk`
   - `mini-sleep`
+  - `mini-alert`
+- Each plan-required visual state loaded with positive natural dimensions and at least `132x132` visible viewport coverage in the automated browser check.
 - Non-favicon network errors: none
 - Relevant console errors: none
 - Ignored browser request: `/favicon.ico` returned 404
-- Screenshot artifact: `/tmp/prompt-picker-calico-idle-director-overlay.png`
-
+- Screenshot artifact: `/tmp/prompt-picker-calico-idle-review-fix-overlay.png`

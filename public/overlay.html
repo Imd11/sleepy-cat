@@ -213,6 +213,7 @@ function pauseIdleForExternalMotion(payload = {}) {
 }
 
 function pauseIdleForPointerInteraction(durationMs = 5_000) {
+  calicoIdleDirector?.resetIdleClock();
   calicoIdleDirector?.pause(durationMs);
 }
 
