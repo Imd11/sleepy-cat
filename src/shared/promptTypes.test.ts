@@ -55,7 +55,7 @@ describe("prompt model helpers", () => {
     expect(getPromptContainerPreview(container)).toContain("1. Analyze the root cause.");
     expect(getPromptContainerPreview(container)).toContain("2. Write a plan.");
     expect(getPromptContainerPreview(container)).not.toContain("Step");
-    expect(getPromptContainerMeta(container)).toBe("Group · 2 prompts · 700ms");
+    expect(getPromptContainerMeta(container)).toBe("Group · 2 prompts");
   });
 
   it("returns one preview line for a single prompt container", () => {

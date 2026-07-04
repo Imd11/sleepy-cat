@@ -91,7 +91,7 @@ export function getPromptContainerPreview(
 export function getPromptContainerMeta(container: PromptContainer): string | null {
   const count = getPromptContainerBodies(container).length;
   if (container.type === "group") {
-    return `Group · ${count} prompts · ${container.intervalMs}ms`;
+    return `Group · ${count} prompts`;
   }
   return null;
 }
