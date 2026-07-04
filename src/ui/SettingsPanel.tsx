@@ -3,14 +3,12 @@ import { LANGUAGE_LABELS, getMessages } from "../shared/i18n";
 
 interface SettingsPanelProps {
   settings: Settings;
-  onRemove: (bundleId: string) => void;
   onLanguageChange: (language: AppLanguage) => void;
   onPromptInsertionModeChange: (mode: PromptInsertionMode) => void;
 }
 
 export function SettingsPanel({
   settings,
-  onRemove,
   onLanguageChange,
   onPromptInsertionModeChange,
 }: SettingsPanelProps) {
@@ -79,32 +77,6 @@ export function SettingsPanel({
             </div>
           </div>
         </div>
-      </section>
-
-      <section className="settings-card">
-        <div className="settings-card-heading">
-          <h2>{t.settings.blacklistedAppsTitle}</h2>
-        </div>
-        {settings.blacklistedApps.length === 0 ? (
-          <div className="settings-empty-row">{t.settings.noBlacklistedApps}</div>
-        ) : (
-          <ul className="blacklist settings-blacklist">
-            {settings.blacklistedApps.map((app) => (
-              <li key={app.bundleId}>
-                <div>
-                  <strong>{app.name}</strong>
-                  <span>{app.bundleId}</span>
-                </div>
-                <button
-                  className="button button-ghost-danger"
-                  onClick={() => onRemove(app.bundleId)}
-                >
-                  {t.common.remove}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
       </section>
     </div>
   );

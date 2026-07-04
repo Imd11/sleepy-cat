@@ -32,7 +32,6 @@ import "./styles.css";
 
 interface AppProps {
   settings?: Settings;
-  onRemoveBlacklist?: (bundleId: string) => void;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -397,11 +396,6 @@ export function App({
     []
   );
 
-  const removeBlacklistedApp = async (bundleId: string) => {
-    await settingsStoreRef.current.removeBlacklistedApp(bundleId);
-    setActiveSettings(await settingsStoreRef.current.get());
-  };
-
   const updatePromptInsertionMode = async (mode: PromptInsertionMode) => {
     await settingsStoreRef.current.setPromptInsertionMode(mode);
     setActiveSettings(await settingsStoreRef.current.get());
@@ -524,7 +518,6 @@ export function App({
         <div className="app-window app-window-main">
           <SettingsPanel
             settings={activeSettings}
-            onRemove={removeBlacklistedApp}
             onLanguageChange={updateLanguage}
             onPromptInsertionModeChange={updatePromptInsertionMode}
           />

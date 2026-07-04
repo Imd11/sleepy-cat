@@ -23,44 +23,18 @@ describe("settings panel", () => {
     render(
       <SettingsPanel
         settings={settings}
-        onRemove={() => {}}
         onLanguageChange={onLanguageChange}
         onPromptInsertionModeChange={onPromptInsertionModeChange}
       />
     );
   }
 
-  it("renders blacklisted apps", () => {
+  it("does not render hidden apps settings", () => {
     renderPanel();
-    expect(screen.getByText("Example App")).toBeTruthy();
-  });
 
-  it("remove button calls onRemove with bundle id", () => {
-    let removedBundleId: string | null = null;
-    render(
-      <SettingsPanel
-        settings={mockSettings}
-        onRemove={(id) => { removedBundleId = id; }}
-        onLanguageChange={() => {}}
-        onPromptInsertionModeChange={() => {}}
-      />
-    );
-
-    const removeBtn = screen.getByRole("button", { name: "移除" });
-    removeBtn.click();
-    expect(removedBundleId).toBe("com.example.app");
-  });
-
-  it("empty state renders when no blacklisted apps", () => {
-    renderPanel({
-      version: 1,
-      blacklistedApps: [],
-      overlayPlacement: { buttonOffset: null, buttonPosition: null },
-      floatingButton: { visible: true },
-      promptInsertion: { mode: "paste_and_submit" },
-      language: "zh-CN",
-    });
-    expect(screen.getByText("暂无隐藏应用")).toBeTruthy();
+    expect(screen.queryByText("隐藏应用")).toBeNull();
+    expect(screen.queryByText("暂无隐藏应用")).toBeNull();
+    expect(screen.queryByText("Example App")).toBeNull();
   });
 
   it("renders prompt insertion behavior controls", () => {
