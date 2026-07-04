@@ -590,11 +590,20 @@ button {
 
 .settings-segmented-control {
   height: 32px;
+  background: var(--pp-surface);
+  border-color: var(--pp-border-strong);
 }
 
 .settings-segmented-control button {
   min-width: 78px;
   padding: 0 11px;
+  color: #475467;
+  font-weight: 650;
+}
+
+.settings-segmented-control button.is-selected {
+  color: #ffffff;
+  background: var(--pp-text);
 }
 
 .settings-empty-row {
