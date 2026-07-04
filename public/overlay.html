@@ -146,6 +146,7 @@ let contextMenuOpened = false;
 let pointerSequence = 0;
 let promptPickSessionId = 0;
 let dragStartedEmitted = false;
+let dragPopoverHidden = false;
 let motionResetTimer = 0;
 let statusTimer = 0;
 
@@ -203,6 +204,12 @@ async function emit(event, payload) {
   } catch (error) {
     console.error(`Tauri event failed: ${event}`, error);
   }
+}
+
+async function hidePromptPopoverForDrag() {
+  if (dragPopoverHidden) return;
+  dragPopoverHidden = true;
+  await invoke('hide_prompt_popover');
 }
 
 function hideStatusBubble() {
@@ -282,6 +289,7 @@ btn.addEventListener('pointerdown', (event) => {
   lastMove = null;
   contextMenuOpened = false;
   dragStartedEmitted = false;
+  dragPopoverHidden = false;
   btn.classList.add('is-pressing');
   try {
     btn.setPointerCapture(event.pointerId);
@@ -307,6 +315,7 @@ btn.addEventListener('pointermove', (event) => {
   if (!dragging && distance(start, current) < DRAG_START_DISTANCE_PX) return;
   if (!dragStartedEmitted) {
     dragStartedEmitted = true;
+    hidePromptPopoverForDrag().catch(() => {});
     emit('prompt-button-drag-started').catch(() => {});
   }
   dragging = true;

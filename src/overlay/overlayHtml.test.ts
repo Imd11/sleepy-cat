@@ -56,6 +56,16 @@ describe("overlay button html", () => {
     expect(html).toContain("releasePointerCapture");
   });
 
+  it("hides the prompt popover when Calico dragging starts", () => {
+    const html = readFileSync("public/overlay.html", "utf8");
+
+    expect(html).toContain("hidePromptPopoverForDrag");
+    expect(html).toContain("await invoke('hide_prompt_popover')");
+    expect(html.indexOf("hidePromptPopoverForDrag().catch")).toBeLessThan(
+      html.indexOf("emit('prompt-button-drag-started')")
+    );
+  });
+
   it("opens the prompt list without awaiting target session capture", () => {
     const html = readFileSync("public/overlay.html", "utf8");
 
