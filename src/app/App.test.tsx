@@ -456,6 +456,72 @@ describe("app", () => {
     expect(screen.queryByRole("button", { name: "返回" })).toBeNull();
   });
 
+  it("renders settings mode with the desktop settings panel shell", async () => {
+    currentWindowLabel = "main";
+    window.history.pushState({}, "", "/?mode=settings");
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockImplementation(
+      async (path: string) => {
+        if (path.includes("prompts")) {
+          return JSON.stringify({ version: 1, prompts: mockPrompts });
+        }
+        if (path.includes("settings")) {
+          return JSON.stringify({
+            version: 1,
+            blacklistedApps: [],
+            overlayPlacement: { buttonOffset: null, buttonPosition: null },
+            floatingButton: { visible: true },
+            promptInsertion: { mode: "paste_and_submit" },
+            language: "zh-CN",
+          });
+        }
+        throw new Error("unexpected path: " + path);
+      }
+    );
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    expect(await screen.findByRole("heading", { name: "设置" })).toBeTruthy();
+    expect(document.querySelector(".app-window-main")).toBeTruthy();
+    expect(document.querySelector(".settings-panel")).toBeTruthy();
+    expect(document.querySelector(".settings-card")).toBeTruthy();
+  });
+
+  it("renders manager mode with the polished prompt manager shell", async () => {
+    currentWindowLabel = "main";
+    window.history.pushState({}, "", "/?mode=manager");
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockImplementation(
+      async (path: string) => {
+        if (path.includes("prompts")) {
+          return JSON.stringify({ version: 1, prompts: mockPrompts });
+        }
+        if (path.includes("settings")) {
+          return JSON.stringify({
+            version: 1,
+            blacklistedApps: [],
+            overlayPlacement: { buttonOffset: null, buttonPosition: null },
+            floatingButton: { visible: true },
+            promptInsertion: { mode: "paste_and_submit" },
+            language: "zh-CN",
+          });
+        }
+        throw new Error("unexpected path: " + path);
+      }
+    );
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    expect(await screen.findByRole("heading", { name: "管理提示词" })).toBeTruthy();
+    expect(document.querySelector(".app-window-main")).toBeTruthy();
+    expect(document.querySelector(".prompt-manager")).toBeTruthy();
+    expect(document.querySelector(".panel-heading-with-actions")).toBeTruthy();
+  });
+
   it("autosends selected prompt into the backend last input target", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockImplementation(async (command: string) => {
