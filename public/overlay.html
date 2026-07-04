@@ -41,34 +41,64 @@ body {
 }
 
 .calico-sprite {
+  --calico-scale: 1;
+  --calico-offset-x: 0px;
+  --calico-offset-y: 0px;
+  --calico-hover-y: 0px;
+  --calico-press-y: 0px;
+  --calico-rotate: 0deg;
   width: 126px;
   height: 126px;
   object-fit: contain;
   pointer-events: none;
   transform-origin: 45% 76%;
+  transform:
+    translate(
+      var(--calico-offset-x),
+      calc(var(--calico-offset-y) + var(--calico-hover-y) + var(--calico-press-y))
+    )
+    rotate(var(--calico-rotate))
+    scale(var(--calico-scale));
   transition: transform 140ms ease;
 }
 
 .calico-entry:hover .calico-sprite {
-  transform: translateY(-2px) scale(1.03);
+  --calico-hover-y: -2px;
 }
 
 .calico-entry.is-pressing .calico-sprite {
-  transform: translateY(1px) scale(0.98);
+  --calico-press-y: 1px;
 }
 
-.calico-entry[data-motion-state="dragging"] .calico-sprite,
+.calico-entry[data-motion-state="react-drag"] .calico-sprite,
 .calico-entry.is-dragging .calico-sprite {
-  transform: rotate(-2deg) scale(1.03);
+  --calico-rotate: -2deg;
 }
 
+.calico-entry[data-motion-state="idle-follow"] .calico-sprite,
 .calico-entry[data-motion-state="idle"] .calico-sprite {
   animation: calico-idle-breath 1800ms ease-in-out infinite alternate;
 }
 
 @keyframes calico-idle-breath {
-  from { transform: translateY(0) scale(1); }
-  to { transform: translateY(-1px) scale(1.01); }
+  from {
+    transform:
+      translate(
+        var(--calico-offset-x),
+        calc(var(--calico-offset-y) + var(--calico-hover-y) + var(--calico-press-y))
+      )
+      rotate(var(--calico-rotate))
+      scale(var(--calico-scale));
+  }
+  to {
+    transform:
+      translate(
+        var(--calico-offset-x),
+        calc(var(--calico-offset-y) + var(--calico-hover-y) + var(--calico-press-y) - 1px)
+      )
+      rotate(var(--calico-rotate))
+      scale(var(--calico-scale));
+  }
 }
 
 .calico-status-bubble {
@@ -124,19 +154,21 @@ body {
   class="calico-entry"
   title="Open Prompt Picker"
   aria-label="Open Prompt Picker"
-  data-motion-state="idle"
+  data-motion-state="idle-follow"
 >
-  <img id="calicoSprite" class="calico-sprite" src="/calico/calico-idle.apng" alt="" draggable="false" />
+  <img id="calicoSprite" class="calico-sprite" src="/calico/calico-idle-follow.svg" alt="" draggable="false" />
 </button>
 <script type="module">
+import { createCalicoMotionRuntime } from '/calico/motion-runtime.js';
+
 const btn = document.getElementById('btn');
 const sprite = document.getElementById('calicoSprite');
 const statusBubble = document.getElementById('statusBubble');
 const tauri = window.__TAURI__;
 const DRAG_START_DISTANCE_PX = 10;
-const sprites = {
-  idle: '/calico/calico-idle.apng',
-  drag: '/calico/calico-react-drag.apng'
+const fallbackSprites = {
+  'idle-follow': '/calico/calico-idle-follow.svg',
+  'react-drag': '/calico/calico-react-drag.apng'
 };
 let start = null;
 let dragging = false;
@@ -149,35 +181,39 @@ let dragStartedEmitted = false;
 let dragPopoverHidden = false;
 let motionResetTimer = 0;
 let statusTimer = 0;
-
-function setSpriteSource(source) {
-  if (!sprite || !source) return;
-  if (!sprite.src.endsWith(source)) {
-    sprite.src = source;
-  }
-}
+let calicoMotion = null;
 
 function clearMotionTimers() {
   window.clearTimeout(motionResetTimer);
 }
 
-function setMotionState(state, resetMs = 0) {
-  window.clearTimeout(motionResetTimer);
+function applyFallbackMotion(payload = {}) {
+  const state = payload.state === 'react-drag' ? 'react-drag' : 'idle-follow';
   btn.dataset.motionState = state;
-  if (state === 'dragging') {
-    setSpriteSource(sprites.drag);
-  } else {
-    setSpriteSource(sprites.idle);
-  }
-  if (resetMs > 0) {
-    motionResetTimer = window.setTimeout(resetCalicoMotion, resetMs);
-  }
+  sprite?.setAttribute('src', fallbackSprites[state]);
+}
+
+function applyCalicoMotion(payload = {}) {
+  if (calicoMotion?.apply(payload)) return;
+  applyFallbackMotion(payload);
 }
 
 function resetCalicoMotion() {
   clearMotionTimers();
-  btn.dataset.motionState = 'idle';
-  setSpriteSource(sprites.idle);
+  if (calicoMotion?.reset()) return;
+  applyFallbackMotion({ state: 'idle-follow' });
+}
+
+async function initializeCalicoMotion() {
+  try {
+    const response = await fetch('/calico/manifest.json');
+    const manifest = await response.json();
+    calicoMotion = createCalicoMotionRuntime({ image: sprite, host: btn, manifest });
+    resetCalicoMotion();
+  } catch (error) {
+    console.error('Failed to initialize Calico motion runtime', error);
+    resetCalicoMotion();
+  }
 }
 
 function distance(a, b) {
@@ -236,6 +272,15 @@ function listenForAutosendStatus() {
     showStatusBubble(event.payload);
   }).catch((error) => {
     console.error('Tauri event listen failed: prompt-autosend-status', error);
+  });
+}
+
+function listenForCalicoMotion() {
+  if (!tauri?.event?.listen) return;
+  tauri.event.listen('calico-motion', (event) => {
+    applyCalicoMotion(event.payload);
+  }).catch((error) => {
+    console.error('Tauri event listen failed: calico-motion', error);
   });
 }
 
@@ -321,8 +366,8 @@ btn.addEventListener('pointermove', (event) => {
   dragging = true;
   btn.classList.remove('is-pressing');
   btn.classList.add('is-dragging');
-  if (btn.dataset.motionState !== 'dragging') {
-    setMotionState('dragging');
+  if (btn.dataset.motionState !== 'react-drag') {
+    applyCalicoMotion({ state: 'react-drag', reason: 'drag' });
   }
   lastMove = current;
   if (!animationFrame) {
@@ -378,7 +423,9 @@ btn.addEventListener('contextmenu', async (event) => {
   await openButtonControls(event);
 });
 
+initializeCalicoMotion();
 listenForAutosendStatus();
+listenForCalicoMotion();
 listenForPromptPopoverDismissed();
 
 statusBubble?.addEventListener('click', async () => {

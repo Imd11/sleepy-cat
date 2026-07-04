@@ -31,9 +31,9 @@ describe("overlay button html", () => {
 
     expect(html).toContain("calico-entry");
     expect(html).toContain("calico-sprite");
-    expect(html).toContain("calico-idle.apng");
+    expect(html).toContain("calico-idle-follow.svg");
     expect(html).toContain("calico-react-drag.apng");
-    expect(html).toContain('data-motion-state="idle"');
+    expect(html).toContain('data-motion-state="idle-follow"');
     expect(html).not.toContain("calico-projectile");
     expect(html).not.toContain("promptProjectile");
     expect(html).toContain('aria-label="Open Prompt Picker"');
@@ -42,6 +42,16 @@ describe("overlay button html", () => {
     expect(html).not.toContain("calico-head");
     expect(html).not.toContain('class="calico-svg"');
     expect(html).not.toContain("<span>Prompts</span>");
+  });
+
+  it("loads the Calico motion runtime and manifest", () => {
+    const html = readFileSync("public/overlay.html", "utf8");
+
+    expect(html).toContain("/calico/motion-runtime.js");
+    expect(html).toContain("createCalicoMotionRuntime");
+    expect(html).toContain("initializeCalicoMotion");
+    expect(html).toContain("fetch('/calico/manifest.json')");
+    expect(html).toContain("calico-motion");
   });
 
   it("keeps existing drag and click commands for the Calico entry", () => {
@@ -88,6 +98,7 @@ describe("overlay button html", () => {
 
     expect(html).toContain("const DRAG_START_DISTANCE_PX = 10;");
     expect(html).toContain("distance(start, current) < DRAG_START_DISTANCE_PX");
+    expect(html).toContain("applyCalicoMotion({ state: 'react-drag'");
     expect(html).not.toContain("distance(start, current) < 4");
   });
 
