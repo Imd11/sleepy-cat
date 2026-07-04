@@ -157,6 +157,9 @@ fn show_popover_mode(x: f64, y: f64, mode: &str, app: &tauri::AppHandle) -> Resu
             window
                 .set_position(prompt_button_window_position(x, y))
                 .map_err(|e| e.to_string())?;
+            if mode == "popover" {
+                crate::macos_panels::configure_transparent_webview_window(&window)?;
+            }
             window.show().map_err(|e| e.to_string())?;
             crate::macos_panels::configure_non_activating_panel(&window)?;
             emit_popover_opened(app, mode);
@@ -178,6 +181,9 @@ fn show_popover_mode(x: f64, y: f64, mode: &str, app: &tauri::AppHandle) -> Resu
         .position(x, y)
         .build()
         .map_err(|e| e.to_string())?;
+    if mode == "popover" {
+        crate::macos_panels::configure_transparent_webview_window(&window)?;
+    }
     crate::macos_panels::configure_non_activating_panel(&window)?;
     set_popover_mode(Some(mode));
     emit_popover_opened(app, mode);
@@ -676,5 +682,21 @@ mod tests {
         assert!(reuse_source.contains("set_position(prompt_button_window_position(x, y))"));
         assert!(reuse_source.contains("window.show().map_err"));
         assert!(reuse_source.contains("emit_popover_opened(app, mode)"));
+    }
+
+    #[test]
+    fn prompt_list_popover_uses_transparent_native_window() {
+        let source = include_str!("windows.rs");
+        let start = source
+            .find("fn show_popover_mode")
+            .expect("show_popover_mode should exist");
+        let end = source[start..]
+            .find("#[tauri::command]\npub fn show_prompt_button")
+            .expect("show_prompt_button should follow show_popover_mode");
+        let command_source = &source[start..start + end];
+
+        assert!(command_source.contains("if mode == \"popover\""));
+        assert!(command_source.contains("configure_transparent_webview_window(&window)?"));
+        assert!(command_source.contains("configure_non_activating_panel(&window)?"));
     }
 }

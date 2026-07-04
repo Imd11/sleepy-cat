@@ -126,6 +126,28 @@ describe("app", () => {
     });
   });
 
+  it("uses a transparent page shell only for prompt-list popovers", async () => {
+    await renderPromptPopover();
+
+    expect(document.querySelector(".popover-root")).toBeTruthy();
+    expect(document.documentElement.classList.contains("popover-transparent-page")).toBe(true);
+    expect(document.body.classList.contains("popover-transparent-page")).toBe(true);
+  });
+
+  it("does not use the transparent prompt-list shell for button controls", async () => {
+    currentWindowLabel = "prompt-popover";
+    window.history.pushState({}, "", "/?mode=button-controls");
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    expect(document.querySelector(".button-controls")).toBeTruthy();
+    expect(document.querySelector(".popover-root")).toBeNull();
+    expect(document.documentElement.classList.contains("popover-transparent-page")).toBe(false);
+    expect(document.body.classList.contains("popover-transparent-page")).toBe(false);
+  });
+
   it("refreshes prompt data when a reused popover is opened", async () => {
     currentWindowLabel = "prompt-popover";
     window.history.pushState({}, "", "/?mode=popover");

@@ -34,6 +34,16 @@ body {
   background: var(--pp-bg);
 }
 
+html.popover-transparent-page,
+body.popover-transparent-page {
+  background: transparent;
+}
+
+body.popover-transparent-page #root {
+  min-height: 100vh;
+  background: transparent;
+}
+
 button,
 input,
 textarea {
@@ -531,6 +541,11 @@ button {
   margin-top: 3px;
   color: #6b7280;
   font-size: 12px;
+}
+
+.popover-root {
+  min-height: 100vh;
+  background: transparent;
 }
 
 .popover-window {

@@ -194,6 +194,17 @@ export function App({
   }, []);
 
   useEffect(() => {
+    const className = "popover-transparent-page";
+    const enabled = windowLabel === "prompt-popover" && mode === "popover";
+    document.documentElement.classList.toggle(className, enabled);
+    document.body.classList.toggle(className, enabled);
+    return () => {
+      document.documentElement.classList.remove(className);
+      document.body.classList.remove(className);
+    };
+  }, [mode, windowLabel]);
+
+  useEffect(() => {
     let active = true;
     storeRef.current.list().then((items) => {
       if (active) setPrompts(items);
@@ -527,7 +538,7 @@ export function App({
 
   // ── Default: popover quick-list ─────────────────────────────────────
   return (
-    <>
+    <div className="popover-root">
       {pollingController}
       <div className="popover-window">
         <PromptQuickList
@@ -539,7 +550,7 @@ export function App({
           hoverResetKey={hoverResetKey}
         />
       </div>
-    </>
+    </div>
   );
 }
 
