@@ -49,6 +49,16 @@ const manifest = {
       offsetX: -3,
       offsetY: -5,
     },
+    "react-left": {
+      file: "/calico/calico-react-left.apng",
+      priority: 80,
+      durationMs: 2500,
+      minMs: 800,
+      replay: true,
+      scale: 1.05,
+      offsetX: 10,
+      offsetY: 0,
+    },
   },
 };
 
@@ -89,6 +99,20 @@ describe("Calico motion runtime", () => {
     runtime.apply({ state: "happy" });
 
     expect(host.dataset.motionState).toBe("error");
+    vi.useRealTimers();
+  });
+
+  it("allows semantic motion to interrupt low-priority idle flourishes", async () => {
+    vi.useFakeTimers();
+    const { createCalicoMotionRuntime } = await loadRuntime();
+    const { image, host } = elements();
+    const runtime = createCalicoMotionRuntime({ image, host, manifest, now: () => Date.now() });
+
+    runtime.apply({ state: "react-left", reason: "idle-director", priority: 1 });
+    runtime.apply({ state: "happy" });
+
+    expect(host.dataset.motionState).toBe("happy");
+    expect(image.getAttribute("src")).toContain("/calico/calico-happy.apng");
     vi.useRealTimers();
   });
 
