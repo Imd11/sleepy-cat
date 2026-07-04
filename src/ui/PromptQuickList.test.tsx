@@ -186,6 +186,29 @@ describe("PromptQuickList", () => {
     expect(screen.getByRole("tooltip")).toBeTruthy();
   });
 
+  it("reports group preview on mouse enter without starting the hover tooltip", () => {
+    vi.useFakeTimers();
+    const onGroupPreview = vi.fn();
+    renderQuickList({ onGroupPreview });
+
+    fireEvent.mouseEnter(screen.getByRole("option", { name: /修复流程/i }));
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
+
+    expect(onGroupPreview).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
+  it("does not report group preview for single prompts", () => {
+    const onGroupPreview = vi.fn();
+    renderQuickList({ onGroupPreview });
+
+    fireEvent.mouseEnter(screen.getByRole("option", { name: /讨论方案/i }));
+
+    expect(onGroupPreview).not.toHaveBeenCalled();
+  });
+
   it("clears hover preview when the reset key changes", () => {
     vi.useFakeTimers();
     const { rerender } = renderQuickList({ hoverResetKey: 0 });

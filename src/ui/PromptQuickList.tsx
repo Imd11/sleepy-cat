@@ -13,6 +13,7 @@ interface PromptQuickListProps {
   onSelect: (prompt: PromptContainer) => void;
   submittingPromptId?: string | null;
   hoverResetKey?: number;
+  onGroupPreview?: () => void;
 }
 
 type HoverPreviewState = {
@@ -44,6 +45,7 @@ export function PromptQuickList({
   onSelect,
   submittingPromptId = null,
   hoverResetKey = 0,
+  onGroupPreview,
 }: PromptQuickListProps) {
   const [hoverPreview, setHoverPreview] = useState<HoverPreviewState | null>(null);
   const hoverPreviewTimerRef = useRef<number | null>(null);
@@ -157,6 +159,12 @@ export function PromptQuickList({
     onSelect(prompt);
   }
 
+  function reportGroupPreview(prompt: PromptContainer) {
+    if (prompt.type === "group") {
+      onGroupPreview?.();
+    }
+  }
+
   return (
     <div className="prompt-quick-shell">
       <div
@@ -181,8 +189,10 @@ export function PromptQuickList({
               role="option"
               aria-selected="false"
               disabled={submittingPromptId === prompt.id}
+              onMouseEnter={() => reportGroupPreview(prompt)}
               onMouseMove={(event) => scheduleHoverPreview(prompt, event.currentTarget)}
               onMouseLeave={hideHoverPreview}
+              onFocus={() => reportGroupPreview(prompt)}
               onBlur={hideHoverPreview}
               onClick={() => selectPrompt(prompt)}
             >

@@ -70,6 +70,34 @@ async function emitPromptPopoverDismissed() {
   }
 }
 
+type CalicoMotionState =
+  | "thinking"
+  | "working-typing"
+  | "working-conducting"
+  | "working-juggling"
+  | "working-building"
+  | "working-carrying"
+  | "working-sweeping"
+  | "notification"
+  | "error"
+  | "happy";
+
+type CalicoMotionPayload = {
+  state: CalicoMotionState;
+  reason: string;
+  durationMs?: number;
+};
+
+function emitCalicoMotion(state: CalicoMotionState, reason: string, durationMs?: number) {
+  const payload: CalicoMotionPayload = { state, reason };
+  if (durationMs !== undefined) {
+    payload.durationMs = durationMs;
+  }
+  emit("calico-motion", payload).catch((error) => {
+    console.warn("Failed to emit Calico motion:", error);
+  });
+}
+
 function pasteOnlyBody(prompt: PromptContainer, bodies: string[]): string {
   if (prompt.type === "group") return bodies.join("\n\n");
   return bodies[0] ?? "";
@@ -273,6 +301,7 @@ export function App({
 
     listen<string>("prompt-popover-opened", async (event) => {
       if (!active || event.payload !== "popover") return;
+      emitCalicoMotion("thinking", "popover-open", 1200);
       resetPromptHoverPreview();
       promptListRefreshingRef.current = true;
       try {
@@ -321,11 +350,17 @@ export function App({
       await waitForWindowHide();
       const bodies = getPromptContainerBodies(prompt);
       if (bodies.length === 0) {
+        emitCalicoMotion("error", "autosend-empty-prompt", 5000);
         await emitAutosendStatus("failed", t.autosend.genericFailed);
         return;
       }
+      emitCalicoMotion(
+        prompt.type === "group" ? "working-conducting" : "working-typing",
+        prompt.type === "group" ? "group-autosend" : "single-autosend"
+      );
       if (activeSettings.promptInsertion.mode === "paste_only") {
         await pastePromptToLastTarget(pasteOnlyBody(prompt, bodies));
+        emitCalicoMotion("happy", "paste-only-success", 3000);
         await emitAutosendStatus("sent", t.autosend.insertedIntoInput);
         return;
       }
@@ -338,9 +373,19 @@ export function App({
           await pastePromptAndSubmitToLastTarget(bodies[0]),
           t
         );
+      if (status.kind === "sent") {
+        emitCalicoMotion("happy", "autosend-success", 3000);
+      } else {
+        emitCalicoMotion(
+          status.action ? "notification" : "error",
+          status.action ? "autosend-action-required" : "autosend-failed",
+          status.action ? 5200 : 5000
+        );
+      }
       await emitAutosendStatus(status.kind, status.message, status.action);
     } catch (e) {
       console.warn("Prompt autosend failed without blocking the picker:", e);
+      emitCalicoMotion("error", "autosend-exception", 5000);
       await emitAutosendStatus("failed", t.autosend.genericFailed);
     } finally {
       setSubmittingPromptId(null);
@@ -398,22 +443,34 @@ export function App({
             messages={t}
             onOpenSettings={() => setMode("settings")}
             onCreate={async (input) => {
+              emitCalicoMotion("working-typing", "create-prompt");
               await storeRef.current.create(input);
               setPrompts(await storeRef.current.list());
+              emitCalicoMotion("happy", "create-prompt-success", 3000);
             }}
             onCreateGroup={async (input) => {
+              emitCalicoMotion("working-building", "create-group");
               await storeRef.current.createGroup(input);
               setPrompts(await storeRef.current.list());
+              emitCalicoMotion("happy", "create-group-success", 3000);
             }}
             onUpdate={async (id, input) => {
+              emitCalicoMotion(
+                input.type === "group" || input.prompts ? "working-building" : "working-typing",
+                "update-prompt"
+              );
               await storeRef.current.update(id, input);
               setPrompts(await storeRef.current.list());
+              emitCalicoMotion("happy", "update-prompt-success", 3000);
             }}
             onDelete={async (id) => {
+              emitCalicoMotion("working-sweeping", "delete-prompt");
               await storeRef.current.remove(id);
               setPrompts(await storeRef.current.list());
+              emitCalicoMotion("happy", "delete-prompt-success", 2200);
             }}
             onReorder={async (ids) => {
+              emitCalicoMotion("working-carrying", "reorder-prompts", 1600);
               await storeRef.current.reorder(ids);
               setPrompts(await storeRef.current.list());
             }}
@@ -424,12 +481,15 @@ export function App({
                   multiple: false,
                 });
                 if (file) {
+                  emitCalicoMotion("working-carrying", "import-prompts");
                   const content = await readTextFile(file as string);
                   await storeRef.current.importJson(content);
                   setPrompts(await storeRef.current.list());
+                  emitCalicoMotion("happy", "import-prompts-success", 3000);
                 }
               } catch (e) {
                 console.error("Import failed:", e);
+                emitCalicoMotion("error", "import-prompts-failed", 5000);
                 alert(t.manager.importFailed);
               }
             }}
@@ -440,11 +500,14 @@ export function App({
                   defaultPath: "prompts.json",
                 });
                 if (path) {
+                  emitCalicoMotion("working-carrying", "export-prompts");
                   const json = await storeRef.current.exportJson();
                   await writeTextFile(path, json);
+                  emitCalicoMotion("happy", "export-prompts-success", 3000);
                 }
               } catch (e) {
                 console.error("Export failed:", e);
+                emitCalicoMotion("error", "export-prompts-failed", 5000);
                 alert(t.manager.exportFailed);
               }
             }}
@@ -548,6 +611,9 @@ export function App({
           onSelect={handleSelect}
           submittingPromptId={submittingPromptId}
           hoverResetKey={hoverResetKey}
+          onGroupPreview={() => {
+            emitCalicoMotion("working-juggling", "group-preview", 1600);
+          }}
         />
       </div>
     </div>

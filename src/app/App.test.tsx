@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 import { App } from "../App";
-import type { PromptItem } from "../shared/promptTypes";
+import type { PromptContainer, PromptItem } from "../shared/promptTypes";
 
 const inputTargetPollingMock = vi.hoisted(() => vi.fn());
 const emitMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
@@ -111,6 +111,60 @@ describe("app", () => {
     expect(screen.getByRole("tooltip")).toBeTruthy();
   }
 
+  function calicoMotionStates() {
+    return emitMock.mock.calls
+      .filter(([event]) => event === "calico-motion")
+      .map(([, payload]) => (payload as { state: string }).state);
+  }
+
+  function expectCalicoMotion(state: string) {
+    expect(emitMock).toHaveBeenCalledWith(
+      "calico-motion",
+      expect.objectContaining({ state })
+    );
+  }
+
+  async function renderMainPromptManager(initialContainers: PromptContainer[] = []) {
+    currentWindowLabel = "main";
+    window.history.pushState({}, "", "/");
+    const files = new Map<string, string>([
+      [
+        "prompts.json",
+        JSON.stringify({ version: 2, containers: initialContainers }),
+      ],
+      [
+        "settings.json",
+        JSON.stringify({
+          version: 1,
+          language: "zh-CN",
+          blacklistedApps: [],
+          overlayPlacement: { buttonOffset: null, buttonPosition: null },
+          floatingButton: { visible: true },
+          promptInsertion: { mode: "paste_and_submit" },
+        }),
+      ],
+    ]);
+    const { readTextFile, writeTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockImplementation(
+      async (path: string) => {
+        const value = files.get(path);
+        if (!value) throw new Error("missing file: " + path);
+        return value;
+      }
+    );
+    (writeTextFile as ReturnType<typeof vi.fn>).mockImplementation(
+      async (path: string, value: string) => {
+        files.set(path, value);
+      }
+    );
+
+    await act(async () => {
+      render(<App />);
+    });
+    await screen.findByRole("heading", { name: "管理提示词" });
+    return files;
+  }
+
   it("shows prompt list in popover mode by default", async () => {
     const { readTextFile } = await import("@tauri-apps/plugin-fs");
     (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
@@ -208,6 +262,18 @@ describe("app", () => {
     });
 
     expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
+  it("emits thinking motion when a reused prompt popover opens", async () => {
+    currentWindowLabel = "prompt-popover";
+    window.history.pushState({}, "", "/?mode=popover");
+    await renderPromptPopover();
+
+    await act(async () => {
+      await eventHandlers.get("prompt-popover-opened")?.({ payload: "popover" });
+    });
+
+    expectCalicoMotion("thinking");
   });
 
   it("clears visible prompt hover preview when the popover is dismissed", async () => {
@@ -417,6 +483,36 @@ describe("app", () => {
     });
   });
 
+  it("emits typing then happy Calico motion for single prompt autosend success", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === "paste_prompt_and_submit_to_last_target") {
+        return { copied: true, sent: true, error: null };
+      }
+      return undefined;
+    });
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      JSON.stringify({ version: 1, prompts: mockPrompts })
+    );
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    fireEvent.click(await screen.findByText("Test Prompt"));
+
+    await waitFor(() => {
+      expectCalicoMotion("happy");
+    });
+    expect(calicoMotionStates()).toEqual(
+      expect.arrayContaining(["working-typing", "happy"])
+    );
+    expect(calicoMotionStates().indexOf("working-typing")).toBeLessThan(
+      calicoMotionStates().indexOf("happy")
+    );
+  });
+
   it("pastes without pressing return when prompt insertion mode is paste only", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockClear();
@@ -458,6 +554,8 @@ describe("app", () => {
       kind: "sent",
       message: "已填入输入框",
     });
+    expectCalicoMotion("working-typing");
+    expectCalicoMotion("happy");
   });
 
   it("hides the prompt list before autosending a selected single prompt without throw animation", async () => {
@@ -557,6 +655,8 @@ describe("app", () => {
       "paste_prompt_and_submit_to_last_target",
       expect.anything()
     );
+    expectCalicoMotion("working-conducting");
+    expectCalicoMotion("happy");
   });
 
   it("autosends grouped prompts without emitting a paper-plane throw event", async () => {
@@ -680,6 +780,7 @@ describe("app", () => {
         action: "request_accessibility_permission",
       });
     });
+    expectCalicoMotion("notification");
     expect(emitMock).not.toHaveBeenCalledWith(
       "prompt-throw-send",
       expect.anything()
@@ -720,6 +821,7 @@ describe("app", () => {
         message: "已填入输入框，未发送",
       });
     });
+    expectCalicoMotion("error");
   });
 
   it("hides the prompt popover before autosending the selected prompt", async () => {
@@ -856,6 +958,7 @@ describe("app", () => {
         expect.any(Error)
       );
     });
+    expectCalicoMotion("error");
     warn.mockRestore();
   });
 
@@ -1017,6 +1120,102 @@ describe("app", () => {
     await waitFor(() => {
       expect(screen.getByText("My Prompt")).toBeTruthy();
     });
+    expectCalicoMotion("working-typing");
+    expectCalicoMotion("happy");
+  });
+
+  it("emits building then happy after creating a prompt group", async () => {
+    await renderMainPromptManager();
+
+    fireEvent.click(screen.getByRole("button", { name: "群组" }));
+    fireEvent.change(screen.getByPlaceholderText("标题"), {
+      target: { value: "Grouped Work" },
+    });
+    fireEvent.change(screen.getAllByLabelText(/提示词 \d+ 内容/i)[0], {
+      target: { value: "First body" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "添加群组" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Grouped Work")).toBeTruthy();
+    });
+    expect(calicoMotionStates()).toEqual(
+      expect.arrayContaining(["working-building", "happy"])
+    );
+    expect(calicoMotionStates().indexOf("working-building")).toBeLessThan(
+      calicoMotionStates().indexOf("happy")
+    );
+  });
+
+  it("emits sweeping motion when deleting a prompt", async () => {
+    await renderMainPromptManager([
+      {
+        id: "delete-1",
+        title: "Delete Me",
+        type: "single",
+        prompts: [{ id: "delete-1-entry", body: "Body", order: 0 }],
+        intervalMs: 700,
+        order: 0,
+        createdAt: "2026-07-03T00:00:00.000Z",
+        updatedAt: "2026-07-03T00:00:00.000Z",
+      },
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "删除" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认" }));
+
+    await waitFor(() => {
+      expect(screen.queryByText("Delete Me")).toBeNull();
+    });
+    expectCalicoMotion("working-sweeping");
+    expectCalicoMotion("happy");
+  });
+
+  it("emits carrying motion for reorder, import, and export", async () => {
+    const files = await renderMainPromptManager([
+      {
+        id: "first",
+        title: "First",
+        type: "single",
+        prompts: [{ id: "first-entry", body: "First body", order: 0 }],
+        intervalMs: 700,
+        order: 0,
+        createdAt: "2026-07-03T00:00:00.000Z",
+        updatedAt: "2026-07-03T00:00:00.000Z",
+      },
+      {
+        id: "second",
+        title: "Second",
+        type: "single",
+        prompts: [{ id: "second-entry", body: "Second body", order: 0 }],
+        intervalMs: 700,
+        order: 1,
+        createdAt: "2026-07-03T00:00:00.000Z",
+        updatedAt: "2026-07-03T00:00:00.000Z",
+      },
+    ]);
+    files.set("import.json", JSON.stringify({ version: 2, containers: [] }));
+    const { open, save } = await import("@tauri-apps/plugin-dialog");
+    (open as ReturnType<typeof vi.fn>).mockResolvedValue("import.json");
+    (save as ReturnType<typeof vi.fn>).mockResolvedValue("export.json");
+
+    fireEvent.click(screen.getAllByText("↓")[0]);
+    await waitFor(() => {
+      expectCalicoMotion("working-carrying");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "导入" }));
+    await waitFor(() => {
+      expectCalicoMotion("happy");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "导出" }));
+    await waitFor(() => {
+      expect(files.has("export.json")).toBe(true);
+    });
+
+    expect(calicoMotionStates().filter((state) => state === "working-carrying").length)
+      .toBeGreaterThanOrEqual(3);
   });
 
   it("does not show floating button controls on the main prompt management page", async () => {
