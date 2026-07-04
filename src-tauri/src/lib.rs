@@ -15,10 +15,9 @@ mod overlay_position;
 pub use overlay_position::{prompt_button_position, OverlayPoint};
 mod windows;
 pub use windows::{
-    hide_paper_plane_flight, hide_prompt_button, hide_prompt_popover, move_prompt_button_to,
-    prompt_button_position_cmd, show_paper_plane_flight_from_button, show_prompt_button,
-    show_prompt_button_controls_from_button, show_prompt_popover, show_prompt_popover_from_button,
-    toggle_prompt_popover_from_button,
+    hide_prompt_button, hide_prompt_popover, move_prompt_button_to, prompt_button_position_cmd,
+    show_prompt_button, show_prompt_button_controls_from_button, show_prompt_popover,
+    show_prompt_popover_from_button, toggle_prompt_popover_from_button,
 };
 mod macos_panels;
 pub use macos_panels::{activate_main_window, configure_non_activating_panel};
@@ -998,8 +997,6 @@ pub fn run() {
             show_prompt_popover_from_button,
             toggle_prompt_popover_from_button,
             show_prompt_button_controls_from_button,
-            show_paper_plane_flight_from_button,
-            hide_paper_plane_flight,
             prompt_button_position_cmd,
             move_prompt_button_to,
             open_main_window,

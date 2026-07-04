@@ -12,7 +12,6 @@ use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 pub const BUTTON_WINDOW_LABEL: &str = "prompt-button";
 pub const POPOVER_WINDOW_LABEL: &str = "prompt-popover";
-pub const PAPER_FLIGHT_WINDOW_LABEL: &str = "paper-plane-flight";
 
 pub const BUTTON_WIDTH: f64 = 132.0;
 pub const BUTTON_HEIGHT: f64 = 132.0;
@@ -260,21 +259,6 @@ fn enable_prompt_popover_outside_click_monitor(app: &tauri::AppHandle) {
     set_outside_click_monitor_active(true);
 }
 
-fn paper_flight_points(
-    monitor_width: f64,
-    monitor_height: f64,
-    button_x: f64,
-    button_y: f64,
-    monitor_x: f64,
-    monitor_y: f64,
-) -> (f64, f64, f64, f64) {
-    let start_x = button_x + 102.0 - monitor_x;
-    let start_y = button_y + 45.0 - monitor_y;
-    let end_x = (start_x - 460.0).clamp(48.0, monitor_width - 48.0);
-    let end_y = (start_y - 120.0).clamp(48.0, monitor_height - 48.0);
-    (start_x, start_y, end_x, end_y)
-}
-
 #[derive(serde::Serialize)]
 pub struct PromptButtonPosition {
     pub x: f64,
@@ -474,80 +458,6 @@ pub fn toggle_prompt_popover_from_button(
 pub fn show_prompt_button_controls_from_button(app: tauri::AppHandle) -> Result<(), String> {
     let position = button_relative_popover_position(&app, BUTTON_WIDTH, BUTTON_HEIGHT);
     show_popover_mode(position.0, position.1, "button-controls", &app)
-}
-
-#[tauri::command]
-pub fn show_paper_plane_flight_from_button(app: tauri::AppHandle) -> Result<(), String> {
-    let Some(button) = app.get_webview_window(BUTTON_WINDOW_LABEL) else {
-        return Ok(());
-    };
-    let monitor = button
-        .current_monitor()
-        .map_err(|e| e.to_string())?
-        .or(app.primary_monitor().map_err(|e| e.to_string())?);
-    let Some(monitor) = monitor else {
-        return Ok(());
-    };
-
-    let scale = monitor.scale_factor();
-    let monitor_x = monitor.position().x as f64 / scale;
-    let monitor_y = monitor.position().y as f64 / scale;
-    let monitor_w = monitor.size().width as f64 / scale;
-    let monitor_h = monitor.size().height as f64 / scale;
-
-    let position = button.outer_position().map_err(|e| e.to_string())?;
-    let button_scale = button.scale_factor().unwrap_or(1.0);
-    let button_x = position.x as f64 / button_scale;
-    let button_y = position.y as f64 / button_scale;
-    let (start_x, start_y, end_x, end_y) = paper_flight_points(
-        monitor_w, monitor_h, button_x, button_y, monitor_x, monitor_y,
-    );
-
-    if let Some(window) = app.get_webview_window(PAPER_FLIGHT_WINDOW_LABEL) {
-        let _ = window.close();
-    }
-
-    let url = format!(
-        "paper-flight.html?startX={:.0}&startY={:.0}&endX={:.0}&endY={:.0}",
-        start_x, start_y, end_x, end_y
-    );
-    let window =
-        WebviewWindowBuilder::new(&app, PAPER_FLIGHT_WINDOW_LABEL, WebviewUrl::App(url.into()))
-            .title("Paper Plane")
-            .inner_size(monitor_w, monitor_h)
-            .resizable(false)
-            .decorations(false)
-            .always_on_top(true)
-            .skip_taskbar(true)
-            .visible(false)
-            .focused(false)
-            .focusable(false)
-            .position(monitor_x, monitor_y)
-            .build()
-            .map_err(|e| e.to_string())?;
-
-    crate::macos_panels::configure_transparent_webview_window(&window)?;
-    crate::macos_panels::configure_non_activating_panel(&window)?;
-    crate::macos_panels::configure_ignores_mouse_events(&window, true)?;
-    window.show().map_err(|e| e.to_string())?;
-
-    let app_for_close = app.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(1200));
-        if let Some(window) = app_for_close.get_webview_window(PAPER_FLIGHT_WINDOW_LABEL) {
-            let _ = window.close();
-        }
-    });
-
-    Ok(())
-}
-
-#[tauri::command]
-pub fn hide_paper_plane_flight(app: tauri::AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window(PAPER_FLIGHT_WINDOW_LABEL) {
-        window.close().map_err(|e| e.to_string())?;
-    }
-    Ok(())
 }
 
 fn button_relative_popover_position(
@@ -858,49 +768,6 @@ mod tests {
         assert!(source.contains("NSEventMask::LeftMouseDown"));
         assert!(source.contains("NSEventMask::RightMouseDown"));
         assert!(source.contains("NSEventMask::OtherMouseDown"));
-    }
-
-    #[test]
-    fn paper_flight_points_move_left_and_up_when_space_allows() {
-        let (sx, sy, ex, ey) = paper_flight_points(1440.0, 900.0, 1000.0, 600.0, 0.0, 0.0);
-        assert_eq!((sx, sy), (1102.0, 645.0));
-        assert!(ex < sx);
-        assert!(ey < sy);
-    }
-
-    #[test]
-    fn paper_flight_points_stay_inside_monitor_bounds() {
-        let (_sx, _sy, ex, ey) = paper_flight_points(500.0, 320.0, 40.0, 30.0, 0.0, 0.0);
-        assert!((48.0..=452.0).contains(&ex));
-        assert!((48.0..=272.0).contains(&ey));
-    }
-
-    #[test]
-    fn paper_flight_window_has_backend_close_fallback() {
-        let source = include_str!("windows.rs");
-        assert!(source.contains("PAPER_FLIGHT_WINDOW_LABEL"));
-        assert!(source.contains("Duration::from_millis(1200)"));
-    }
-
-    #[test]
-    fn paper_flight_window_is_configured_before_showing() {
-        let source = include_str!("windows.rs");
-        let start = source
-            .find("pub fn show_paper_plane_flight_from_button")
-            .expect("paper flight command should exist");
-        let end = source[start..]
-            .find("let app_for_close = app.clone();")
-            .expect("paper flight backend close fallback should exist");
-        let command_source = &source[start..start + end];
-        assert!(command_source.contains(".visible(false)"));
-        assert!(command_source.contains(".focused(false)"));
-        assert!(command_source.contains(".focusable(false)"));
-        assert!(command_source.contains("configure_ignores_mouse_events(&window, true)?;"));
-        assert!(command_source.contains("window.show().map_err"));
-        assert!(
-            command_source.find("configure_ignores_mouse_events(&window, true)?;")
-                < command_source.find("window.show().map_err")
-        );
     }
 
     #[test]

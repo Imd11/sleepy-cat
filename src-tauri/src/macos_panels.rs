@@ -87,24 +87,6 @@ pub fn configure_transparent_webview_window(window: &tauri::WebviewWindow) -> Re
         .map_err(|e| e.to_string())
 }
 
-#[cfg(target_os = "macos")]
-pub fn configure_ignores_mouse_events(
-    window: &tauri::WebviewWindow,
-    ignores: bool,
-) -> Result<(), String> {
-    let ns_window_ptr = window.ns_window().map_err(|e| e.to_string())?;
-    if ns_window_ptr.is_null() {
-        return Err("ns_window returned null".to_string());
-    }
-
-    unsafe {
-        let ns_window = &*(ns_window_ptr.cast::<NSWindow>());
-        ns_window.setIgnoresMouseEvents(ignores);
-    }
-
-    Ok(())
-}
-
 #[cfg(not(target_os = "macos"))]
 pub fn activate_main_window(_window: &tauri::WebviewWindow) -> Result<(), String> {
     Ok(())
@@ -117,13 +99,5 @@ pub fn configure_non_activating_panel(_window: &tauri::WebviewWindow) -> Result<
 
 #[cfg(not(target_os = "macos"))]
 pub fn configure_transparent_webview_window(_window: &tauri::WebviewWindow) -> Result<(), String> {
-    Ok(())
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn configure_ignores_mouse_events(
-    _window: &tauri::WebviewWindow,
-    _ignores: bool,
-) -> Result<(), String> {
     Ok(())
 }

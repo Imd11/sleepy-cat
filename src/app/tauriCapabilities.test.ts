@@ -1,4 +1,4 @@
-import { readFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { describe, expect, it } from "vitest";
 
 describe("Tauri capabilities", () => {
@@ -10,5 +10,10 @@ describe("Tauri capabilities", () => {
     expect(capability.windows).toEqual(
       expect.arrayContaining(["main", "prompt-button", "prompt-popover"])
     );
+    expect(capability.windows).not.toContain("paper-plane-flight");
+  });
+
+  it("does not grant permissions to the removed paper-plane flight window", () => {
+    expect(existsSync("src-tauri/capabilities/paper-flight.json")).toBe(false);
   });
 });

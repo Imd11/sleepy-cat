@@ -1,4 +1,4 @@
-import { readFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { describe, expect, it } from "vitest";
 
 describe("overlay button html", () => {
@@ -151,12 +151,9 @@ describe("overlay button html", () => {
     expect(html).toContain("motionResetTimer");
   });
 
-  it("grants only minimal IPC access to the paper-plane flight window", () => {
-    const capability = JSON.parse(
-      readFileSync("src-tauri/capabilities/paper-flight.json", "utf8")
-    );
-
-    expect(capability.windows).toEqual(["paper-plane-flight"]);
-    expect(capability.permissions).toEqual(["core:default"]);
+  it("does not ship the removed paper-plane flight window", () => {
+    expect(existsSync("public/paper-flight.html")).toBe(false);
+    expect(existsSync("public/calico/paper-plane.svg")).toBe(false);
+    expect(existsSync("src-tauri/capabilities/paper-flight.json")).toBe(false);
   });
 });
