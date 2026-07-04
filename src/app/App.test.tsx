@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 import { App } from "../App";
 import type { PromptItem } from "../shared/promptTypes";
@@ -71,6 +71,46 @@ describe("app", () => {
     );
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function renderPromptPopover() {
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockImplementation(
+      async (path: string) => {
+        if (path.includes("prompts")) {
+          return JSON.stringify({ version: 1, prompts: mockPrompts });
+        }
+        if (path.includes("settings")) {
+          return JSON.stringify({
+            version: 1,
+            language: "zh-CN",
+            blacklistedApps: [],
+            overlayPlacement: { buttonOffset: null, buttonPosition: null },
+            floatingButton: { visible: true },
+            promptInsertion: { mode: "paste_and_submit" },
+          });
+        }
+        throw new Error("unexpected path: " + path);
+      }
+    );
+
+    await act(async () => {
+      render(<App />);
+    });
+    await screen.findByText("Test Prompt");
+  }
+
+  function revealPromptPopoverTooltip() {
+    vi.useFakeTimers();
+    fireEvent.mouseEnter(screen.getByRole("option", { name: /Test Prompt/i }));
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+    expect(screen.getByRole("tooltip")).toBeTruthy();
+  }
+
   it("shows prompt list in popover mode by default", async () => {
     const { readTextFile } = await import("@tauri-apps/plugin-fs");
     (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
@@ -131,6 +171,34 @@ describe("app", () => {
 
     expect(await screen.findByText("Fresh Prompt")).toBeTruthy();
     expect(screen.queryByText("Test Prompt")).toBeNull();
+  });
+
+  it("clears visible prompt hover preview when a reused popover is opened", async () => {
+    currentWindowLabel = "prompt-popover";
+    window.history.pushState({}, "", "/?mode=popover");
+    await renderPromptPopover();
+    revealPromptPopoverTooltip();
+
+    const handler = eventHandlers.get("prompt-popover-opened");
+    expect(handler).toBeTruthy();
+    await act(async () => {
+      await handler?.({ payload: "popover" });
+    });
+
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
+  it("clears visible prompt hover preview when the popover is dismissed", async () => {
+    currentWindowLabel = "prompt-popover";
+    window.history.pushState({}, "", "/?mode=popover");
+    await renderPromptPopover();
+    revealPromptPopoverTooltip();
+
+    await act(async () => {
+      await eventHandlers.get("prompt-popover-dismissed")?.({ payload: undefined });
+    });
+
+    expect(screen.queryByRole("tooltip")).toBeNull();
   });
 
   it("does not select stale prompt rows while a reused popover is refreshing", async () => {

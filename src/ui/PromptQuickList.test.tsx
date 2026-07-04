@@ -166,6 +166,63 @@ describe("PromptQuickList", () => {
     expect(screen.getByRole("tooltip")).toBeTruthy();
   });
 
+  it("clears hover preview when the reset key changes", () => {
+    vi.useFakeTimers();
+    const { rerender } = renderQuickList({ hoverResetKey: 0 });
+
+    revealHoverPreview(screen.getByRole("option", { name: /修复流程/i }));
+    expect(screen.getByRole("tooltip")).toBeTruthy();
+
+    const zh = getMessages("zh-CN");
+    rerender(
+      <PromptQuickList
+        prompts={prompts}
+        messages={zh.quickList}
+        groupMeta={zh.manager.groupMeta}
+        onSelect={() => {}}
+        hoverResetKey={1}
+      />
+    );
+
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
+  it("cancels a pending hover preview when the reset key changes", () => {
+    vi.useFakeTimers();
+    const { rerender } = renderQuickList({ hoverResetKey: 0 });
+
+    fireEvent.mouseEnter(screen.getByRole("option", { name: /修复流程/i }));
+
+    const zh = getMessages("zh-CN");
+    rerender(
+      <PromptQuickList
+        prompts={prompts}
+        messages={zh.quickList}
+        groupMeta={zh.manager.groupMeta}
+        onSelect={() => {}}
+        hoverResetKey={1}
+      />
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
+  it("does not show hover preview from focus alone", () => {
+    vi.useFakeTimers();
+    renderQuickList();
+
+    fireEvent.focus(screen.getByRole("option", { name: /修复流程/i }));
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
   it("shows full single prompt content on hover", () => {
     vi.useFakeTimers();
     renderQuickList();
@@ -229,6 +286,19 @@ describe("PromptQuickList", () => {
     fireEvent.click(option);
 
     expect(selected).toEqual(prompts[1]);
+  });
+
+  it("clears hover preview before selecting a prompt", () => {
+    vi.useFakeTimers();
+    let selected: PromptContainer | null = null;
+    renderQuickList({ onSelect: (prompt) => { selected = prompt; } });
+
+    const option = screen.getByRole("option", { name: /修复流程/i });
+    revealHoverPreview(option);
+    fireEvent.click(option);
+
+    expect(selected).toEqual(prompts[1]);
+    expect(screen.queryByRole("tooltip")).toBeNull();
   });
 
   it("disables the prompt currently being submitted", () => {

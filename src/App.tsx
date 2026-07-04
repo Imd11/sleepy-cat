@@ -181,12 +181,16 @@ export function App({
   const [submittingPromptId, setSubmittingPromptId] = useState<string | null>(null);
   const [activeSettings, setActiveSettings] = useState<Settings>(settings);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [hoverResetKey, setHoverResetKey] = useState(0);
   const storeRef = useRef(createPromptStore(createTauriPromptStorage()));
   const settingsStoreRef = useRef(createSettingsStore(createTauriSettingsStorage()));
   const promptListRefreshingRef = useRef(false);
   const t = getMessages(activeSettings.language);
   const reloadPrompts = useCallback(async () => {
     setPrompts(await storeRef.current.list());
+  }, []);
+  const resetPromptHoverPreview = useCallback(() => {
+    setHoverResetKey((key) => key + 1);
   }, []);
 
   useEffect(() => {
@@ -254,10 +258,11 @@ export function App({
     if (windowLabel !== "prompt-popover") return;
 
     let active = true;
-    let dispose: (() => void) | undefined;
+    const disposers: Array<() => void> = [];
 
     listen<string>("prompt-popover-opened", async (event) => {
       if (!active || event.payload !== "popover") return;
+      resetPromptHoverPreview();
       promptListRefreshingRef.current = true;
       try {
         await reloadPrompts();
@@ -267,7 +272,7 @@ export function App({
     })
       .then((unlisten) => {
         if (active) {
-          dispose = unlisten;
+          disposers.push(unlisten);
           return;
         }
         unlisten();
@@ -276,11 +281,26 @@ export function App({
         console.warn("Failed to listen for prompt popover refresh:", error);
       });
 
+    listen("prompt-popover-dismissed", () => {
+      if (!active || currentWindowLabel() !== "prompt-popover") return;
+      resetPromptHoverPreview();
+    })
+      .then((unlisten) => {
+        if (active) {
+          disposers.push(unlisten);
+          return;
+        }
+        unlisten();
+      })
+      .catch((error) => {
+        console.warn("Failed to listen for prompt popover dismissal:", error);
+      });
+
     return () => {
       active = false;
-      dispose?.();
+      disposers.forEach((dispose) => dispose());
     };
-  }, [reloadPrompts, windowLabel]);
+  }, [reloadPrompts, resetPromptHoverPreview, windowLabel]);
 
   const handleSelect = async (prompt: PromptContainer) => {
     if (submittingPromptId || promptListRefreshingRef.current) return;
@@ -516,6 +536,7 @@ export function App({
           groupMeta={t.manager.groupMeta}
           onSelect={handleSelect}
           submittingPromptId={submittingPromptId}
+          hoverResetKey={hoverResetKey}
         />
       </div>
     </>

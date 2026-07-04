@@ -12,6 +12,7 @@ interface PromptQuickListProps {
   groupMeta: Messages["manager"]["groupMeta"];
   onSelect: (prompt: PromptContainer) => void;
   submittingPromptId?: string | null;
+  hoverResetKey?: number;
 }
 
 type HoverPreviewState = {
@@ -42,6 +43,7 @@ export function PromptQuickList({
   groupMeta,
   onSelect,
   submittingPromptId = null,
+  hoverResetKey = 0,
 }: PromptQuickListProps) {
   const [hoverPreview, setHoverPreview] = useState<HoverPreviewState | null>(null);
   const hoverPreviewTimerRef = useRef<number | null>(null);
@@ -53,6 +55,10 @@ export function PromptQuickList({
       clearHoverPreviewTimer();
     };
   }, []);
+
+  useEffect(() => {
+    hideHoverPreview();
+  }, [hoverResetKey]);
 
   function clearHoverPreviewTimer() {
     if (hoverPreviewTimerRef.current !== null) {
@@ -137,6 +143,11 @@ export function PromptQuickList({
     setHoverPreview(null);
   }
 
+  function selectPrompt(prompt: PromptContainer) {
+    hideHoverPreview();
+    onSelect(prompt);
+  }
+
   return (
     <div className="prompt-quick-shell">
       <div
@@ -163,9 +174,8 @@ export function PromptQuickList({
               disabled={submittingPromptId === prompt.id}
               onMouseEnter={(event) => scheduleHoverPreview(prompt, event.currentTarget)}
               onMouseLeave={hideHoverPreview}
-              onFocus={(event) => scheduleHoverPreview(prompt, event.currentTarget)}
               onBlur={hideHoverPreview}
-              onClick={() => onSelect(prompt)}
+              onClick={() => selectPrompt(prompt)}
             >
               <span className="prompt-quick-title-row">
                 <span className="prompt-quick-title">{prompt.title}</span>
