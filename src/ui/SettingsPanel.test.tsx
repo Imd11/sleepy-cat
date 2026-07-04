@@ -18,13 +18,15 @@ describe("settings panel", () => {
   function renderPanel(
     settings: Settings = mockSettings,
     onPromptInsertionModeChange: (mode: PromptInsertionMode) => void = () => {},
-    onLanguageChange: (language: AppLanguage) => void = () => {}
+    onLanguageChange: (language: AppLanguage) => void = () => {},
+    onBack?: () => void
   ) {
     render(
       <SettingsPanel
         settings={settings}
         onLanguageChange={onLanguageChange}
         onPromptInsertionModeChange={onPromptInsertionModeChange}
+        onBack={onBack}
       />
     );
   }
@@ -59,18 +61,19 @@ describe("settings panel", () => {
     renderPanel();
 
     expect(screen.getByRole("heading", { name: "语言" })).toBeTruthy();
-    expect(screen.getByLabelText("界面语言")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /界面语言.*中文/ })).toBeTruthy();
   });
 
-  it("renders language selection as a right-aligned settings row", () => {
+  it("renders language selection as a custom dropdown row", () => {
     renderPanel();
 
-    const languageSelect = screen.getByLabelText("界面语言");
-    const row = languageSelect.closest(".settings-row");
+    const trigger = screen.getByRole("button", { name: /界面语言.*中文/ });
+    const row = trigger.closest(".settings-row");
 
     expect(row).toBeTruthy();
     expect(row?.querySelector(".settings-row-main")).toBeTruthy();
-    expect(row?.querySelector(".settings-row-control")?.contains(languageSelect)).toBe(true);
+    expect(row?.querySelector(".settings-row-control")?.contains(trigger)).toBe(true);
+    expect(screen.queryByRole("combobox")).toBeNull();
   });
 
   it("does not render instructional settings descriptions", () => {
@@ -92,15 +95,44 @@ describe("settings panel", () => {
     expect(row?.querySelector(".settings-row-control")?.contains(selectedButton)).toBe(true);
   });
 
-  it("changes language", () => {
+  it("opens and selects language from the custom dropdown", () => {
     let selectedLanguage: AppLanguage | null = null;
     renderPanel(mockSettings, () => {}, (language) => { selectedLanguage = language; });
 
-    fireEvent.change(screen.getByLabelText("界面语言"), {
-      target: { value: "en-US" },
-    });
+    fireEvent.click(screen.getByRole("button", { name: /界面语言.*中文/ }));
+
+    expect(screen.getByRole("listbox", { name: "界面语言" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("option", { name: "English" }));
 
     expect(selectedLanguage).toBe("en-US");
+    expect(screen.queryByRole("listbox", { name: "界面语言" })).toBeNull();
+  });
+
+  it("closes the language dropdown with Escape", () => {
+    renderPanel();
+
+    fireEvent.click(screen.getByRole("button", { name: /界面语言.*中文/ }));
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.queryByRole("listbox", { name: "界面语言" })).toBeNull();
+  });
+
+  it("closes the language dropdown on outside click", () => {
+    renderPanel();
+
+    fireEvent.click(screen.getByRole("button", { name: /界面语言.*中文/ }));
+    fireEvent.pointerDown(document.body);
+
+    expect(screen.queryByRole("listbox", { name: "界面语言" })).toBeNull();
+  });
+
+  it("renders optional manager back button", () => {
+    let wentBack = false;
+    renderPanel(mockSettings, () => {}, () => {}, () => { wentBack = true; });
+
+    fireEvent.click(screen.getByRole("button", { name: "返回管理提示词" }));
+
+    expect(wentBack).toBe(true);
   });
 
   it("renders English labels when English is selected", () => {

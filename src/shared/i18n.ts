@@ -31,6 +31,7 @@ export const messages = {
     },
     settings: {
       title: "设置",
+      backToManager: "返回管理提示词",
       subtitle: "控制 Calico 如何填入提示词。",
       languageTitle: "语言",
       languageDescription: "选择应用界面使用的语言。",
@@ -115,6 +116,7 @@ export const messages = {
     },
     settings: {
       title: "Settings",
+      backToManager: "Back to prompt manager",
       subtitle: "Control how Calico inserts prompts.",
       languageTitle: "Language",
       languageDescription: "Choose the language used by Prompt Picker.",

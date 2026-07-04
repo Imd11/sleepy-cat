@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type DragEvent } from "react";
 import type { PromptContainer } from "../shared/promptTypes";
 import {
   DEFAULT_GROUP_INTERVAL_MS,
+  MAX_GROUP_INTERVAL_MS,
+  MIN_GROUP_INTERVAL_MS,
   getPromptContainerBodies,
   getPromptContainerPreviewLines,
 } from "../shared/promptTypes";
@@ -75,6 +77,20 @@ function hasValidDraft(draft: Draft): boolean {
   if (!draft.title.trim()) return false;
   if (draft.type === "single") return Boolean(draft.body.trim());
   return cleanBodies(draft.prompts).length > 0;
+}
+
+const GROUP_INTERVAL_STEP_SECONDS = 0.1;
+
+function formatIntervalSeconds(intervalMs: number): string {
+  return String(Number((intervalMs / 1000).toFixed(2)));
+}
+
+function intervalSecondsToMs(seconds: number): number {
+  if (!Number.isFinite(seconds)) return MIN_GROUP_INTERVAL_MS;
+  const minSeconds = MIN_GROUP_INTERVAL_MS / 1000;
+  const maxSeconds = MAX_GROUP_INTERVAL_MS / 1000;
+  const clampedSeconds = Math.min(maxSeconds, Math.max(minSeconds, seconds));
+  return Math.round(clampedSeconds * 1000);
 }
 
 function moveArrayItem<T>(items: T[], from: number, to: number): T[] {
@@ -542,6 +558,13 @@ function GroupFields({
   onMovePrompt,
 }: GroupFieldsProps) {
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
+  const [intervalSecondsInput, setIntervalSecondsInput] = useState(() =>
+    formatIntervalSeconds(intervalMs)
+  );
+
+  useEffect(() => {
+    setIntervalSecondsInput(formatIntervalSeconds(intervalMs));
+  }, [intervalMs]);
 
   const handleDragStart = (event: DragEvent<HTMLButtonElement>, index: number) => {
     setDraggingIndex(index);
@@ -557,20 +580,32 @@ function GroupFields({
     onMovePrompt(sourceIndex, targetIndex);
   };
 
+  const handleIntervalChange = (value: string) => {
+    setIntervalSecondsInput(value);
+    if (!value.trim()) return;
+    onIntervalChange(intervalSecondsToMs(Number(value)));
+  };
+
   return (
     <div className="group-editor">
       <label className="interval-field">
         <span>{messages.manager.delayBetweenPrompts}</span>
         <input
+          aria-label={messages.manager.delayBetweenPrompts}
           className="field"
           type="number"
-          min={200}
-          max={3000}
-          step={50}
-          value={intervalMs}
-          onChange={(e) => onIntervalChange(Number(e.target.value))}
+          min={MIN_GROUP_INTERVAL_MS / 1000}
+          max={MAX_GROUP_INTERVAL_MS / 1000}
+          step={GROUP_INTERVAL_STEP_SECONDS}
+          value={intervalSecondsInput}
+          onBlur={() => {
+            if (!intervalSecondsInput.trim()) {
+              setIntervalSecondsInput(formatIntervalSeconds(intervalMs));
+            }
+          }}
+          onChange={(e) => handleIntervalChange(e.target.value)}
         />
-        <span>ms</span>
+        <span>s</span>
       </label>
       <div className="group-prompt-list">
         {prompts.map((body, index) => (

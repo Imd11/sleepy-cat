@@ -453,7 +453,20 @@ describe("app", () => {
 
     expect(screen.getByRole("heading", { name: "设置" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "填入并发送" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "返回" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "返回管理提示词" })).toBeNull();
+  });
+
+  it("shows a settings back arrow when settings is opened from manager", async () => {
+    await renderMainPromptManager();
+
+    fireEvent.click(screen.getByRole("button", { name: "设置" }));
+
+    expect(await screen.findByRole("heading", { name: "设置" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "返回管理提示词" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "返回管理提示词" }));
+
+    expect(await screen.findByRole("heading", { name: "管理提示词" })).toBeTruthy();
   });
 
   it("renders settings mode with the desktop settings panel shell", async () => {

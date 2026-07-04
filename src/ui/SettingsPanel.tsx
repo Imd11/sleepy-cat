@@ -1,23 +1,36 @@
 import type { AppLanguage, PromptInsertionMode, Settings } from "../shared/settingsStore";
-import { LANGUAGE_LABELS, getMessages } from "../shared/i18n";
+import { getMessages } from "../shared/i18n";
+import { LanguageDropdown } from "./LanguageDropdown";
 
 interface SettingsPanelProps {
   settings: Settings;
   onLanguageChange: (language: AppLanguage) => void;
   onPromptInsertionModeChange: (mode: PromptInsertionMode) => void;
+  onBack?: () => void;
 }
 
 export function SettingsPanel({
   settings,
   onLanguageChange,
   onPromptInsertionModeChange,
+  onBack,
 }: SettingsPanelProps) {
   const t = getMessages(settings.language);
 
   return (
     <div className="settings-panel page-stack">
       <header className="page-header settings-page-header">
-        <div>
+        <div className="settings-title-row">
+          {onBack ? (
+            <button
+              aria-label={t.settings.backToManager}
+              className="button icon-button settings-back-button"
+              type="button"
+              onClick={onBack}
+            >
+              ←
+            </button>
+          ) : null}
           <h1>{t.settings.title}</h1>
         </div>
       </header>
@@ -26,21 +39,18 @@ export function SettingsPanel({
         <div className="settings-card-heading">
           <h2>{t.settings.languageTitle}</h2>
         </div>
-        <label className="settings-row">
+        <div className="settings-row">
           <span className="settings-row-main">
             <span className="settings-row-title">{t.settings.languageField}</span>
           </span>
           <span className="settings-row-control">
-            <select
-              className="field settings-select"
+            <LanguageDropdown
+              label={t.settings.languageField}
               value={settings.language}
-              onChange={(event) => onLanguageChange(event.target.value as AppLanguage)}
-            >
-              <option value="zh-CN">{LANGUAGE_LABELS["zh-CN"]}</option>
-              <option value="en-US">{LANGUAGE_LABELS["en-US"]}</option>
-            </select>
+              onChange={onLanguageChange}
+            />
           </span>
-        </label>
+        </div>
       </section>
 
       <section className="settings-card">

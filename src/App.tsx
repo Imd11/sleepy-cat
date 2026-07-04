@@ -201,6 +201,7 @@ export function App({
   const [activeSettings, setActiveSettings] = useState<Settings>(settings);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [hoverResetKey, setHoverResetKey] = useState(0);
+  const [settingsReturnTarget, setSettingsReturnTarget] = useState<"manager" | null>(null);
   const storeRef = useRef(createPromptStore(createTauriPromptStorage()));
   const settingsStoreRef = useRef(createSettingsStore(createTauriSettingsStorage()));
   const promptListRefreshingRef = useRef(false);
@@ -250,6 +251,7 @@ export function App({
 
     listen("open-manager-window", () => {
       if (!active || currentWindowLabel() !== "main") return;
+      setSettingsReturnTarget(null);
       setMode("manager");
     })
       .then((unlisten) => {
@@ -265,6 +267,7 @@ export function App({
 
     listen("open-settings-window", () => {
       if (!active || currentWindowLabel() !== "main") return;
+      setSettingsReturnTarget(null);
       setMode("settings");
     })
       .then((unlisten) => {
@@ -427,7 +430,10 @@ export function App({
           <PromptManager
             prompts={prompts}
             messages={t}
-            onOpenSettings={() => setMode("settings")}
+            onOpenSettings={() => {
+              setSettingsReturnTarget("manager");
+              setMode("settings");
+            }}
             onCreate={async (input) => {
               emitCalicoMotion("working-typing", "create-prompt");
               await storeRef.current.create(input);
@@ -520,6 +526,10 @@ export function App({
             settings={activeSettings}
             onLanguageChange={updateLanguage}
             onPromptInsertionModeChange={updatePromptInsertionMode}
+            onBack={settingsReturnTarget === "manager" ? () => {
+              setSettingsReturnTarget(null);
+              setMode("manager");
+            } : undefined}
           />
           {windowLabel !== "main" ? (
             <div className="page-footer">

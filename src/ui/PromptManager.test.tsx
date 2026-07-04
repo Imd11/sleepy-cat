@@ -199,6 +199,44 @@ describe("prompt manager", () => {
     });
   });
 
+  it("shows group interval in seconds while creating a group", () => {
+    renderManager();
+
+    fireEvent.click(screen.getByRole("button", { name: "群组" }));
+
+    const intervalInput = screen.getByLabelText("提示词间隔") as HTMLInputElement;
+    expect(intervalInput.value).toBe("0.7");
+    expect(screen.getByText("s")).toBeTruthy();
+    expect(screen.queryByText("ms")).toBeNull();
+  });
+
+  it("converts group interval seconds to milliseconds when creating a group", () => {
+    let createdGroup: { intervalMs: number } | null = null;
+    renderManager({ onCreateGroup: (input) => { createdGroup = input; } });
+
+    fireEvent.click(screen.getByRole("button", { name: "群组" }));
+    fireEvent.change(screen.getByPlaceholderText("标题"), {
+      target: { value: "Timed Group" },
+    });
+    fireEvent.change(screen.getAllByLabelText(/提示词 \d+ 内容/i)[0], {
+      target: { value: "First" },
+    });
+    fireEvent.change(screen.getByLabelText("提示词间隔"), {
+      target: { value: "1.5" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "添加群组" }));
+
+    expect(createdGroup?.intervalMs).toBe(1500);
+  });
+
+  it("shows existing group interval in seconds while editing", () => {
+    renderManager();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "编辑" })[1]);
+
+    expect((screen.getByLabelText("提示词间隔") as HTMLInputElement).value).toBe("0.7");
+  });
+
   it("shows success feedback after creating a group", async () => {
     renderManager();
 
