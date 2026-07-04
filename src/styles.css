@@ -295,6 +295,18 @@ button {
   grid-column: 1 / -1;
 }
 
+.panel-heading-with-actions {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.panel-heading-with-actions h2 {
+  margin: 0;
+}
+
 .segmented-control {
   display: inline-flex;
   width: fit-content;
@@ -856,9 +868,9 @@ button {
 }
 
 .prompt-manager {
-  width: min(840px, 100%);
+  width: min(760px, 100%);
   margin: 0 auto;
-  gap: 18px;
+  gap: 14px;
 }
 
 .prompt-manager .page-header {
@@ -867,8 +879,9 @@ button {
 }
 
 .prompt-manager .page-header h1 {
-  font-size: 24px;
+  font-size: 21px;
   font-weight: 680;
+  line-height: 1.2;
 }
 
 .prompt-manager .page-header p,
@@ -886,27 +899,27 @@ button {
 
 .prompt-manager .editor-panel,
 .prompt-manager .list-panel {
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--pp-surface);
   border: 1px solid var(--pp-border);
-  border-radius: var(--pp-radius-lg);
+  border-radius: var(--pp-radius-sm);
   box-shadow: var(--pp-shadow-soft);
 }
 
 .prompt-manager .editor-panel {
   position: relative;
   gap: 12px;
-  padding: 16px;
+  padding: 14px;
 }
 
 .prompt-manager .list-panel {
-  padding: 16px;
+  padding: 14px;
 }
 
 .prompt-manager .button {
   min-height: 32px;
-  border-radius: var(--pp-radius-sm);
+  border-radius: 7px;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 620;
 }
 
 .prompt-manager .button-primary {
@@ -1016,13 +1029,14 @@ button {
 .prompt-manager .prompt-list {
   gap: 0;
   overflow: hidden;
-  background: var(--pp-surface-subtle);
+  margin-top: 10px;
+  background: var(--pp-surface);
   border: 1px solid var(--pp-border);
-  border-radius: var(--pp-radius-md);
+  border-radius: var(--pp-radius-sm);
 }
 
 .prompt-manager .prompt-item {
-  background: rgba(255, 255, 255, 0.74);
+  background: transparent;
   border: 0;
   border-bottom: 1px solid var(--pp-border);
   border-radius: 0;
@@ -1037,7 +1051,7 @@ button {
 }
 
 .prompt-manager .prompt-content {
-  padding: 12px 13px;
+  padding: 11px 13px;
 }
 
 .prompt-manager .prompt-info strong {

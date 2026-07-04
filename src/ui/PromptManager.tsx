@@ -266,25 +266,26 @@ export function PromptManager({
           runSubmitOnce(() => handleCreate(draftFromCreateDom()));
         }}
       >
-        <div className="section-heading">
-          <h2>{messages.manager.newContainerTitle}</h2>
-          <p>{messages.manager.newContainerDescription}</p>
-        </div>
-        <div className="segmented-control" aria-label={messages.manager.promptContainerType}>
-          <button
-            className={draft.type === "single" ? "is-selected" : ""}
-            type="button"
-            onClick={() => setDraft({ ...draft, type: "single" })}
-          >
-            {messages.manager.single}
-          </button>
-          <button
-            className={draft.type === "group" ? "is-selected" : ""}
-            type="button"
-            onClick={() => setDraft({ ...draft, type: "group" })}
-          >
-            {messages.manager.group}
-          </button>
+        <div className="section-heading panel-heading-with-actions">
+          <div>
+            <h2>{messages.manager.newContainerTitle}</h2>
+          </div>
+          <div className="segmented-control" aria-label={messages.manager.promptContainerType}>
+            <button
+              className={draft.type === "single" ? "is-selected" : ""}
+              type="button"
+              onClick={() => setDraft({ ...draft, type: "single" })}
+            >
+              {messages.manager.single}
+            </button>
+            <button
+              className={draft.type === "group" ? "is-selected" : ""}
+              type="button"
+              onClick={() => setDraft({ ...draft, type: "group" })}
+            >
+              {messages.manager.group}
+            </button>
+          </div>
         </div>
         <input
           ref={titleInputRef}
@@ -341,9 +342,10 @@ export function PromptManager({
       </form>
 
       <section className="list-panel">
-        <div className="section-heading">
-          <h2>{messages.manager.promptListTitle}</h2>
-          <p>{messages.manager.promptListDescription}</p>
+        <div className="section-heading panel-heading-with-actions">
+          <div>
+            <h2>{messages.manager.promptListTitle}</h2>
+          </div>
         </div>
         <div className="prompt-list">
           {prompts.length === 0 ? (

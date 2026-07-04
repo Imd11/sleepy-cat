@@ -58,6 +58,32 @@ describe("prompt manager", () => {
     expect(screen.getByText("群组 · 2 条 · 700ms")).toBeTruthy();
   });
 
+  it("does not render instructional manager section descriptions", () => {
+    renderManager();
+
+    expect(screen.queryByText("为快速选择器添加一个提示词或一个有顺序的提示词组。")).toBeNull();
+    expect(screen.queryByText("选择小猫列表中的显示顺序。")).toBeNull();
+  });
+
+  it("renders create panel heading and type control in the same shell", () => {
+    renderManager();
+
+    const singleButton = screen.getByRole("button", { name: "单个" });
+    const header = singleButton.closest(".panel-heading-with-actions");
+
+    expect(header).toBeTruthy();
+    expect(header?.textContent).toContain("新建提示词容器");
+  });
+
+  it("renders prompt list as a unified row list", () => {
+    renderManager();
+
+    const list = screen.getByText("Code Review").closest(".prompt-list");
+
+    expect(list).toBeTruthy();
+    expect(list?.querySelectorAll(".prompt-item").length).toBe(2);
+  });
+
   it("creates a single prompt container", () => {
     let created: { title: string; body: string } | null = null;
     renderManager({ onCreate: (input) => { created = input; } });
