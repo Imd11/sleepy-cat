@@ -756,6 +756,43 @@ describe("app", () => {
     });
   });
 
+  it("emits autosend activity around single prompt sending", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const calls: string[] = [];
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      calls.push(`invoke:${command}`);
+      if (command === "paste_prompt_and_submit_to_last_target") {
+        return { copied: true, sent: true, error: null };
+      }
+      return undefined;
+    });
+    emitMock.mockImplementation(async (event: string, payload?: unknown) => {
+      calls.push(`emit:${event}:${JSON.stringify(payload)}`);
+    });
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      JSON.stringify({ version: 1, prompts: mockPrompts })
+    );
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    fireEvent.click(await screen.findByText("Test Prompt"));
+
+    await waitFor(() => {
+      expect(calls).toContain("invoke:paste_prompt_and_submit_to_last_target");
+      expect(calls).toContain('emit:prompt-autosend-activity:{"active":false}');
+    });
+    expect(calls).toContain('emit:prompt-autosend-activity:{"active":true}');
+    expect(calls.indexOf('emit:prompt-autosend-activity:{"active":true}')).toBeLessThan(
+      calls.indexOf("invoke:paste_prompt_and_submit_to_last_target")
+    );
+    expect(calls.indexOf("invoke:paste_prompt_and_submit_to_last_target")).toBeLessThan(
+      calls.indexOf('emit:prompt-autosend-activity:{"active":false}')
+    );
+  });
+
   it("emits typing then happy Calico motion for single prompt autosend success", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockImplementation(async (command: string) => {
@@ -829,6 +866,45 @@ describe("app", () => {
     });
     expectCalicoMotion("working-typing");
     expectCalicoMotion("happy");
+  });
+
+  it("emits autosend activity around paste-only prompt insertion", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const calls: string[] = [];
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      calls.push(`invoke:${command}`);
+      return undefined;
+    });
+    emitMock.mockImplementation(async (event: string, payload?: unknown) => {
+      calls.push(`emit:${event}:${JSON.stringify(payload)}`);
+    });
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(JSON.stringify({ version: 1, prompts: mockPrompts }))
+      .mockResolvedValueOnce(JSON.stringify({
+        version: 1,
+        blacklistedApps: [],
+        overlayPlacement: { buttonOffset: null, buttonPosition: null },
+        floatingButton: { visible: true },
+        promptInsertion: { mode: "paste_only" },
+      }));
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    fireEvent.click(await screen.findByText("Test Prompt"));
+
+    await waitFor(() => {
+      expect(calls).toContain("invoke:paste_prompt_to_last_target");
+      expect(calls).toContain('emit:prompt-autosend-activity:{"active":false}');
+    });
+    expect(calls.indexOf('emit:prompt-autosend-activity:{"active":true}')).toBeLessThan(
+      calls.indexOf("invoke:paste_prompt_to_last_target")
+    );
+    expect(calls.indexOf("invoke:paste_prompt_to_last_target")).toBeLessThan(
+      calls.indexOf('emit:prompt-autosend-activity:{"active":false}')
+    );
   });
 
   it("emits a permission status when paste-only insertion lacks accessibility permission", async () => {

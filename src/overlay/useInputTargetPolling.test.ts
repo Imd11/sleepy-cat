@@ -347,4 +347,66 @@ describe("useInputTargetPolling", () => {
 
     expect(showPromptButton).toHaveBeenCalled(); // at least once, polling continues
   });
+
+  it("pauses input target polling while autosend is active", async () => {
+    getFrontmostApp.mockResolvedValue({ name: "Finder", bundle_id: "com.apple.finder" });
+    getCurrentInputTarget.mockResolvedValue({
+      frame: { x: 100, y: 200, width: 300, height: 40 },
+      window_frame: { x: 100, y: 200, width: 300, height: 40 },
+      button_position: [960, 700],
+      app: { name: "Finder", bundle_id: "com.apple.finder" },
+    });
+
+    void renderHook(() =>
+      useInputTargetPolling([], { buttonOffset: null }, {}, true)
+    );
+
+    await waitFor(() => {
+      expect(getFrontmostApp).toHaveBeenCalled();
+    });
+    vi.clearAllMocks();
+
+    eventMock.listeners.get("prompt-autosend-activity")?.({
+      payload: { active: true },
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(2500);
+    });
+
+    expect(getFrontmostApp).not.toHaveBeenCalled();
+    expect(getCurrentInputTarget).not.toHaveBeenCalled();
+    expect(showPromptButton).not.toHaveBeenCalled();
+  });
+
+  it("does not apply an in-flight polling result after autosend starts", async () => {
+    let resolveFrontmost: (app: { name: string; bundle_id: string }) => void = () => {};
+    getFrontmostApp.mockReturnValue(new Promise((resolve) => {
+      resolveFrontmost = resolve;
+    }));
+    getCurrentInputTarget.mockResolvedValue({
+      frame: { x: 100, y: 200, width: 300, height: 40 },
+      window_frame: { x: 100, y: 200, width: 300, height: 40 },
+      button_position: [960, 700],
+      app: { name: "Finder", bundle_id: "com.apple.finder" },
+    });
+
+    void renderHook(() =>
+      useInputTargetPolling([], { buttonOffset: null }, {}, true)
+    );
+
+    await waitFor(() => {
+      expect(getFrontmostApp).toHaveBeenCalled();
+    });
+    eventMock.listeners.get("prompt-autosend-activity")?.({
+      payload: { active: true },
+    });
+
+    await act(async () => {
+      resolveFrontmost({ name: "Finder", bundle_id: "com.apple.finder" });
+    });
+
+    expect(getCurrentInputTarget).not.toHaveBeenCalled();
+    expect(showPromptButton).not.toHaveBeenCalled();
+  });
 });

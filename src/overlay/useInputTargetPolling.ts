@@ -59,6 +59,7 @@ export function useInputTargetPolling(
   const lastTargetAtRef = useRef(0);
   const currentBasePositionRef = useRef<[number, number] | null>(null);
   const draggingRef = useRef(false);
+  const autosendPausedRef = useRef(false);
   const timeoutRef = useRef<number | null>(null);
   const generationRef = useRef(0);
 
@@ -66,6 +67,7 @@ export function useInputTargetPolling(
     let active = true;
     let unlistenDragStarted: (() => void) | undefined;
     let unlistenDragEnded: (() => void) | undefined;
+    let unlistenAutosendActivity: (() => void) | undefined;
 
     listen("prompt-button-drag-started", () => {
       draggingRef.current = true;
@@ -102,10 +104,26 @@ export function useInputTargetPolling(
       })
       .catch(() => {});
 
+    listen<{ active?: boolean }>("prompt-autosend-activity", (event) => {
+      autosendPausedRef.current = event.payload?.active === true;
+      if (!autosendPausedRef.current) {
+        lastTargetAtRef.current = Date.now();
+      }
+    })
+      .then((unlisten) => {
+        if (active) {
+          unlistenAutosendActivity = unlisten;
+        } else {
+          unlisten();
+        }
+      })
+      .catch(() => {});
+
     return () => {
       active = false;
       unlistenDragStarted?.();
       unlistenDragEnded?.();
+      unlistenAutosendActivity?.();
     };
   }, [options.onButtonDragEnd]);
 
@@ -149,6 +167,11 @@ export function useInputTargetPolling(
         return;
       }
 
+      if (autosendPausedRef.current) {
+        schedulePoll(500);
+        return;
+      }
+
       try {
         const fixedPosition = savedButtonPosition(overlayPlacement);
         if (fixedPosition) {
@@ -156,10 +179,10 @@ export function useInputTargetPolling(
         }
         const displayPosition = lastButtonPositionRef.current ?? DEFAULT_BUTTON_POSITION;
         const app = await getFrontmostApp();
-        if (!isCurrent()) return;
+        if (!isCurrent() || autosendPausedRef.current) return;
 
         const inputTarget = (await getCurrentInputTarget()) as InputTarget | null;
-        if (!isCurrent()) return;
+        if (!isCurrent() || autosendPausedRef.current) return;
 
         if (inputTarget && app) {
           setTarget(inputTarget);

@@ -56,6 +56,14 @@ async function emitAutosendStatus(
   }
 }
 
+async function emitAutosendActivity(active: boolean) {
+  try {
+    await emit("prompt-autosend-activity", { active });
+  } catch (error) {
+    console.warn("Failed to emit autosend activity:", error);
+  }
+}
+
 type CalicoMotionState =
   | "thinking"
   | "working-typing"
@@ -212,6 +220,7 @@ export function App({
   const storeRef = useRef(createPromptStore(createTauriPromptStorage()));
   const settingsStoreRef = useRef(createSettingsStore(createTauriSettingsStorage()));
   const promptListRefreshingRef = useRef(false);
+  const autosendInFlightRef = useRef(false);
   const t = getMessages(activeSettings.language);
   const reloadPromptData = useCallback(async () => {
     const data = await storeRef.current.getData();
@@ -375,11 +384,14 @@ export function App({
   }, [reloadPromptData, resetPromptHoverPreview, windowLabel]);
 
   const handleSelect = async (prompt: PromptContainer) => {
-    if (submittingPromptId || promptListRefreshingRef.current) return;
+    if (autosendInFlightRef.current || promptListRefreshingRef.current) return;
+    autosendInFlightRef.current = true;
     setSubmittingPromptId(prompt.id);
     try {
       await hidePromptPopover();
       await waitForWindowHide();
+      setSubmittingPromptId(null);
+      await emitAutosendActivity(true);
       const bodies = getPromptContainerBodies(prompt);
       if (bodies.length === 0) {
         emitCalicoMotion("error", "autosend-empty-prompt", 5000);
@@ -425,7 +437,9 @@ export function App({
         await emitAutosendStatus("failed", t.autosend.genericFailed);
       }
     } finally {
+      autosendInFlightRef.current = false;
       setSubmittingPromptId(null);
+      await emitAutosendActivity(false);
     }
   };
 

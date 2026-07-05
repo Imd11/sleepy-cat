@@ -100,24 +100,31 @@ fn current_input_target(
 }
 
 #[tauri::command]
-fn begin_prompt_pick_session(
+async fn begin_prompt_pick_session(
     session_id: u64,
-    session_state: tauri::State<PromptPickSessionState>,
-    recent_state: tauri::State<LastInputTargetState>,
-) -> Option<FrontmostApp> {
-    if let Some(input_target) = platform::macos::current_input_target() {
-        record_last_input_target_if_valid(recent_state.inner(), &input_target);
-    }
+    session_state: tauri::State<'_, PromptPickSessionState>,
+    recent_state: tauri::State<'_, LastInputTargetState>,
+) -> Result<Option<FrontmostApp>, String> {
+    let session_state = session_state.inner().clone();
+    let recent_state = recent_state.inner().clone();
 
-    let Some(target) = prompt_pick_session_target(
-        frontmost_app(),
-        platform::macos::visible_apps(),
-        recent_state.inner().get(),
-    ) else {
-        session_state.inner().clear_if_current(session_id);
-        return None;
-    };
-    record_prompt_pick_session_target_if_valid(session_state.inner(), target, session_id)
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Some(input_target) = platform::macos::current_input_target() {
+            record_last_input_target_if_valid(&recent_state, &input_target);
+        }
+
+        let Some(target) = prompt_pick_session_target(
+            frontmost_app(),
+            platform::macos::visible_apps(),
+            recent_state.get(),
+        ) else {
+            session_state.clear_if_current(session_id);
+            return None;
+        };
+        record_prompt_pick_session_target_if_valid(&session_state, target, session_id)
+    })
+    .await
+    .map_err(|error| format!("Prompt pick session task failed: {}", error))
 }
 
 #[tauri::command]
@@ -137,14 +144,18 @@ fn paste_prompt_to_app(
 }
 
 #[tauri::command]
-fn paste_prompt_to_last_target(
+async fn paste_prompt_to_last_target(
     body: String,
-    state: tauri::State<LastInputTargetState>,
+    state: tauri::State<'_, LastInputTargetState>,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
-    paste_prompt_to_last_target_impl(&body, state.inner(), |text| {
-        copy_text_to_clipboard(&app, text)
+    let state = state.inner().clone();
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        paste_prompt_to_last_target_impl(&body, &state, |text| copy_text_to_clipboard(&app, text))
     })
+    .await
+    .map_err(|error| format!("Paste task failed: {}", error))?
 }
 
 fn paste_prompt_to_last_target_impl<C>(
@@ -162,18 +173,20 @@ where
 }
 
 #[tauri::command]
-fn paste_prompt_and_submit_to_last_target(
+async fn paste_prompt_and_submit_to_last_target(
     body: String,
-    session_state: tauri::State<PromptPickSessionState>,
-    recent_state: tauri::State<LastInputTargetState>,
+    session_state: tauri::State<'_, PromptPickSessionState>,
+    recent_state: tauri::State<'_, LastInputTargetState>,
     app: tauri::AppHandle,
 ) -> Result<AutosendOutcome, String> {
-    paste_prompt_and_submit_to_last_target_impl(
-        &body,
-        session_state.inner(),
-        recent_state.inner(),
-        &app,
-    )
+    let session_state = session_state.inner().clone();
+    let recent_state = recent_state.inner().clone();
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        paste_prompt_and_submit_to_last_target_impl(&body, &session_state, &recent_state, &app)
+    })
+    .await
+    .map_err(|error| format!("Autosend task failed: {}", error))?
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -211,20 +224,27 @@ impl AutosendSequenceOutcome {
 }
 
 #[tauri::command]
-fn paste_prompt_sequence_and_submit_to_last_target(
+async fn paste_prompt_sequence_and_submit_to_last_target(
     bodies: Vec<String>,
     interval_ms: u64,
-    session_state: tauri::State<PromptPickSessionState>,
-    recent_state: tauri::State<LastInputTargetState>,
+    session_state: tauri::State<'_, PromptPickSessionState>,
+    recent_state: tauri::State<'_, LastInputTargetState>,
     app: tauri::AppHandle,
 ) -> Result<AutosendSequenceOutcome, String> {
-    paste_prompt_sequence_and_submit_to_last_target_impl(
-        &bodies,
-        interval_ms,
-        session_state.inner(),
-        recent_state.inner(),
-        &app,
-    )
+    let session_state = session_state.inner().clone();
+    let recent_state = recent_state.inner().clone();
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        paste_prompt_sequence_and_submit_to_last_target_impl(
+            &bodies,
+            interval_ms,
+            &session_state,
+            &recent_state,
+            &app,
+        )
+    })
+    .await
+    .map_err(|error| format!("Autosend sequence task failed: {}", error))?
 }
 
 fn paste_prompt_sequence_and_submit_to_last_target_impl(
@@ -478,8 +498,8 @@ pub struct TargetClickPoint {
     pub y: f64,
 }
 
-#[derive(Default)]
-pub struct LastInputTargetState(std::sync::Mutex<Option<LastInputTarget>>);
+#[derive(Clone, Default)]
+pub struct LastInputTargetState(std::sync::Arc<std::sync::Mutex<Option<LastInputTarget>>>);
 
 impl LastInputTargetState {
     pub fn set(&self, target: LastInputTarget) {
@@ -511,8 +531,8 @@ struct PromptPickSessionInner {
     target: Option<PromptPickSessionTarget>,
 }
 
-#[derive(Default)]
-pub struct PromptPickSessionState(std::sync::Mutex<PromptPickSessionInner>);
+#[derive(Clone, Default)]
+pub struct PromptPickSessionState(std::sync::Arc<std::sync::Mutex<PromptPickSessionInner>>);
 
 impl PromptPickSessionState {
     pub fn begin(&self, session_id: u64) {
@@ -1115,6 +1135,55 @@ mod last_input_target_tests {
         state.set(target);
 
         assert_eq!(state.get().unwrap().app.bundle_id, "com.apple.Notes");
+    }
+
+    #[test]
+    fn cloned_last_input_target_state_shares_target() {
+        let state = LastInputTargetState::default();
+        let cloned = state.clone();
+
+        state.set(LastInputTarget {
+            app: FrontmostApp {
+                name: "Codex".to_string(),
+                bundle_id: "com.openai.codex".to_string(),
+            },
+            observed_at_ms: now_ms(),
+            click_point: Some(TargetClickPoint { x: 12.0, y: 34.0 }),
+        });
+
+        assert_eq!(cloned.get().unwrap().app.bundle_id, "com.openai.codex");
+    }
+
+    #[test]
+    fn cloned_prompt_pick_session_state_shares_target() {
+        let state = PromptPickSessionState::default();
+        let cloned = state.clone();
+
+        state.begin(7);
+        assert!(cloned.set_if_current(
+            7,
+            PromptPickSessionTarget {
+                app: FrontmostApp {
+                    name: "Codex".to_string(),
+                    bundle_id: "com.openai.codex".to_string(),
+                },
+                observed_at_ms: now_ms(),
+                click_point: None,
+            }
+        ));
+
+        assert_eq!(state.take().unwrap().app.bundle_id, "com.openai.codex");
+    }
+
+    #[test]
+    fn autosend_and_prompt_capture_commands_use_spawn_blocking() {
+        let source = include_str!("lib.rs");
+
+        assert!(source.contains("async fn begin_prompt_pick_session"));
+        assert!(source.contains("async fn paste_prompt_to_last_target"));
+        assert!(source.contains("async fn paste_prompt_and_submit_to_last_target"));
+        assert!(source.contains("async fn paste_prompt_sequence_and_submit_to_last_target"));
+        assert!(source.matches("tauri::async_runtime::spawn_blocking(move ||").count() >= 4);
     }
 
     #[test]
