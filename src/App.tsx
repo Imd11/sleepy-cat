@@ -509,7 +509,7 @@ export function App({
     return (
       <>
         {pollingController}
-        <div className="app-window app-window-main">
+        <div className="app-window app-window-main app-window-manager">
           <PromptManager
             prompts={activePrompts}
             categories={categories}
