@@ -431,10 +431,16 @@ fn native_autosend_uses_osascript() -> bool {
     false
 }
 
-pub fn paste_prompt_with_copier<C>(body: &str, copy_sender: C) -> Result<(), String>
+fn paste_prompt_with_accessibility_gate<C, T>(
+    body: &str,
+    copy_sender: C,
+    is_trusted: T,
+) -> Result<(), String>
 where
     C: FnOnce(&str) -> Result<(), String>,
+    T: FnOnce() -> bool,
 {
+    ensure_accessibility_trusted_with(is_trusted)?;
     copy_sender(body)?;
     Command::new("osascript")
         .args([
@@ -444,6 +450,13 @@ where
         .output()
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+pub fn paste_prompt_with_copier<C>(body: &str, copy_sender: C) -> Result<(), String>
+where
+    C: FnOnce(&str) -> Result<(), String>,
+{
+    paste_prompt_with_accessibility_gate(body, copy_sender, is_accessibility_trusted)
 }
 
 pub fn paste_prompt_to_app_with_copier<C>(
@@ -1160,6 +1173,26 @@ mod tests {
             outcome.reason,
             Some(AutosendFailureReason::MissingAccessibilityPermission)
         );
+    }
+
+    #[test]
+    fn plain_paste_does_not_copy_before_accessibility_permission() {
+        let mut copied = false;
+
+        let result = paste_prompt_with_accessibility_gate(
+            "hello",
+            |_| {
+                copied = true;
+                Ok(())
+            },
+            || false,
+        );
+
+        assert_eq!(
+            result,
+            Err(ACCESSIBILITY_PERMISSION_REQUIRED_ERROR.to_string())
+        );
+        assert!(!copied);
     }
 
     #[test]
