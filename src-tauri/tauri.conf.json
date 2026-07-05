@@ -32,8 +32,8 @@
     "active": true,
     "targets": "all",
     "macOS": {
-      "signingIdentity": "Apple Development: Jinhang Yang (33T9V6C2V2)",
-      "hardenedRuntime": false
+      "signingIdentity": "Developer ID Application: Jinhang Yang (2GWPG8KGW5)",
+      "hardenedRuntime": true
     },
     "icon": [
       "icons/32x32.png",

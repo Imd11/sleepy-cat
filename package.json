@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "sign:macos": "bash scripts/sign-macos-bundle.sh",
-    "tauri:build:signed": "tauri build && npm run sign:macos"
+    "tauri:build:signed": "tauri build"
   },
   "keywords": [],
   "author": "",
