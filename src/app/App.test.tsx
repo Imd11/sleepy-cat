@@ -646,11 +646,11 @@ describe("app", () => {
       ],
     });
 
-    expect(screen.getByRole("button", { name: /开发代码/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^开发代码1$/ })).toBeTruthy();
     expect(screen.getByText("Code Review")).toBeTruthy();
     expect(screen.queryByText("Blog Draft")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: /写作/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^写作1$/ }));
 
     expect(await screen.findByText("Blog Draft")).toBeTruthy();
     expect(screen.queryByText("Code Review")).toBeNull();
@@ -659,14 +659,14 @@ describe("app", () => {
   it("creates a category from the manager rail and selects it", async () => {
     const files = await renderMainPromptManager();
 
-    fireEvent.click(screen.getByRole("button", { name: /\+ 新建/ }));
+    fireEvent.click(screen.getByRole("button", { name: "新分类" }));
     fireEvent.change(screen.getByRole("textbox", { name: /分类名称/ }), {
       target: { value: "写作" },
     });
     fireEvent.keyDown(screen.getByRole("textbox", { name: /分类名称/ }), { key: "Enter" });
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /写作/ }).getAttribute("aria-current"))
+      expect(screen.getByRole("button", { name: /^写作0$/ }).getAttribute("aria-current"))
         .toBe("true");
     });
 
@@ -683,7 +683,9 @@ describe("app", () => {
       containers: [makeContainer({ id: "dev-1", categoryId: "cat-dev", title: "Code Review" })],
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /删除分类/ }));
+    fireEvent.click(screen.getByRole("button", { name: /开发代码 的更多操作/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "删除分类" }));
+    fireEvent.click(screen.getByRole("button", { name: "删除分类" }));
 
     expect(await screen.findByRole("status")).toBeTruthy();
     expect(screen.getByRole("status").textContent).toContain("未能删除分类");
@@ -703,7 +705,7 @@ describe("app", () => {
       containers: [],
     });
 
-    expect(screen.getByRole("button", { name: /默认/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^默认0$/ })).toBeTruthy();
     expect(files.get("prompts.json")).toContain("\"name\":\"Default\"");
   });
 
