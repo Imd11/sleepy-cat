@@ -231,6 +231,17 @@ describe("overlay button html", () => {
     expect(html).not.toContain("payload.kind || 'copied'");
   });
 
+  it("only debounces Accessibility settings after the settings open command succeeds", () => {
+    const html = readOverlayHtml();
+    const settingsBlock = html.slice(
+      html.indexOf("const now = Date.now();"),
+      html.indexOf("} catch (error)", html.indexOf("const now = Date.now();"))
+    );
+
+    expect(settingsBlock.indexOf("await invokeOrThrow('open_accessibility_settings');"))
+      .toBeLessThan(settingsBlock.indexOf("lastAccessibilitySettingsOpenAt = now;"));
+  });
+
   it("opens prompts without switching Calico into a throw-ready pose", () => {
     const html = readOverlayHtml();
 

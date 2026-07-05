@@ -337,10 +337,10 @@ async function handleMissingPromptInteractionPermission(permission) {
     showStatusBubble({ kind: 'failed', message: permissionText(permission, 'settingsOpened') });
     return;
   }
-  lastAccessibilitySettingsOpenAt = now;
 
   try {
     await invokeOrThrow('open_accessibility_settings');
+    lastAccessibilitySettingsOpenAt = now;
     showStatusBubble({ kind: 'failed', message: permissionText(permission, 'settingsOpened') });
   } catch (error) {
     console.error('Failed to open Accessibility settings', error);
