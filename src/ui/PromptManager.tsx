@@ -393,14 +393,16 @@ export function PromptManager({
             }}
           />
         )}
-        <button
-          className="button button-primary editor-submit"
-          type="submit"
-          onPointerDown={(event) => event.preventDefault()}
-          onPointerUp={() => runSubmitOnce(() => handleCreate(draftFromCreateDom()))}
-        >
-          {draft.type === "group" ? messages.manager.addGroup : messages.manager.addPrompt}
-        </button>
+        <div className="editor-submit-row">
+          <button
+            className="button button-primary editor-submit"
+            type="submit"
+            onPointerDown={(event) => event.preventDefault()}
+            onPointerUp={() => runSubmitOnce(() => handleCreate(draftFromCreateDom()))}
+          >
+            {draft.type === "group" ? messages.manager.addGroup : messages.manager.addPrompt}
+          </button>
+        </div>
         {createToastMessage ? (
           <div className="create-toast" role="status" aria-live="polite">
             <span className="create-toast-icon" aria-hidden="true">✓</span>

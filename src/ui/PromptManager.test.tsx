@@ -111,6 +111,16 @@ describe("prompt manager", () => {
     expect(header?.textContent).toContain("新建提示词容器");
   });
 
+  it("renders the create action in a right-aligned form action row", () => {
+    renderManager();
+
+    const addButton = screen.getByRole("button", { name: "添加提示词" });
+    const actionRow = addButton.closest(".editor-submit-row");
+
+    expect(actionRow).toBeTruthy();
+    expect(actionRow?.textContent).toContain("添加提示词");
+  });
+
   it("marks prompt container type segments with pressed state", () => {
     renderManager();
 
