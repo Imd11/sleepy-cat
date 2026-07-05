@@ -409,4 +409,48 @@ describe("useInputTargetPolling", () => {
     expect(getCurrentInputTarget).not.toHaveBeenCalled();
     expect(showPromptButton).not.toHaveBeenCalled();
   });
+
+  it("resumes polling after an in-flight poll is paused by autosend", async () => {
+    let resolveFrontmost: (app: { name: string; bundle_id: string }) => void = () => {};
+    getFrontmostApp
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveFrontmost = resolve;
+      }))
+      .mockResolvedValue({ name: "Finder", bundle_id: "com.apple.finder" });
+    getCurrentInputTarget.mockResolvedValue({
+      frame: { x: 100, y: 200, width: 300, height: 40 },
+      window_frame: { x: 100, y: 200, width: 300, height: 40 },
+      button_position: [960, 700],
+      app: { name: "Finder", bundle_id: "com.apple.finder" },
+    });
+
+    void renderHook(() =>
+      useInputTargetPolling([], { buttonOffset: null }, {}, true)
+    );
+
+    await waitFor(() => {
+      expect(getFrontmostApp).toHaveBeenCalledTimes(1);
+    });
+    eventMock.listeners.get("prompt-autosend-activity")?.({
+      payload: { active: true },
+    });
+
+    await act(async () => {
+      resolveFrontmost({ name: "Finder", bundle_id: "com.apple.finder" });
+    });
+
+    expect(getCurrentInputTarget).not.toHaveBeenCalled();
+    vi.clearAllMocks();
+
+    eventMock.listeners.get("prompt-autosend-activity")?.({
+      payload: { active: false },
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(600);
+    });
+
+    await waitFor(() => {
+      expect(getFrontmostApp).toHaveBeenCalled();
+    });
+  });
 });

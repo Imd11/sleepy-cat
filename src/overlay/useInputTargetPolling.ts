@@ -179,10 +179,18 @@ export function useInputTargetPolling(
         }
         const displayPosition = lastButtonPositionRef.current ?? DEFAULT_BUTTON_POSITION;
         const app = await getFrontmostApp();
-        if (!isCurrent() || autosendPausedRef.current) return;
+        if (!isCurrent()) return;
+        if (autosendPausedRef.current) {
+          schedulePoll(500);
+          return;
+        }
 
         const inputTarget = (await getCurrentInputTarget()) as InputTarget | null;
-        if (!isCurrent() || autosendPausedRef.current) return;
+        if (!isCurrent()) return;
+        if (autosendPausedRef.current) {
+          schedulePoll(500);
+          return;
+        }
 
         if (inputTarget && app) {
           setTarget(inputTarget);
