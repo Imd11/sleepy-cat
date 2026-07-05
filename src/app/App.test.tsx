@@ -1465,6 +1465,8 @@ describe("app", () => {
     expect(screen.queryByText("Floating Button")).toBeNull();
     expect(screen.queryByText("Hide Floating Button")).toBeNull();
     expect(screen.queryByRole("heading", { name: "设置" })).toBeNull();
+    expect(screen.queryByPlaceholderText("标题")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "+ 添加提示词" }));
     expect(screen.getByPlaceholderText("标题")).toBeTruthy();
   });
 
@@ -1491,7 +1493,7 @@ describe("app", () => {
       render(<App />);
     });
 
-    // Editor is always visible; fill title and body
+    fireEvent.click(screen.getByRole("button", { name: "+ 添加提示词" }));
     fireEvent.change(screen.getByPlaceholderText("标题"), {
       target: { value: "My Prompt" },
     });
@@ -1510,6 +1512,7 @@ describe("app", () => {
   it("emits building then happy after creating a prompt group", async () => {
     await renderMainPromptManager();
 
+    fireEvent.click(screen.getByRole("button", { name: "+ 添加提示词" }));
     fireEvent.click(screen.getByRole("button", { name: "群组" }));
     fireEvent.change(screen.getByPlaceholderText("标题"), {
       target: { value: "Grouped Work" },

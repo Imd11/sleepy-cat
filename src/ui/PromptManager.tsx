@@ -150,6 +150,7 @@ export function PromptManager({
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft>(() => emptyDraft());
   const [editDraft, setEditDraft] = useState<Draft>(() => emptyDraft());
+  const [createPanelOpen, setCreatePanelOpen] = useState(false);
   const [createToastMessage, setCreateToastMessage] = useState<string | null>(null);
   const titleInputRef = useRef<HTMLInputElement | null>(null);
   const bodyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -175,6 +176,8 @@ export function PromptManager({
   useEffect(() => {
     setEditingId(null);
     setDeleteConfirmId(null);
+    setCreatePanelOpen(false);
+    setDraft(emptyDraft());
   }, [activeCategoryId]);
 
   const setDraftPrompt = (index: number, value: string) => {
@@ -245,6 +248,20 @@ export function PromptManager({
       showCreateToast(messages.manager.promptAdded);
     }
     setDraft(emptyDraft());
+    setCreatePanelOpen(false);
+  };
+
+  const openCreatePanel = () => {
+    setCreatePanelOpen(true);
+    window.requestAnimationFrame(() => {
+      titleInputRef.current?.focus();
+      titleInputRef.current?.select();
+    });
+  };
+
+  const cancelCreate = () => {
+    setDraft(emptyDraft());
+    setCreatePanelOpen(false);
   };
 
   const handleSaveEdit = (id: string, sourceDraft = editDraft) => {
@@ -325,264 +342,289 @@ export function PromptManager({
           onDelete={onDeleteCategory}
         />
         <div className="prompt-manager-content">
-          <form
-            className="editor-panel editor-panel-stacked"
-            onSubmit={(event) => {
-              event.preventDefault();
-              runSubmitOnce(() => handleCreate(draftFromCreateDom()));
-            }}
-          >
-        <div className="section-heading panel-heading-with-actions">
-          <div>
-            <h2>{messages.manager.newContainerTitle}</h2>
-          </div>
-          <div className="segmented-control" aria-label={messages.manager.promptContainerType}>
-            <button
-              className={draft.type === "single" ? "is-selected" : ""}
-              type="button"
-              aria-pressed={draft.type === "single"}
-              onClick={() => setDraft({ ...draft, type: "single" })}
-            >
-              {messages.manager.single}
-            </button>
-            <button
-              className={draft.type === "group" ? "is-selected" : ""}
-              type="button"
-              aria-pressed={draft.type === "group"}
-              onClick={() => setDraft({ ...draft, type: "group" })}
-            >
-              {messages.manager.group}
-            </button>
-          </div>
-        </div>
-        <input
-          ref={titleInputRef}
-          className="field"
-          type="text"
-          placeholder={messages.manager.titlePlaceholder}
-          value={draft.title}
-          onChange={(e) => setDraft({ ...draft, title: e.target.value })}
-        />
-        {draft.type === "single" ? (
-          <textarea
-            ref={bodyTextareaRef}
-            className="field prompt-body-field"
-            placeholder={messages.manager.bodyPlaceholder}
-            value={draft.body}
-            onChange={(e) => setDraft({ ...draft, body: e.target.value })}
-          />
-        ) : (
-          <GroupFields
-            prompts={draft.prompts}
-            intervalMs={draft.intervalMs}
-            messages={messages}
-            promptRef={(index, node) => { groupPromptRefs.current[index] = node; }}
-            onIntervalChange={(intervalMs) => setDraft({ ...draft, intervalMs })}
-            onPromptChange={setDraftPrompt}
-            onInsertPrompt={(index) => {
-              const next = [...draft.prompts];
-              next.splice(index + 1, 0, "");
-              setDraft({ ...draft, prompts: next });
-            }}
-            onRemovePrompt={(index) => {
-              const next = draft.prompts.filter((_, i) => i !== index);
-              setDraft({ ...draft, prompts: next.length ? next : [""] });
-            }}
-            onMovePrompt={(from, to) => {
-              setDraft({ ...draft, prompts: moveArrayItem(draft.prompts, from, to) });
-            }}
-          />
-        )}
-        <div className="editor-submit-row">
-          <button
-            className="button button-primary editor-submit"
-            type="submit"
-            onPointerDown={(event) => event.preventDefault()}
-            onPointerUp={() => runSubmitOnce(() => handleCreate(draftFromCreateDom()))}
-          >
-            {draft.type === "group" ? messages.manager.addGroup : messages.manager.addPrompt}
-          </button>
-        </div>
-        {createToastMessage ? (
-          <div className="create-toast" role="status" aria-live="polite">
-            <span className="create-toast-icon" aria-hidden="true">✓</span>
-            <span>{createToastMessage}</span>
-          </div>
-        ) : null}
-          </form>
-
           <section className="list-panel">
-        <div className="section-heading panel-heading-with-actions">
-          <div>
-            <h2>{messages.manager.promptListTitle}</h2>
-          </div>
-        </div>
-        <div className="prompt-list">
-          {prompts.length === 0 ? (
-            <div className="empty-state-block">
-              {activeCategoryId ? messages.manager.emptyCategory : messages.manager.noPrompts}
+            <div className="section-heading panel-heading-with-actions">
+              <div>
+                <h2>{messages.manager.promptListTitle}</h2>
+              </div>
+              <button
+                className="button button-primary list-add-button"
+                type="button"
+                onClick={openCreatePanel}
+              >
+                + {messages.manager.addPrompt}
+              </button>
             </div>
-          ) : prompts.map((prompt, index) => (
-            <div
-              key={prompt.id}
-              className={`prompt-item ${prompt.type === "group" ? "prompt-item-group" : ""}`}
-            >
-              {editingId === prompt.id ? (
-                <form
-                  className="edit-form edit-form-stacked"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    runSubmitOnce(() => handleSaveEdit(prompt.id, draftFromEditDom()));
-                  }}
-                >
-                  <div className="segmented-control" aria-label={messages.manager.editPromptContainerType}>
+            {createPanelOpen ? (
+              <form
+                className="editor-panel editor-panel-stacked create-panel-inline"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  runSubmitOnce(() => handleCreate(draftFromCreateDom()));
+                }}
+              >
+                <div className="section-heading panel-heading-with-actions">
+                  <div>
+                    <h2>{messages.manager.newContainerTitle}</h2>
+                  </div>
+                  <div
+                    className="segmented-control"
+                    aria-label={messages.manager.promptContainerType}
+                  >
                     <button
-                      className={editDraft.type === "single" ? "is-selected" : ""}
+                      className={draft.type === "single" ? "is-selected" : ""}
                       type="button"
-                      aria-pressed={editDraft.type === "single"}
-                      onClick={() => setEditDraft({ ...editDraft, type: "single" })}
+                      aria-pressed={draft.type === "single"}
+                      onClick={() => setDraft({ ...draft, type: "single" })}
                     >
                       {messages.manager.single}
                     </button>
                     <button
-                      className={editDraft.type === "group" ? "is-selected" : ""}
+                      className={draft.type === "group" ? "is-selected" : ""}
                       type="button"
-                      aria-pressed={editDraft.type === "group"}
-                      onClick={() => setEditDraft({ ...editDraft, type: "group" })}
+                      aria-pressed={draft.type === "group"}
+                      onClick={() => setDraft({ ...draft, type: "group" })}
                     >
                       {messages.manager.group}
                     </button>
                   </div>
-                  <input
-                    ref={editTitleInputRef}
-                    className="field"
-                    type="text"
-                    value={editDraft.title}
-                    onChange={(e) => setEditDraft({ ...editDraft, title: e.target.value })}
+                </div>
+                <input
+                  ref={titleInputRef}
+                  className="field"
+                  type="text"
+                  placeholder={messages.manager.titlePlaceholder}
+                  value={draft.title}
+                  onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+                />
+                {draft.type === "single" ? (
+                  <textarea
+                    ref={bodyTextareaRef}
+                    className="field prompt-body-field"
+                    placeholder={messages.manager.bodyPlaceholder}
+                    value={draft.body}
+                    onChange={(e) => setDraft({ ...draft, body: e.target.value })}
                   />
-                  {editDraft.type === "single" ? (
-                    <textarea
-                      ref={editBodyTextareaRef}
-                      className="field prompt-body-field"
-                      value={editDraft.body}
-                      onChange={(e) => setEditDraft({ ...editDraft, body: e.target.value })}
-                    />
-                  ) : (
-                    <GroupFields
-                      prompts={editDraft.prompts}
-                      intervalMs={editDraft.intervalMs}
-                      messages={messages}
-                      promptRef={(entryIndex, node) => {
-                        editGroupPromptRefs.current[entryIndex] = node;
+                ) : (
+                  <GroupFields
+                    prompts={draft.prompts}
+                    intervalMs={draft.intervalMs}
+                    messages={messages}
+                    promptRef={(index, node) => {
+                      groupPromptRefs.current[index] = node;
+                    }}
+                    onIntervalChange={(intervalMs) => setDraft({ ...draft, intervalMs })}
+                    onPromptChange={setDraftPrompt}
+                    onInsertPrompt={(index) => {
+                      const next = [...draft.prompts];
+                      next.splice(index + 1, 0, "");
+                      setDraft({ ...draft, prompts: next });
+                    }}
+                    onRemovePrompt={(index) => {
+                      const next = draft.prompts.filter((_, i) => i !== index);
+                      setDraft({ ...draft, prompts: next.length ? next : [""] });
+                    }}
+                    onMovePrompt={(from, to) => {
+                      setDraft({ ...draft, prompts: moveArrayItem(draft.prompts, from, to) });
+                    }}
+                  />
+                )}
+                <div className="editor-submit-row">
+                  <button
+                    className="button button-secondary"
+                    type="button"
+                    onClick={cancelCreate}
+                  >
+                    {messages.manager.cancel}
+                  </button>
+                  <button
+                    className="button button-primary editor-submit"
+                    type="submit"
+                    onPointerDown={(event) => event.preventDefault()}
+                    onPointerUp={() => runSubmitOnce(() => handleCreate(draftFromCreateDom()))}
+                  >
+                    {draft.type === "group" ? messages.manager.addGroup : messages.manager.addPrompt}
+                  </button>
+                </div>
+              </form>
+            ) : null}
+            {createToastMessage ? (
+              <div className="create-toast" role="status" aria-live="polite">
+                <span className="create-toast-icon" aria-hidden="true">✓</span>
+                <span>{createToastMessage}</span>
+              </div>
+            ) : null}
+            <div className="prompt-list">
+              {prompts.length === 0 ? (
+                <div className="empty-state-block">
+                  {activeCategoryId ? messages.manager.emptyCategory : messages.manager.noPrompts}
+                </div>
+              ) : prompts.map((prompt, index) => (
+                <div
+                  key={prompt.id}
+                  className={`prompt-item ${prompt.type === "group" ? "prompt-item-group" : ""}`}
+                >
+                  {editingId === prompt.id ? (
+                    <form
+                      className="edit-form edit-form-stacked"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        runSubmitOnce(() => handleSaveEdit(prompt.id, draftFromEditDom()));
                       }}
-                      onIntervalChange={(intervalMs) => setEditDraft({ ...editDraft, intervalMs })}
-                      onPromptChange={setEditPrompt}
-                      onInsertPrompt={(entryIndex) => {
-                        const next = [...editDraft.prompts];
-                        next.splice(entryIndex + 1, 0, "");
-                        setEditDraft({ ...editDraft, prompts: next });
-                      }}
-                      onRemovePrompt={(entryIndex) => {
-                        const next = editDraft.prompts.filter((_, i) => i !== entryIndex);
-                        setEditDraft({ ...editDraft, prompts: next.length ? next : [""] });
-                      }}
-                      onMovePrompt={(from, to) => {
-                        setEditDraft({
-                          ...editDraft,
-                          prompts: moveArrayItem(editDraft.prompts, from, to),
-                        });
-                      }}
-                    />
-                  )}
-                  <div className="edit-actions">
-                    <button
-                      className="button button-primary"
-                      type="submit"
-                      onPointerDown={(event) => event.preventDefault()}
-                      onPointerUp={() => runSubmitOnce(() =>
-                        handleSaveEdit(prompt.id, draftFromEditDom())
+                    >
+                      <div
+                        className="segmented-control"
+                        aria-label={messages.manager.editPromptContainerType}
+                      >
+                        <button
+                          className={editDraft.type === "single" ? "is-selected" : ""}
+                          type="button"
+                          aria-pressed={editDraft.type === "single"}
+                          onClick={() => setEditDraft({ ...editDraft, type: "single" })}
+                        >
+                          {messages.manager.single}
+                        </button>
+                        <button
+                          className={editDraft.type === "group" ? "is-selected" : ""}
+                          type="button"
+                          aria-pressed={editDraft.type === "group"}
+                          onClick={() => setEditDraft({ ...editDraft, type: "group" })}
+                        >
+                          {messages.manager.group}
+                        </button>
+                      </div>
+                      <input
+                        ref={editTitleInputRef}
+                        className="field"
+                        type="text"
+                        value={editDraft.title}
+                        onChange={(e) => setEditDraft({ ...editDraft, title: e.target.value })}
+                      />
+                      {editDraft.type === "single" ? (
+                        <textarea
+                          ref={editBodyTextareaRef}
+                          className="field prompt-body-field"
+                          value={editDraft.body}
+                          onChange={(e) => setEditDraft({ ...editDraft, body: e.target.value })}
+                        />
+                      ) : (
+                        <GroupFields
+                          prompts={editDraft.prompts}
+                          intervalMs={editDraft.intervalMs}
+                          messages={messages}
+                          promptRef={(entryIndex, node) => {
+                            editGroupPromptRefs.current[entryIndex] = node;
+                          }}
+                          onIntervalChange={(intervalMs) =>
+                            setEditDraft({ ...editDraft, intervalMs })
+                          }
+                          onPromptChange={setEditPrompt}
+                          onInsertPrompt={(entryIndex) => {
+                            const next = [...editDraft.prompts];
+                            next.splice(entryIndex + 1, 0, "");
+                            setEditDraft({ ...editDraft, prompts: next });
+                          }}
+                          onRemovePrompt={(entryIndex) => {
+                            const next = editDraft.prompts.filter((_, i) => i !== entryIndex);
+                            setEditDraft({ ...editDraft, prompts: next.length ? next : [""] });
+                          }}
+                          onMovePrompt={(from, to) => {
+                            setEditDraft({
+                              ...editDraft,
+                              prompts: moveArrayItem(editDraft.prompts, from, to),
+                            });
+                          }}
+                        />
                       )}
-                    >
-                      {messages.manager.save}
-                    </button>
-                    <button
-                      className="button button-secondary"
-                      type="button"
-                      onClick={() => setEditingId(null)}
-                    >
-                      {messages.manager.cancel}
-                    </button>
-                  </div>
-                </form>
-              ) : deleteConfirmId === prompt.id ? (
-                <div className="delete-confirm">
-                  <span>{messages.manager.deleteConfirm}</span>
-                  <div className="confirm-actions">
-                    <button
-                      className="button button-danger"
-                      onClick={() => { onDelete(prompt.id); setDeleteConfirmId(null); }}
-                    >
-                      {messages.manager.confirm}
-                    </button>
-                    <button
-                      className="button button-secondary"
-                      onClick={() => setDeleteConfirmId(null)}
-                    >
-                      {messages.manager.cancel}
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="prompt-content">
-                  <div className="prompt-info">
-                    <div className="prompt-title-row">
-                      <strong>{prompt.title}</strong>
-                      <PromptKindBadge prompt={prompt} messages={messages} />
+                      <div className="edit-actions">
+                        <button
+                          className="button button-primary"
+                          type="submit"
+                          onPointerDown={(event) => event.preventDefault()}
+                          onPointerUp={() => runSubmitOnce(() =>
+                            handleSaveEdit(prompt.id, draftFromEditDom())
+                          )}
+                        >
+                          {messages.manager.save}
+                        </button>
+                        <button
+                          className="button button-secondary"
+                          type="button"
+                          onClick={() => setEditingId(null)}
+                        >
+                          {messages.manager.cancel}
+                        </button>
+                      </div>
+                    </form>
+                  ) : deleteConfirmId === prompt.id ? (
+                    <div className="delete-confirm">
+                      <span>{messages.manager.deleteConfirm}</span>
+                      <div className="confirm-actions">
+                        <button
+                          className="button button-danger"
+                          onClick={() => { onDelete(prompt.id); setDeleteConfirmId(null); }}
+                        >
+                          {messages.manager.confirm}
+                        </button>
+                        <button
+                          className="button button-secondary"
+                          onClick={() => setDeleteConfirmId(null)}
+                        >
+                          {messages.manager.cancel}
+                        </button>
+                      </div>
                     </div>
-                    <span className="prompt-preview-lines">
-                      {getPromptContainerPreviewLines(prompt).map((line) => (
-                        <span className="prompt-preview-line" key={line}>
-                          {line}
+                  ) : (
+                    <div className="prompt-content">
+                      <div className="prompt-info">
+                        <div className="prompt-title-row">
+                          <strong>{prompt.title}</strong>
+                          <PromptKindBadge prompt={prompt} messages={messages} />
+                        </div>
+                        <span className="prompt-preview-lines">
+                          {getPromptContainerPreviewLines(prompt).map((line) => (
+                            <span className="prompt-preview-line" key={line}>
+                              {line}
+                            </span>
+                          ))}
                         </span>
-                      ))}
-                    </span>
-                  </div>
-                  <div className="prompt-actions">
-                    <button
-                      className="button icon-button"
-                      onClick={() => handleMoveUp(index)}
-                      disabled={index === 0}
-                    >
-                      ↑
-                    </button>
-                    <button
-                      className="button icon-button"
-                      onClick={() => handleMoveDown(index)}
-                      disabled={index === prompts.length - 1}
-                    >
-                      ↓
-                    </button>
-                    <button
-                      className="button button-secondary"
-                      onClick={() => {
-                        setEditingId(prompt.id);
-                        setEditDraft(draftFromPrompt(prompt));
-                      }}
-                    >
-                      {messages.manager.edit}
-                    </button>
-                    <button
-                      className="button button-ghost-danger"
-                      onClick={() => setDeleteConfirmId(prompt.id)}
-                    >
-                      {messages.manager.delete}
-                    </button>
-                  </div>
+                      </div>
+                      <div className="prompt-actions">
+                        <button
+                          className="button icon-button"
+                          onClick={() => handleMoveUp(index)}
+                          disabled={index === 0}
+                        >
+                          ↑
+                        </button>
+                        <button
+                          className="button icon-button"
+                          onClick={() => handleMoveDown(index)}
+                          disabled={index === prompts.length - 1}
+                        >
+                          ↓
+                        </button>
+                        <button
+                          className="button button-secondary"
+                          onClick={() => {
+                            setEditingId(prompt.id);
+                            setEditDraft(draftFromPrompt(prompt));
+                          }}
+                        >
+                          {messages.manager.edit}
+                        </button>
+                        <button
+                          className="button button-ghost-danger"
+                          onClick={() => setDeleteConfirmId(prompt.id)}
+                        >
+                          {messages.manager.delete}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              )}
+              ))}
             </div>
-          ))}
-        </div>
           </section>
         </div>
       </div>

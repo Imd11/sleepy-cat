@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { PromptManager } from "./PromptManager";
 import { getMessages } from "../shared/i18n";
 import type { PromptCategory, PromptContainer } from "../shared/promptTypes";
@@ -84,6 +84,10 @@ describe("prompt manager", () => {
     };
   }
 
+  function openCreatePanel(name = "+ 添加提示词") {
+    fireEvent.click(screen.getByRole("button", { name }));
+  }
+
   it("renders prompt containers with group distinction", () => {
     renderManager();
 
@@ -101,8 +105,12 @@ describe("prompt manager", () => {
     expect(screen.queryByText("选择小猫列表中的显示顺序。")).toBeNull();
   });
 
-  it("renders create panel heading and type control in the same shell", () => {
+  it("keeps the create panel collapsed until adding a prompt", () => {
     renderManager();
+
+    expect(screen.queryByRole("heading", { name: "新建提示词容器" })).toBeNull();
+
+    openCreatePanel();
 
     const singleButton = screen.getByRole("button", { name: "单个" });
     const header = singleButton.closest(".panel-heading-with-actions");
@@ -114,6 +122,8 @@ describe("prompt manager", () => {
   it("renders the create action in a right-aligned form action row", () => {
     renderManager();
 
+    openCreatePanel();
+
     const addButton = screen.getByRole("button", { name: "添加提示词" });
     const actionRow = addButton.closest(".editor-submit-row");
 
@@ -123,6 +133,8 @@ describe("prompt manager", () => {
 
   it("marks prompt container type segments with pressed state", () => {
     renderManager();
+
+    openCreatePanel();
 
     expect(screen.getByRole("button", { name: "单个" }).getAttribute("aria-pressed"))
       .toBe("true");
@@ -146,7 +158,7 @@ describe("prompt manager", () => {
     expect(list?.querySelectorAll(".prompt-item").length).toBe(2);
   });
 
-  it("renders a left category rail without changing create and list panels", () => {
+  it("renders a left category rail with the list-first manager layout", () => {
     renderManager({
       categories: [
         { id: "cat-dev", name: "开发代码", order: 0, createdAt: "", updatedAt: "" },
@@ -158,8 +170,10 @@ describe("prompt manager", () => {
 
     expect(screen.getByRole("heading", { name: "分类" })).toBeTruthy();
     expect(screen.getByRole("button", { name: /开发代码.*2/ })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "新建提示词容器" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "提示词列表" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "新建提示词容器" })).toBeNull();
+    openCreatePanel();
+    expect(screen.getByRole("heading", { name: "新建提示词容器" })).toBeTruthy();
   });
 
   it("clears transient edit and delete state when the active category changes", () => {
@@ -188,10 +202,11 @@ describe("prompt manager", () => {
     expect(screen.queryByDisplayValue("Code Review")).toBeNull();
   });
 
-  it("creates a single prompt container", () => {
+  it("creates a single prompt container", async () => {
     let created: { title: string; body: string } | null = null;
     renderManager({ onCreate: (input) => { created = input; } });
 
+    openCreatePanel();
     fireEvent.change(screen.getByPlaceholderText("标题"), {
       target: { value: "New Single" },
     });
@@ -201,11 +216,31 @@ describe("prompt manager", () => {
     fireEvent.click(screen.getByRole("button", { name: "添加提示词" }));
 
     expect(created).toEqual({ title: "New Single", body: "Single body" });
+    await waitFor(() => {
+      expect(screen.queryByRole("heading", { name: "新建提示词容器" })).toBeNull();
+    });
+  });
+
+  it("cancels the inline create form without keeping the draft", () => {
+    renderManager();
+
+    openCreatePanel();
+    fireEvent.change(screen.getByPlaceholderText("标题"), {
+      target: { value: "Discard me" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+
+    expect(screen.queryByRole("heading", { name: "新建提示词容器" })).toBeNull();
+
+    openCreatePanel();
+
+    expect((screen.getByPlaceholderText("标题") as HTMLInputElement).value).toBe("");
   });
 
   it("shows localized success feedback after creating a single prompt", async () => {
     renderManager({ messages: getMessages("en-US") });
 
+    openCreatePanel("+ Add Prompt");
     fireEvent.change(screen.getByPlaceholderText("Title"), {
       target: { value: "New Single" },
     });
@@ -221,6 +256,7 @@ describe("prompt manager", () => {
     let created: { title: string; body: string } | null = null;
     renderManager({ onCreate: (input) => { created = input; } });
 
+    openCreatePanel();
     fireEvent.change(screen.getByPlaceholderText("标题"), {
       target: { value: "审阅修复计划" },
     });
@@ -240,6 +276,7 @@ describe("prompt manager", () => {
     let createCount = 0;
     renderManager({ onCreate: () => { createCount += 1; } });
 
+    openCreatePanel();
     fireEvent.change(screen.getByPlaceholderText("标题"), {
       target: { value: "No duplicate" },
     });
@@ -262,6 +299,7 @@ describe("prompt manager", () => {
     } | null = null;
     renderManager({ onCreateGroup: (input) => { createdGroup = input; } });
 
+    openCreatePanel();
     fireEvent.click(screen.getByRole("button", { name: "群组" }));
     fireEvent.change(screen.getByPlaceholderText("标题"), {
       target: { value: "Codex Flow" },
@@ -289,6 +327,7 @@ describe("prompt manager", () => {
   it("shows group interval in seconds while creating a group", () => {
     renderManager();
 
+    openCreatePanel();
     fireEvent.click(screen.getByRole("button", { name: "群组" }));
 
     const intervalInput = screen.getByLabelText("提示词间隔") as HTMLInputElement;
@@ -301,6 +340,7 @@ describe("prompt manager", () => {
     let createdIntervalMs: number | null = null;
     renderManager({ onCreateGroup: (input) => { createdIntervalMs = input.intervalMs; } });
 
+    openCreatePanel();
     fireEvent.click(screen.getByRole("button", { name: "群组" }));
     fireEvent.change(screen.getByPlaceholderText("标题"), {
       target: { value: "Timed Group" },
@@ -327,6 +367,7 @@ describe("prompt manager", () => {
   it("shows success feedback after creating a group", async () => {
     renderManager();
 
+    openCreatePanel();
     fireEvent.click(screen.getByRole("button", { name: "群组" }));
     fireEvent.change(screen.getByPlaceholderText("标题"), {
       target: { value: "群组提示词" },
@@ -342,6 +383,7 @@ describe("prompt manager", () => {
   it("inserts and removes group prompts from row controls", () => {
     renderManager();
 
+    openCreatePanel();
     fireEvent.click(screen.getByRole("button", { name: "群组" }));
     expect(screen.getAllByLabelText(/提示词 \d+ 内容/i)).toHaveLength(2);
 
@@ -355,6 +397,7 @@ describe("prompt manager", () => {
   it("reorders group prompts from row controls", () => {
     renderManager();
 
+    openCreatePanel();
     fireEvent.click(screen.getByRole("button", { name: "群组" }));
     const promptFields = screen.getAllByLabelText(/提示词 \d+ 内容/i);
     fireEvent.change(promptFields[0], { target: { value: "First grouped prompt" } });
@@ -370,6 +413,7 @@ describe("prompt manager", () => {
   it("does not remove the last group prompt row", () => {
     renderManager();
 
+    openCreatePanel();
     fireEvent.click(screen.getByRole("button", { name: "群组" }));
     fireEvent.click(screen.getByRole("button", { name: "移除提示词 2" }));
 
@@ -381,6 +425,7 @@ describe("prompt manager", () => {
   it("reorders group prompts by dragging the row handle", () => {
     renderManager();
 
+    openCreatePanel();
     fireEvent.click(screen.getByRole("button", { name: "群组" }));
     const promptFields = screen.getAllByLabelText(/提示词 \d+ 内容/i);
     fireEvent.change(promptFields[0], { target: { value: "First grouped prompt" } });
