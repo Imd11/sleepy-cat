@@ -617,6 +617,7 @@ export function App({
     if (promptLibraryDraftActive) return;
     try {
       setPromptLibrarySyncError(null);
+      await promptStorageRef.current.syncNow();
       await reloadPromptData();
       emitCalicoMotion("happy", "sync-prompts-success", 2200);
     } catch (e) {

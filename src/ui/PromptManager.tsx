@@ -329,6 +329,11 @@ export function PromptManager({
   };
 
   const linkedPath = promptLibraryLink.mode === "linked" ? promptLibraryLink.path : null;
+  const promptLibraryStatusText = linkedPath
+    ? promptLibrarySyncError
+      ? messages.manager.promptLibraryNeedsAttention(promptFileName(linkedPath))
+      : messages.manager.promptLibraryLinked(promptFileName(linkedPath))
+    : messages.manager.promptLibraryLocal;
 
   return (
     <div className="prompt-manager page-stack">
@@ -353,9 +358,7 @@ export function PromptManager({
       <div className="prompt-library-status">
         <div className="prompt-library-status-main">
           <strong>
-            {linkedPath
-              ? messages.manager.promptLibraryLinked(promptFileName(linkedPath))
-              : messages.manager.promptLibraryLocal}
+            {promptLibraryStatusText}
           </strong>
           {promptLibrarySyncError ? (
             <span className="prompt-library-error">

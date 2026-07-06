@@ -234,6 +234,107 @@ describe("app", () => {
     return files;
   }
 
+  async function renderLinkedPromptManager({
+    localContainers = [],
+    externalContent = JSON.stringify({ version: 2, containers: [] }),
+    externalSignature = "20:2000",
+    linkPath = "/Users/example/Desktop/prompts.json",
+    linkSignature = "10:1000",
+    readExternal,
+    writeExternal,
+    getExternalMetadata,
+  }: {
+    localContainers?: PromptContainer[];
+    externalContent?: string;
+    externalSignature?: string;
+    linkPath?: string;
+    linkSignature?: string;
+    readExternal?: () => Promise<{ content: string; signature: string }>;
+    writeExternal?: (content: string) => Promise<{ signature: string }>;
+    getExternalMetadata?: () => Promise<{ signature: string }>;
+  } = {}) {
+    currentWindowLabel = "main";
+    window.history.pushState({}, "", "/");
+    let currentExternalContent = externalContent;
+    let currentExternalSignature = externalSignature;
+    let currentMetadataSignature = externalSignature;
+    const files = new Map<string, string>([
+      [
+        "prompts.json",
+        JSON.stringify({ version: 2, containers: localContainers }),
+      ],
+      [
+        "settings.json",
+        JSON.stringify({
+          version: 1,
+          language: "zh-CN",
+          blacklistedApps: [],
+          overlayPlacement: { buttonOffset: null, buttonPosition: null },
+          floatingButton: { visible: true },
+          promptInsertion: { mode: "paste_and_submit" },
+          permissions: { accessibilityPromptRequested: false },
+          promptLibraryLink: {
+            mode: "linked",
+            path: linkPath,
+            lastKnownSignature: linkSignature,
+            lastSyncedAt: "2026-07-06T00:00:00.000Z",
+          },
+        }),
+      ],
+    ]);
+    const { readTextFile, writeTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockImplementation(async (path: string) => {
+      const value = files.get(path);
+      if (!value) throw new Error("missing file: " + path);
+      return value;
+    });
+    (writeTextFile as ReturnType<typeof vi.fn>).mockImplementation(
+      async (path: string, value: string) => {
+        files.set(path, value);
+      }
+    );
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockImplementation(async (command: string, args?: unknown) => {
+      if (command === "read_prompt_library_file") {
+        if (readExternal) return readExternal();
+        return {
+          content: currentExternalContent,
+          signature: currentExternalSignature,
+        };
+      }
+      if (command === "prompt_library_file_metadata") {
+        if (getExternalMetadata) return getExternalMetadata();
+        return { signature: currentMetadataSignature };
+      }
+      if (command === "write_prompt_library_file") {
+        const content = (args as { content?: string } | undefined)?.content ?? "";
+        if (writeExternal) return writeExternal(content);
+        currentExternalContent = content;
+        currentExternalSignature = "30:3000";
+        currentMetadataSignature = currentExternalSignature;
+        return { signature: currentExternalSignature };
+      }
+      return undefined;
+    });
+
+    await act(async () => {
+      render(<App />);
+    });
+    await screen.findByRole("heading", { name: "管理提示词" });
+    return {
+      files,
+      setExternalContent: (content: string) => {
+        currentExternalContent = content;
+      },
+      setExternalSignature: (signature: string) => {
+        currentExternalSignature = signature;
+      },
+      setExternalMetadataSignature: (signature: string) => {
+        currentMetadataSignature = signature;
+      },
+    };
+  }
+
   async function renderPromptPopoverWithStore(promptData: unknown) {
     currentWindowLabel = "prompt-popover";
     window.history.pushState({}, "", "/?mode=popover");
@@ -1837,6 +1938,109 @@ describe("app", () => {
 
     await waitFor(() => {
       expect(screen.getByDisplayValue("Edited Conflict Prompt")).toBeTruthy();
+    });
+  });
+
+  it("falls back to AppData and shows a sync error when linked prompt library read fails", async () => {
+    const localPrompt = makeContainer({ id: "local-fallback", title: "Local Fallback" });
+
+    await renderLinkedPromptManager({
+      localContainers: [localPrompt],
+      readExternal: async () => { throw new Error("missing linked file"); },
+    });
+
+    expect(await screen.findByText("Local Fallback")).toBeTruthy();
+    expect(screen.getByText("提示词库：prompts.json 需要处理")).toBeTruthy();
+    expect(await screen.findByText("外部提示词文件同步失败，请检查文件或取消同步。")).toBeTruthy();
+  });
+
+  it("syncs linked prompt library changes on demand", async () => {
+    const initialPrompt = makeContainer({ id: "linked-initial", title: "Linked Initial" });
+    const updatedPrompt = makeContainer({ id: "linked-updated", title: "Linked Updated" });
+    const linked = await renderLinkedPromptManager({
+      externalContent: JSON.stringify({ version: 2, containers: [initialPrompt] }),
+    });
+
+    expect(await screen.findByText("Linked Initial")).toBeTruthy();
+
+    linked.setExternalContent(JSON.stringify({ version: 2, containers: [updatedPrompt] }));
+    linked.setExternalSignature("30:3000");
+    fireEvent.click(screen.getByRole("button", { name: "立即同步" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Linked Updated")).toBeTruthy();
+    });
+  });
+
+  it("keeps the current prompts when manual linked sync reads invalid prompt data", async () => {
+    const initialPrompt = makeContainer({ id: "linked-valid", title: "Linked Valid" });
+    const linked = await renderLinkedPromptManager({
+      externalContent: JSON.stringify({ version: 2, containers: [initialPrompt] }),
+    });
+
+    expect(await screen.findByText("Linked Valid")).toBeTruthy();
+
+    linked.setExternalContent(JSON.stringify({ foo: true }));
+    linked.setExternalSignature("30:3000");
+    fireEvent.click(screen.getByRole("button", { name: "立即同步" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Linked Valid")).toBeTruthy();
+      expect(screen.getByText("外部提示词文件同步失败，请检查文件或取消同步。")).toBeTruthy();
+    });
+  });
+
+  it("keeps local edits visible when linked external write fails", async () => {
+    const prompt = makeContainer({ id: "write-failure", title: "Write Failure Prompt" });
+    await renderLinkedPromptManager({
+      externalContent: JSON.stringify({ version: 2, containers: [prompt] }),
+      writeExternal: async () => { throw new Error("denied"); },
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "编辑" }));
+    fireEvent.change(screen.getByDisplayValue("Write Failure Prompt"), {
+      target: { value: "Edited Write Failure Prompt" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Edited Write Failure Prompt")).toBeTruthy();
+      expect(screen.getByText("外部提示词文件同步失败，请检查文件或取消同步。")).toBeTruthy();
+    });
+  });
+
+  it("unlinks the external prompt library without removing current prompts", async () => {
+    const prompt = makeContainer({ id: "unlink-prompt", title: "Unlink Prompt" });
+    const linked = await renderLinkedPromptManager({
+      externalContent: JSON.stringify({ version: 2, containers: [prompt] }),
+    });
+
+    expect(await screen.findByText("Unlink Prompt")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "取消同步" }));
+
+    await waitFor(() => {
+      expect(JSON.parse(linked.files.get("settings.json") ?? "{}").promptLibraryLink.mode)
+        .toBe("copy");
+    });
+    expect(screen.getByText("Unlink Prompt")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "立即同步" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "取消同步" })).toBeNull();
+  });
+
+  it("disables manual linked sync while a prompt edit is active", async () => {
+    const prompt = makeContainer({ id: "draft-guard", title: "Draft Guard Prompt" });
+    await renderLinkedPromptManager({
+      externalContent: JSON.stringify({ version: 2, containers: [prompt] }),
+    });
+
+    const syncButton = await screen.findByRole("button", { name: "立即同步" });
+    expect((syncButton as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+
+    await waitFor(() => {
+      expect((screen.getByRole("button", { name: "立即同步" }) as HTMLButtonElement).disabled)
+        .toBe(true);
     });
   });
 

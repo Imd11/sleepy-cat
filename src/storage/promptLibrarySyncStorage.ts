@@ -1,4 +1,4 @@
-import type { StorageAdapter } from "../shared/promptStore";
+import { validatePromptLibraryJson, type StorageAdapter } from "../shared/promptStore";
 import type { PromptLibraryLink } from "../shared/settingsStore";
 
 export type PromptLibrarySyncErrorKind = "read_failed" | "write_failed" | "conflict";
@@ -29,6 +29,10 @@ type PromptLibrarySyncStorageDeps = {
   now?: () => Date;
 };
 
+export type PromptLibrarySyncStorage = StorageAdapter & {
+  syncNow(): Promise<string | null>;
+};
+
 function linkedPath(link: PromptLibraryLink): string | null {
   return link.mode === "linked" && link.path ? link.path : null;
 }
@@ -45,10 +49,6 @@ function syncedLink(
   };
 }
 
-function assertJsonContent(content: string): void {
-  JSON.parse(content);
-}
-
 export function createPromptLibrarySyncStorage({
   appDataStorage,
   getLink,
@@ -58,23 +58,51 @@ export function createPromptLibrarySyncStorage({
   getExternalMetadata,
   onSyncError,
   now = () => new Date(),
-}: PromptLibrarySyncStorageDeps): StorageAdapter {
+}: PromptLibrarySyncStorageDeps): PromptLibrarySyncStorage {
+  let hasUnsyncedLocalChanges = false;
+
+  async function readLinkedExternal(
+    link: PromptLibraryLink,
+    path: string
+  ): Promise<string> {
+    const external = await readExternal(path);
+    validatePromptLibraryJson(external.content);
+    await appDataStorage.write(external.content);
+    await setLink(syncedLink(link, external.signature, now));
+    hasUnsyncedLocalChanges = false;
+    return external.content;
+  }
+
+  async function readLinkedWithFallback(
+    link: PromptLibraryLink,
+    path: string
+  ): Promise<string | null> {
+    try {
+      return await readLinkedExternal(link, path);
+    } catch (error) {
+      onSyncError?.({ kind: "read_failed", path, error });
+      return appDataStorage.read();
+    }
+  }
+
   return {
     async read(): Promise<string | null> {
       const link = await getLink();
       const path = linkedPath(link);
       if (!path) return appDataStorage.read();
 
-      try {
-        const external = await readExternal(path);
-        assertJsonContent(external.content);
-        await appDataStorage.write(external.content);
-        await setLink(syncedLink(link, external.signature, now));
-        return external.content;
-      } catch (error) {
-        onSyncError?.({ kind: "read_failed", path, error });
+      if (hasUnsyncedLocalChanges) {
         return appDataStorage.read();
       }
+
+      return readLinkedWithFallback(link, path);
+    },
+
+    async syncNow(): Promise<string | null> {
+      const link = await getLink();
+      const path = linkedPath(link);
+      if (!path) return appDataStorage.read();
+      return readLinkedWithFallback(link, path);
     },
 
     async write(value: string): Promise<void> {
@@ -90,6 +118,7 @@ export function createPromptLibrarySyncStorage({
         metadata = await getExternalMetadata(path);
       } catch (error) {
         await appDataStorage.write(value);
+        hasUnsyncedLocalChanges = true;
         onSyncError?.({ kind: "write_failed", path, error });
         return;
       }
@@ -103,8 +132,10 @@ export function createPromptLibrarySyncStorage({
       await appDataStorage.write(value);
       try {
         const written = await writeExternal(path, value);
+        hasUnsyncedLocalChanges = false;
         await setLink(syncedLink(link, written.signature, now));
       } catch (error) {
+        hasUnsyncedLocalChanges = true;
         onSyncError?.({ kind: "write_failed", path, error });
       }
     },

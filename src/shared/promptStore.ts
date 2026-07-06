@@ -339,6 +339,10 @@ function validateImportedData(json: string): NormalizedPromptStore {
   throw new Error("Invalid format");
 }
 
+export function validatePromptLibraryJson(json: string): void {
+  validateImportedData(json);
+}
+
 function serializeStore(store: NormalizedPromptStore): string {
   const data: PromptStoreDataV3 = {
     version: 3,

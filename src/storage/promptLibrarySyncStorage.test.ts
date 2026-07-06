@@ -92,6 +92,28 @@ describe("prompt library sync storage", () => {
     }));
   });
 
+  it("does not overwrite AppData when linked external file is valid JSON but not a prompt library", async () => {
+    const fallback = JSON.stringify({ version: 2, containers: [] });
+    const appDataStorage = memoryStorage(fallback);
+    const onSyncError = vi.fn();
+    const storage = createPromptLibrarySyncStorage({
+      appDataStorage,
+      getLink: async () => linked(),
+      setLink: async () => {},
+      readExternal: async () => ({ content: JSON.stringify({ foo: true }), signature: "20:2000" }),
+      writeExternal: vi.fn(),
+      getExternalMetadata: vi.fn(),
+      onSyncError,
+    });
+
+    await expect(storage.read()).resolves.toBe(fallback);
+    expect(appDataStorage.state()).toBe(fallback);
+    expect(onSyncError).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "read_failed",
+      path: "/Users/example/Desktop/prompts.json",
+    }));
+  });
+
   it("falls back to AppData when linked file is missing", async () => {
     const appDataStorage = memoryStorage("appdata");
     const onSyncError = vi.fn();
