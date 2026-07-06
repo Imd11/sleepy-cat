@@ -156,7 +156,7 @@
     {
       "id": "container-1783144723315-ttbrem8",
       "categoryId": "category-default",
-      "title": "Execute the Plan in Batches",
+      "title": "Execute the Plan",
       "type": "single",
       "prompts": [
         {
