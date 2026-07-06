@@ -2549,7 +2549,7 @@ dependencies = [
 
 [[package]]
 name = "prompt-picker"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "block2",
  "objc2",

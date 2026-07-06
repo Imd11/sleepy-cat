@@ -1,6 +1,6 @@
 [package]
 name = "prompt-picker"
-version = "1.0.2"
+version = "1.0.3"
 description = "Local macOS Prompt Picker"
 authors = [""]
 license = ""
