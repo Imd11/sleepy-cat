@@ -22,7 +22,7 @@ type CalicoManifest = {
 };
 
 type IdleDirectorModule = {
-  IDLE_MOTION_POOL: Array<{ state: string }>;
+  IDLE_MOTION_POOL: Array<{ state: string; weights: Record<string, number> }>;
 };
 
 const phase1States = [
@@ -121,6 +121,18 @@ describe("Calico manifest", () => {
     expect(manifest.states["mini-happy"]).toBeDefined();
     expect(existsSync(`public${manifest.states.waking.file}`)).toBe(true);
     expect(existsSync(`public${manifest.states["mini-happy"].file}`)).toBe(true);
+  });
+
+  it("keeps deep idle states on non-replay assets", async () => {
+    const manifest = readManifest();
+    const { IDLE_MOTION_POOL } = await loadIdleDirector();
+    const deepIdleStates = IDLE_MOTION_POOL.filter((entry) => (entry.weights.deepIdle ?? 0) > 0)
+      .map((entry) => entry.state);
+
+    expect(deepIdleStates.length).toBeGreaterThan(0);
+    for (const stateName of deepIdleStates) {
+      expect(manifest.states[stateName].replay, stateName).toBe(false);
+    }
   });
 
   it("keeps every rendered Calico motion inside the native transparent window", () => {
