@@ -1372,8 +1372,11 @@ mod tests {
             .next()
             .expect("production source should precede tests");
 
-        assert!(!production_source.contains("fn paste_to_app_script"));
-        assert!(!production_source.contains("pub fn paste_prompt_to_app_with_copier"));
+        assert!(!production_source.contains(concat!("fn paste", "_to_app_script")));
+        assert!(!production_source.contains(concat!(
+            "pub fn paste_prompt",
+            "_to_app_with_copier"
+        )));
     }
 
     #[test]

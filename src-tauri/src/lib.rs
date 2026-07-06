@@ -1486,8 +1486,8 @@ mod last_input_target_tests {
             .expect("invoke handler should close");
         let handler_source = &handler_rest[..handler_end];
 
-        assert!(!handler_source.contains("paste_prompt_to_app,"));
-        assert!(!handler_source.contains("paste_prompt_to_last_target,"));
+        assert!(!handler_source.contains(concat!("paste_prompt", "_to_app,")));
+        assert!(!handler_source.contains(concat!("paste_prompt", "_to_last_target,")));
     }
 
     #[test]
