@@ -1,3 +1,5 @@
+const REPLAY_SLOT_COUNT = 2;
+
 export function createCalicoMotionRuntime({ image, host, manifest, now = () => Date.now() }) {
   let currentPriority = 0;
   let minUntil = 0;
@@ -13,11 +15,15 @@ export function createCalicoMotionRuntime({ image, host, manifest, now = () => D
     return manifest.states[state] || manifest.states[manifest.defaultState];
   }
 
+  function replaySourceFor(entry) {
+    replayCounter = (replayCounter + 1) % REPLAY_SLOT_COUNT;
+    return `${entry.file}?replay=${replayCounter}`;
+  }
+
   function setImageSource(entry) {
     if (!entry?.file) return;
     if (entry.replay) {
-      replayCounter += 1;
-      image.setAttribute("src", `${entry.file}?replay=${replayCounter}`);
+      image.setAttribute("src", replaySourceFor(entry));
       return;
     }
     image.setAttribute("src", entry.file);
@@ -28,6 +34,27 @@ export function createCalicoMotionRuntime({ image, host, manifest, now = () => D
     image.style.setProperty("--calico-offset-x", `${entry.offsetX ?? 0}px`);
     image.style.setProperty("--calico-offset-y", `${entry.offsetY ?? 0}px`);
   }
+
+  function defaultEntry() {
+    return entryFor(manifest.defaultState);
+  }
+
+  function resetToDefaultAfterError() {
+    const defaultState = manifest.defaultState;
+    const entry = defaultEntry();
+    if (!entry?.file) return;
+    window.clearTimeout(autoReturnTimer);
+    currentPriority = 0;
+    minUntil = 0;
+    host.dataset.motionState = defaultState;
+    image.setAttribute("src", entry.file);
+    applyRenderMetadata(entry);
+  }
+
+  image.addEventListener?.("error", () => {
+    if (host.dataset.motionState === manifest.defaultState) return;
+    resetToDefaultAfterError();
+  });
 
   function apply(payload = {}) {
     const state = stateFor(payload.state);

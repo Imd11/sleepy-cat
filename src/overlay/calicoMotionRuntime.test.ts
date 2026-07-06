@@ -128,6 +128,44 @@ describe("Calico motion runtime", () => {
     expect(image.getAttribute("src")).not.toBe(firstSrc);
   });
 
+  it("keeps replay image URLs bounded during long-running motion loops", async () => {
+    const { createCalicoMotionRuntime } = await loadRuntime();
+    const { image, host } = elements();
+    const runtime = createCalicoMotionRuntime({ image, host, manifest });
+    const seenSrcs = new Set<string>();
+
+    for (let index = 0; index < 100; index += 1) {
+      runtime.apply({ state: "happy" });
+      seenSrcs.add(image.getAttribute("src") ?? "");
+    }
+
+    expect(seenSrcs.size).toBeLessThanOrEqual(2);
+    expect([...seenSrcs].every((src) => src.startsWith("/calico/calico-happy.apng?replay="))).toBe(
+      true
+    );
+  });
+
+  it("keeps replay image URLs bounded across mixed replay states", async () => {
+    const { createCalicoMotionRuntime } = await loadRuntime();
+    const { image, host } = elements();
+    const runtime = createCalicoMotionRuntime({ image, host, manifest });
+    const seenByFile = new Map<string, Set<string>>();
+    const states = ["happy", "react-left"] as const;
+
+    for (let index = 0; index < 100; index += 1) {
+      runtime.apply({ state: states[index % states.length] });
+      const src = image.getAttribute("src") ?? "";
+      const file = src.split("?")[0];
+      if (!seenByFile.has(file)) {
+        seenByFile.set(file, new Set());
+      }
+      seenByFile.get(file)?.add(src);
+    }
+
+    expect(seenByFile.get("/calico/calico-happy.apng")?.size).toBeLessThanOrEqual(2);
+    expect(seenByFile.get("/calico/calico-react-left.apng")?.size).toBeLessThanOrEqual(2);
+  });
+
   it("resets to the manifest default state even during a minimum display window", async () => {
     const { createCalicoMotionRuntime } = await loadRuntime();
     const { image, host } = elements();
@@ -135,6 +173,30 @@ describe("Calico motion runtime", () => {
 
     runtime.apply({ state: "error" });
     runtime.reset();
+
+    expect(host.dataset.motionState).toBe("idle-follow");
+    expect(image.getAttribute("src")).toBe("/calico/calico-idle-follow.svg");
+  });
+
+  it("resets to the default state when a replay image fails to load", async () => {
+    const { createCalicoMotionRuntime } = await loadRuntime();
+    const { image, host } = elements();
+    const runtime = createCalicoMotionRuntime({ image, host, manifest });
+
+    runtime.apply({ state: "happy" });
+    image.dispatchEvent(new Event("error"));
+
+    expect(host.dataset.motionState).toBe("idle-follow");
+    expect(image.getAttribute("src")).toBe("/calico/calico-idle-follow.svg");
+  });
+
+  it("does not loop fallback handling when the default image errors", async () => {
+    const { createCalicoMotionRuntime } = await loadRuntime();
+    const { image, host } = elements();
+    const runtime = createCalicoMotionRuntime({ image, host, manifest });
+
+    runtime.reset();
+    image.dispatchEvent(new Event("error"));
 
     expect(host.dataset.motionState).toBe("idle-follow");
     expect(image.getAttribute("src")).toBe("/calico/calico-idle-follow.svg");
