@@ -11,6 +11,13 @@ export type OverlayButtonPosition = {
 export type PromptInsertionMode = "paste_only" | "paste_and_submit";
 export type AppLanguage = "zh-CN" | "en-US";
 
+export type PromptLibraryLink = {
+  mode: "copy" | "linked";
+  path: string | null;
+  lastKnownSignature: string | null;
+  lastSyncedAt: string | null;
+};
+
 export type Settings = {
   version: 1;
   language: AppLanguage;
@@ -28,6 +35,7 @@ export type Settings = {
   permissions: {
     accessibilityPromptRequested: boolean;
   };
+  promptLibraryLink: PromptLibraryLink;
 };
 
 interface SettingsAdapter {
@@ -36,6 +44,15 @@ interface SettingsAdapter {
 }
 
 export function createSettingsStore(adapter: SettingsAdapter) {
+  function defaultPromptLibraryLink(): PromptLibraryLink {
+    return {
+      mode: "copy",
+      path: null,
+      lastKnownSignature: null,
+      lastSyncedAt: null,
+    };
+  }
+
   function defaultSettings(): Settings {
     return {
       version: 1,
@@ -44,7 +61,8 @@ export function createSettingsStore(adapter: SettingsAdapter) {
       overlayPlacement: { buttonOffset: null, buttonPosition: null },
       floatingButton: { visible: true },
       promptInsertion: { mode: "paste_and_submit" },
-      permissions: { accessibilityPromptRequested: false }
+      permissions: { accessibilityPromptRequested: false },
+      promptLibraryLink: defaultPromptLibraryLink()
     };
   }
 
@@ -61,10 +79,27 @@ export function createSettingsStore(adapter: SettingsAdapter) {
     const candidate = value as Partial<Settings> & {
       overlayPlacement?: { buttonOffset?: unknown; buttonPosition?: unknown };
       permissions?: { accessibilityPromptRequested?: unknown };
+      promptLibraryLink?: Partial<PromptLibraryLink>;
     };
     if (candidate.version !== 1 || !Array.isArray(candidate.blacklistedApps)) {
       return defaultSettings();
     }
+    const rawPromptLibraryLink = candidate.promptLibraryLink;
+    const promptLibraryPath = typeof rawPromptLibraryLink?.path === "string" && rawPromptLibraryLink.path.trim()
+      ? rawPromptLibraryLink.path
+      : null;
+    const promptLibraryLink: PromptLibraryLink = rawPromptLibraryLink?.mode === "linked" && promptLibraryPath
+      ? {
+          mode: "linked",
+          path: promptLibraryPath,
+          lastKnownSignature: typeof rawPromptLibraryLink.lastKnownSignature === "string"
+            ? rawPromptLibraryLink.lastKnownSignature
+            : null,
+          lastSyncedAt: typeof rawPromptLibraryLink.lastSyncedAt === "string"
+            ? rawPromptLibraryLink.lastSyncedAt
+            : null,
+        }
+      : defaultPromptLibraryLink();
     return {
       version: 1,
       language: candidate.language === "en-US" ? "en-US" : "zh-CN",
@@ -85,7 +120,8 @@ export function createSettingsStore(adapter: SettingsAdapter) {
       },
       permissions: {
         accessibilityPromptRequested: candidate.permissions?.accessibilityPromptRequested === true
-      }
+      },
+      promptLibraryLink
     };
   }
 
@@ -162,6 +198,20 @@ export function createSettingsStore(adapter: SettingsAdapter) {
     async setAccessibilityPromptRequested(requested: boolean): Promise<void> {
       const settings = await load();
       settings.permissions.accessibilityPromptRequested = requested;
+      await save(settings);
+    },
+
+    async setPromptLibraryLink(link: PromptLibraryLink): Promise<void> {
+      const settings = await load();
+      settings.promptLibraryLink = link.mode === "linked" && link.path
+        ? link
+        : defaultPromptLibraryLink();
+      await save(settings);
+    },
+
+    async clearPromptLibraryLink(): Promise<void> {
+      const settings = await load();
+      settings.promptLibraryLink = defaultPromptLibraryLink();
       await save(settings);
     }
   };

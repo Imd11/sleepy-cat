@@ -38,6 +38,12 @@ const DEFAULT_SETTINGS: Settings = {
   floatingButton: { visible: true },
   promptInsertion: { mode: "paste_and_submit" },
   permissions: { accessibilityPromptRequested: false },
+  promptLibraryLink: {
+    mode: "copy",
+    path: null,
+    lastKnownSignature: null,
+    lastSyncedAt: null,
+  },
   language: "zh-CN",
 };
 

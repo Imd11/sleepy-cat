@@ -144,6 +144,63 @@ describe("settings store", () => {
     expect(settings.permissions).toEqual({ accessibilityPromptRequested: false });
   });
 
+  it("defaults prompt library linking to copy mode", async () => {
+    const store = createTestSettingsStore();
+    const settings = await store.get();
+    expect(settings.promptLibraryLink).toEqual({
+      mode: "copy",
+      path: null,
+      lastKnownSignature: null,
+      lastSyncedAt: null,
+    });
+  });
+
+  it("normalizes linked prompt library settings", async () => {
+    const store = createTestSettingsStore(JSON.stringify({
+      version: 1,
+      language: "zh-CN",
+      blacklistedApps: [],
+      overlayPlacement: { buttonOffset: null, buttonPosition: null },
+      floatingButton: { visible: true },
+      promptInsertion: { mode: "paste_and_submit" },
+      permissions: { accessibilityPromptRequested: false },
+      promptLibraryLink: {
+        mode: "linked",
+        path: "/Users/example/Desktop/prompts.json",
+        lastKnownSignature: "100:1700000000000",
+        lastSyncedAt: "2026-07-06T00:00:00.000Z",
+      },
+    }));
+
+    const settings = await store.get();
+    expect(settings.promptLibraryLink).toEqual({
+      mode: "linked",
+      path: "/Users/example/Desktop/prompts.json",
+      lastKnownSignature: "100:1700000000000",
+      lastSyncedAt: "2026-07-06T00:00:00.000Z",
+    });
+  });
+
+  it("clears prompt library linking", async () => {
+    const store = createTestSettingsStore();
+    await store.setPromptLibraryLink({
+      mode: "linked",
+      path: "/Users/example/Desktop/prompts.json",
+      lastKnownSignature: "100:1700000000000",
+      lastSyncedAt: "2026-07-06T00:00:00.000Z",
+    });
+
+    await store.clearPromptLibraryLink();
+
+    const settings = await store.get();
+    expect(settings.promptLibraryLink).toEqual({
+      mode: "copy",
+      path: null,
+      lastKnownSignature: null,
+      lastSyncedAt: null,
+    });
+  });
+
   it("normalizes old settings without permissions", async () => {
     const store = createTestSettingsStore(
       JSON.stringify({
