@@ -223,6 +223,17 @@ function resetCalicoMotion() {
   applyFallbackMotion({ state: 'idle-follow' });
 }
 
+function startCalicoSpriteHealthWatchdog() {
+  window.setInterval(() => {
+    if (!sprite) return;
+    const source = sprite.getAttribute('src') || '';
+    const failedImage = sprite.complete && sprite.naturalWidth === 0;
+    if (!source || failedImage) {
+      resetCalicoMotion();
+    }
+  }, 60_000);
+}
+
 function pauseIdleForExternalMotion(payload = {}) {
   const durationMs = Number.isFinite(payload.durationMs) ? payload.durationMs : 3_600;
   calicoIdleDirector?.resetIdleClock();
@@ -534,6 +545,7 @@ btn.addEventListener('contextmenu', async (event) => {
 });
 
 initializeCalicoMotion();
+startCalicoSpriteHealthWatchdog();
 listenForAutosendStatus();
 listenForCalicoMotion();
 listenForPromptPopoverDismissed();

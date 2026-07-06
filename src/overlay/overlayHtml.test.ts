@@ -144,6 +144,16 @@ describe("overlay button html", () => {
     expect(html).toContain("applyCalicoMotion(event.payload)");
   });
 
+  it("starts a lightweight Calico sprite health watchdog", () => {
+    const html = readOverlayHtml();
+
+    expect(html).toContain("function startCalicoSpriteHealthWatchdog()");
+    expect(html).toContain("window.setInterval");
+    expect(html).toContain("sprite.naturalWidth === 0");
+    expect(html).toContain("resetCalicoMotion();");
+    expect(html).toContain("startCalicoSpriteHealthWatchdog();");
+  });
+
   it("keeps click-to-open neutral and separate from hover attention", () => {
     const html = readFileSync("public/overlay.html", "utf8");
     const clickBlock = html.slice(
