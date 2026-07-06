@@ -29,10 +29,6 @@ type PromptLibrarySyncStorageDeps = {
   now?: () => Date;
 };
 
-export type PromptLibrarySyncStorage = StorageAdapter & {
-  syncNow(): Promise<string | null>;
-};
-
 function linkedPath(link: PromptLibraryLink): string | null {
   return link.mode === "linked" && link.path ? link.path : null;
 }
@@ -58,7 +54,7 @@ export function createPromptLibrarySyncStorage({
   getExternalMetadata,
   onSyncError,
   now = () => new Date(),
-}: PromptLibrarySyncStorageDeps): PromptLibrarySyncStorage {
+}: PromptLibrarySyncStorageDeps): StorageAdapter {
   let hasUnsyncedLocalChanges = false;
 
   async function readLinkedExternal(
@@ -95,13 +91,6 @@ export function createPromptLibrarySyncStorage({
         return appDataStorage.read();
       }
 
-      return readLinkedWithFallback(link, path);
-    },
-
-    async syncNow(): Promise<string | null> {
-      const link = await getLink();
-      const path = linkedPath(link);
-      if (!path) return appDataStorage.read();
       return readLinkedWithFallback(link, path);
     },
 

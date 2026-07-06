@@ -258,6 +258,7 @@ describe("app", () => {
     let currentExternalContent = externalContent;
     let currentExternalSignature = externalSignature;
     let currentMetadataSignature = externalSignature;
+    let externalReadCount = 0;
     const files = new Map<string, string>([
       [
         "prompts.json",
@@ -296,6 +297,7 @@ describe("app", () => {
     const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockImplementation(async (command: string, args?: unknown) => {
       if (command === "read_prompt_library_file") {
+        externalReadCount += 1;
         if (readExternal) return readExternal();
         return {
           content: currentExternalContent,
@@ -332,6 +334,7 @@ describe("app", () => {
       setExternalMetadataSignature: (signature: string) => {
         currentMetadataSignature = signature;
       },
+      getExternalReadCount: () => externalReadCount,
     };
   }
 
@@ -1941,7 +1944,7 @@ describe("app", () => {
     });
   });
 
-  it("falls back to AppData and shows a sync error when linked prompt library read fails", async () => {
+  it("falls back to AppData without showing linked prompt library controls when linked read fails", async () => {
     const localPrompt = makeContainer({ id: "local-fallback", title: "Local Fallback" });
 
     await renderLinkedPromptManager({
@@ -1950,11 +1953,13 @@ describe("app", () => {
     });
 
     expect(await screen.findByText("Local Fallback")).toBeTruthy();
-    expect(screen.getByText("提示词库：prompts.json 需要处理")).toBeTruthy();
-    expect(await screen.findByText("外部提示词文件同步失败，请检查文件或取消同步。")).toBeTruthy();
+    expect(screen.queryByText(/Prompt library:/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "立即同步" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "取消同步" })).toBeNull();
+    expect(screen.queryByText("外部提示词文件同步失败，请检查文件或取消同步。")).toBeNull();
   });
 
-  it("syncs linked prompt library changes on demand", async () => {
+  it("syncs linked prompt library changes in the background", async () => {
     const initialPrompt = makeContainer({ id: "linked-initial", title: "Linked Initial" });
     const updatedPrompt = makeContainer({ id: "linked-updated", title: "Linked Updated" });
     const linked = await renderLinkedPromptManager({
@@ -1965,14 +1970,14 @@ describe("app", () => {
 
     linked.setExternalContent(JSON.stringify({ version: 2, containers: [updatedPrompt] }));
     linked.setExternalSignature("30:3000");
-    fireEvent.click(screen.getByRole("button", { name: "立即同步" }));
 
     await waitFor(() => {
+      expect(linked.getExternalReadCount()).toBeGreaterThan(1);
       expect(screen.getByText("Linked Updated")).toBeTruthy();
-    });
-  });
+    }, { timeout: 7000 });
+  }, 10000);
 
-  it("keeps the current prompts when manual linked sync reads invalid prompt data", async () => {
+  it("keeps the current prompts when background linked sync reads invalid prompt data", async () => {
     const initialPrompt = makeContainer({ id: "linked-valid", title: "Linked Valid" });
     const linked = await renderLinkedPromptManager({
       externalContent: JSON.stringify({ version: 2, containers: [initialPrompt] }),
@@ -1982,13 +1987,13 @@ describe("app", () => {
 
     linked.setExternalContent(JSON.stringify({ foo: true }));
     linked.setExternalSignature("30:3000");
-    fireEvent.click(screen.getByRole("button", { name: "立即同步" }));
 
     await waitFor(() => {
+      expect(linked.getExternalReadCount()).toBeGreaterThan(1);
       expect(screen.getByText("Linked Valid")).toBeTruthy();
-      expect(screen.getByText("外部提示词文件同步失败，请检查文件或取消同步。")).toBeTruthy();
-    });
-  });
+      expect(screen.queryByText("外部提示词文件同步失败，请检查文件或取消同步。")).toBeNull();
+    }, { timeout: 7000 });
+  }, 10000);
 
   it("keeps local edits visible when linked external write fails", async () => {
     const prompt = makeContainer({ id: "write-failure", title: "Write Failure Prompt" });
@@ -2005,43 +2010,12 @@ describe("app", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Edited Write Failure Prompt")).toBeTruthy();
-      expect(screen.getByText("外部提示词文件同步失败，请检查文件或取消同步。")).toBeTruthy();
     });
-  });
-
-  it("unlinks the external prompt library without removing current prompts", async () => {
-    const prompt = makeContainer({ id: "unlink-prompt", title: "Unlink Prompt" });
-    const linked = await renderLinkedPromptManager({
-      externalContent: JSON.stringify({ version: 2, containers: [prompt] }),
-    });
-
-    expect(await screen.findByText("Unlink Prompt")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "取消同步" }));
-
     await waitFor(() => {
-      expect(JSON.parse(linked.files.get("settings.json") ?? "{}").promptLibraryLink.mode)
-        .toBe("copy");
-    });
-    expect(screen.getByText("Unlink Prompt")).toBeTruthy();
+      expect(screen.getByText("Edited Write Failure Prompt")).toBeTruthy();
+    }, { timeout: 7000 });
     expect(screen.queryByRole("button", { name: "立即同步" })).toBeNull();
     expect(screen.queryByRole("button", { name: "取消同步" })).toBeNull();
-  });
-
-  it("disables manual linked sync while a prompt edit is active", async () => {
-    const prompt = makeContainer({ id: "draft-guard", title: "Draft Guard Prompt" });
-    await renderLinkedPromptManager({
-      externalContent: JSON.stringify({ version: 2, containers: [prompt] }),
-    });
-
-    const syncButton = await screen.findByRole("button", { name: "立即同步" });
-    expect((syncButton as HTMLButtonElement).disabled).toBe(false);
-
-    fireEvent.click(screen.getByRole("button", { name: "编辑" }));
-
-    await waitFor(() => {
-      expect((screen.getByRole("button", { name: "立即同步" }) as HTMLButtonElement).disabled)
-        .toBe(true);
-    });
   });
 
   it("does not show floating button controls on the main prompt management page", async () => {

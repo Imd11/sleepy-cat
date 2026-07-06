@@ -9,10 +9,7 @@ import type { AppLanguage, PromptInsertionMode, Settings } from "./shared/settin
 import { createSettingsStore } from "./shared/settingsStore";
 import { getMessages, type Messages } from "./shared/i18n";
 import { DEFAULT_CATEGORY_ID, createPromptStore } from "./shared/promptStore";
-import {
-  createPromptLibrarySyncStorage,
-  type PromptLibrarySyncError,
-} from "./storage/promptLibrarySyncStorage";
+import { createPromptLibrarySyncStorage } from "./storage/promptLibrarySyncStorage";
 import { createTauriPromptStorage } from "./storage/tauriPromptStorage";
 import { createTauriSettingsStorage } from "./storage/tauriSettingsStorage";
 import {
@@ -55,6 +52,7 @@ const DEFAULT_SETTINGS: Settings = {
 };
 
 const waitForWindowHide = () => new Promise((resolve) => window.setTimeout(resolve, 260));
+const LINKED_PROMPT_LIBRARY_REFRESH_MS = 5000;
 
 type AutosendStatusKind = "sent" | "failed";
 
@@ -236,8 +234,6 @@ export function App({
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [hoverResetKey, setHoverResetKey] = useState(0);
   const [settingsReturnTarget, setSettingsReturnTarget] = useState<"manager" | null>(null);
-  const [promptLibrarySyncError, setPromptLibrarySyncError] =
-    useState<PromptLibrarySyncError | null>(null);
   const [promptLibraryDraftActive, setPromptLibraryDraftActive] = useState(false);
   const [pendingPromptImport, setPendingPromptImport] = useState<PendingPromptImport | null>(null);
   const activeSettingsRef = useRef<Settings>(settings);
@@ -258,7 +254,6 @@ export function App({
     readExternal: readPromptLibraryFile,
     writeExternal: writePromptLibraryFile,
     getExternalMetadata: getPromptLibraryFileMetadata,
-    onSyncError: setPromptLibrarySyncError,
   }));
   const storeRef = useRef(createPromptStore(promptStorageRef.current));
   const promptListRefreshingRef = useRef(false);
@@ -347,6 +342,29 @@ export function App({
       active = false;
     };
   }, [applyActiveSettings, reloadPromptData]);
+
+  useEffect(() => {
+    if (windowLabel !== "main" || mode !== "manager") return;
+    if (activeSettings.promptLibraryLink.mode !== "linked") return;
+    if (promptLibraryDraftActive) return;
+
+    const intervalId = window.setInterval(() => {
+      reloadPromptData().catch((error) => {
+        console.warn("Failed to refresh linked prompt library:", error);
+      });
+    }, LINKED_PROMPT_LIBRARY_REFRESH_MS);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [
+    activeSettings.promptLibraryLink.mode,
+    activeSettings.promptLibraryLink.path,
+    mode,
+    promptLibraryDraftActive,
+    reloadPromptData,
+    windowLabel,
+  ]);
 
   useEffect(() => {
     let active = true;
@@ -603,7 +621,6 @@ export function App({
         applyActiveSettings(await settingsStoreRef.current.get());
       }
       setPendingPromptImport(null);
-      setPromptLibrarySyncError(null);
       await reloadPromptData();
       emitCalicoMotion("happy", "import-prompts-success", 3000);
     } catch (e) {
@@ -611,26 +628,6 @@ export function App({
       emitCalicoMotion("error", "import-prompts-failed", 5000);
       alert(t.manager.importFailed);
     }
-  };
-
-  const syncLinkedPromptLibraryNow = async () => {
-    if (promptLibraryDraftActive) return;
-    try {
-      setPromptLibrarySyncError(null);
-      await promptStorageRef.current.syncNow();
-      await reloadPromptData();
-      emitCalicoMotion("happy", "sync-prompts-success", 2200);
-    } catch (e) {
-      console.warn("Prompt library sync failed:", e);
-      emitCalicoMotion("error", "sync-prompts-failed", 5000);
-      alert(t.manager.promptLibrarySyncFailed);
-    }
-  };
-
-  const unlinkPromptLibrary = async () => {
-    await settingsStoreRef.current.clearPromptLibraryLink();
-    applyActiveSettings(await settingsStoreRef.current.get());
-    setPromptLibrarySyncError(null);
   };
 
   const pollingController =
@@ -660,11 +657,6 @@ export function App({
             onDeleteCategory={handleDeleteCategory}
             getCategoryDisplayName={getCategoryDisplayName}
             categoryActionError={categoryActionError}
-            promptLibraryLink={activeSettings.promptLibraryLink}
-            promptLibrarySyncError={promptLibrarySyncError}
-            promptLibraryDraftActive={promptLibraryDraftActive}
-            onSyncPromptLibraryNow={syncLinkedPromptLibraryNow}
-            onUnlinkPromptLibrary={unlinkPromptLibrary}
             onDraftActivityChange={setPromptLibraryDraftActive}
             onOpenSettings={() => {
               setSettingsReturnTarget("manager");

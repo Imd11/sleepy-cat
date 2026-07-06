@@ -1033,47 +1033,6 @@ button {
   gap: 14px;
 }
 
-.prompt-library-status {
-  display: flex;
-  min-height: 42px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 10px;
-  color: #344054;
-  background: rgba(255, 255, 255, 0.78);
-  border: 1px solid var(--pp-border);
-  border-radius: var(--pp-radius-sm);
-}
-
-.prompt-library-status-main {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.prompt-library-status-main strong {
-  overflow: hidden;
-  color: var(--pp-text);
-  font-size: 12px;
-  font-weight: 680;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.prompt-library-error {
-  color: var(--pp-danger);
-  font-size: 11px;
-  font-weight: 620;
-}
-
-.prompt-library-status-actions {
-  display: flex;
-  flex: 0 0 auto;
-  gap: 8px;
-}
-
 .category-rail {
   position: sticky;
   top: 12px;
@@ -1663,8 +1622,6 @@ button {
     position: static;
   }
 
-  .prompt-library-status,
-  .prompt-library-status-actions,
   .import-choice-actions {
     align-items: stretch;
     flex-direction: column;

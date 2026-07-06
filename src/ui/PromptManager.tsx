@@ -8,8 +8,6 @@ import {
   getPromptContainerPreviewLines,
 } from "../shared/promptTypes";
 import type { Messages } from "../shared/i18n";
-import type { PromptLibraryLink } from "../shared/settingsStore";
-import type { PromptLibrarySyncError } from "../storage/promptLibrarySyncStorage";
 import { CategoryRail } from "./CategoryRail";
 
 type EditorMode = "single" | "group";
@@ -36,11 +34,6 @@ interface PromptManagerProps {
   onDeleteCategory: (categoryId: string) => void | Promise<void>;
   getCategoryDisplayName: (category: PromptCategory) => string;
   categoryActionError?: string | null;
-  promptLibraryLink?: PromptLibraryLink;
-  promptLibrarySyncError?: PromptLibrarySyncError | null;
-  promptLibraryDraftActive?: boolean;
-  onSyncPromptLibraryNow?: () => void | Promise<void>;
-  onUnlinkPromptLibrary?: () => void | Promise<void>;
   onDraftActivityChange?: (active: boolean) => void;
   onCreate: (input: { title: string; body: string }) => void | Promise<void>;
   onCreateGroup: (input: {
@@ -132,11 +125,6 @@ function PromptKindBadge({ prompt, messages }: { prompt: PromptContainer; messag
   );
 }
 
-function promptFileName(path: string): string {
-  const parts = path.split(/[\\/]/).filter(Boolean);
-  return parts[parts.length - 1] ?? path;
-}
-
 export function PromptManager({
   prompts,
   categories,
@@ -151,16 +139,6 @@ export function PromptManager({
   onDeleteCategory,
   getCategoryDisplayName,
   categoryActionError = null,
-  promptLibraryLink = {
-    mode: "copy",
-    path: null,
-    lastKnownSignature: null,
-    lastSyncedAt: null,
-  },
-  promptLibrarySyncError = null,
-  promptLibraryDraftActive = false,
-  onSyncPromptLibraryNow = () => {},
-  onUnlinkPromptLibrary = () => {},
   onDraftActivityChange,
   onCreate,
   onCreateGroup,
@@ -328,13 +306,6 @@ export function PromptManager({
     runSubmitOnce(() => onReorder(newOrder));
   };
 
-  const linkedPath = promptLibraryLink.mode === "linked" ? promptLibraryLink.path : null;
-  const promptLibraryStatusText = linkedPath
-    ? promptLibrarySyncError
-      ? messages.manager.promptLibraryNeedsAttention(promptFileName(linkedPath))
-      : messages.manager.promptLibraryLinked(promptFileName(linkedPath))
-    : messages.manager.promptLibraryLocal;
-
   return (
     <div className="prompt-manager page-stack">
       <header className="page-header">
@@ -354,41 +325,6 @@ export function PromptManager({
           </button>
         </div>
       </header>
-
-      <div className="prompt-library-status">
-        <div className="prompt-library-status-main">
-          <strong>
-            {promptLibraryStatusText}
-          </strong>
-          {promptLibrarySyncError ? (
-            <span className="prompt-library-error">
-              {messages.manager.promptLibrarySyncFailed}
-            </span>
-          ) : null}
-        </div>
-        {linkedPath ? (
-          <div className="prompt-library-status-actions">
-            <button
-              className="button button-secondary"
-              type="button"
-              disabled={promptLibraryDraftActive || hasDraftActivity}
-              title={promptLibraryDraftActive || hasDraftActivity
-                ? messages.manager.promptLibrarySyncBlockedByDraft
-                : undefined}
-              onClick={() => runSubmitOnce(onSyncPromptLibraryNow)}
-            >
-              {messages.manager.syncPromptLibraryNow}
-            </button>
-            <button
-              className="button button-secondary"
-              type="button"
-              onClick={() => runSubmitOnce(onUnlinkPromptLibrary)}
-            >
-              {messages.manager.unlinkPromptLibrary}
-            </button>
-          </div>
-        ) : null}
-      </div>
 
       <div className="prompt-manager-body">
         <CategoryRail
