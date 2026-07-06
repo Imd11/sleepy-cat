@@ -14,6 +14,12 @@ pub struct FrontmostApp {
     pub bundle_id: String,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct FrontmostAppWithPid {
+    pub app: FrontmostApp,
+    pub pid: Option<u32>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct AccessibilityStatus {
     pub trusted: bool,
@@ -223,6 +229,13 @@ where
 
 pub fn frontmost_app() -> Option<FrontmostApp> {
     frontmost_app_info().map(|info| info.app)
+}
+
+pub fn frontmost_app_with_pid() -> Option<FrontmostAppWithPid> {
+    frontmost_app_info().map(|info| FrontmostAppWithPid {
+        app: info.app,
+        pid: Some(info.pid),
+    })
 }
 
 struct FrontmostAppInfo {

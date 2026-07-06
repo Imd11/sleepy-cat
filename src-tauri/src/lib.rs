@@ -9,7 +9,7 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 mod platform;
 pub use platform::{
     accessibility_status, frontmost_app, request_accessibility_permission, AccessibilityStatus,
-    AutosendOutcome, CandidateInput, FrontmostApp,
+    AutosendOutcome, CandidateInput, FrontmostApp, FrontmostAppWithPid,
 };
 mod overlay_position;
 pub use overlay_position::{prompt_button_position, OverlayPoint};
@@ -96,7 +96,7 @@ fn current_input_target(
         return Some(target);
     }
 
-    if let Some(app) = frontmost_app() {
+    if let Some(app) = platform::frontmost_app_with_pid() {
         record_last_app_if_valid(state.inner(), app);
     }
 
@@ -118,7 +118,7 @@ async fn begin_prompt_pick_session(
         }
 
         let Some(target) = prompt_pick_session_target(
-            frontmost_app(),
+            platform::frontmost_app_with_pid(),
             platform::macos::visible_apps(),
             recent_state.get(),
         ) else {
@@ -327,6 +327,7 @@ fn prompt_pick_target_or_recent(
         .filter(|target| is_usable_autosend_app(&target.app))
         .map(|target| PromptPickSessionTarget {
             app: target.app,
+            pid: target.pid,
             observed_at_ms: now_ms(),
             click_point: target.click_point,
         })
@@ -492,6 +493,7 @@ fn set_menu_language(app: tauri::AppHandle, language: String) -> Result<(), Stri
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct LastInputTarget {
     pub app: FrontmostApp,
+    pub pid: Option<u32>,
     pub observed_at_ms: u128,
     pub click_point: Option<TargetClickPoint>,
 }
@@ -525,6 +527,7 @@ impl LastInputTargetState {
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct PromptPickSessionTarget {
     pub app: FrontmostApp,
+    pub pid: Option<u32>,
     pub observed_at_ms: u128,
     pub click_point: Option<TargetClickPoint>,
 }
@@ -609,24 +612,25 @@ fn record_prompt_pick_session_target_if_valid(
 }
 
 fn prompt_pick_session_target(
-    frontmost: Option<FrontmostApp>,
+    frontmost: Option<FrontmostAppWithPid>,
     visible_apps: Vec<FrontmostApp>,
     recent_target: Option<LastInputTarget>,
 ) -> Option<PromptPickSessionTarget> {
     let frontmost = frontmost?;
-    if is_usable_autosend_app(&frontmost) {
+    if is_usable_autosend_app(&frontmost.app) {
         let click_point = recent_target
             .as_ref()
-            .filter(|target| target.app.bundle_id == frontmost.bundle_id)
+            .filter(|target| target.app.bundle_id == frontmost.app.bundle_id)
             .and_then(|target| target.click_point);
         return Some(PromptPickSessionTarget {
-            app: frontmost,
+            app: frontmost.app,
+            pid: frontmost.pid,
             observed_at_ms: now_ms(),
             click_point,
         });
     }
 
-    if !is_prompt_picker_app(&frontmost) {
+    if !is_prompt_picker_app(&frontmost.app) {
         return None;
     }
 
@@ -637,6 +641,7 @@ fn prompt_pick_session_target(
     {
         return Some(PromptPickSessionTarget {
             app: target.app.clone(),
+            pid: target.pid,
             observed_at_ms: now_ms(),
             click_point: target.click_point,
         });
@@ -649,6 +654,7 @@ fn prompt_pick_session_target(
         if is_usable_autosend_app(&app) {
             return Some(PromptPickSessionTarget {
                 app,
+                pid: None,
                 observed_at_ms: now_ms(),
                 click_point: None,
             });
@@ -661,6 +667,7 @@ fn prompt_pick_session_target(
         .filter(|target| is_usable_autosend_app(&target.app))
         .map(|target| PromptPickSessionTarget {
             app: target.app,
+            pid: target.pid,
             observed_at_ms: now_ms(),
             click_point: target.click_point,
         })
@@ -692,28 +699,46 @@ fn record_last_input_target_if_valid(state: &LastInputTargetState, target: &plat
 
     state.set(LastInputTarget {
         app,
+        pid: None,
         observed_at_ms: now_ms(),
         click_point,
     });
 }
 
-fn record_last_app_if_valid(state: &LastInputTargetState, app: FrontmostApp) {
-    if is_prompt_picker_app(&app) {
+fn record_last_app_if_valid(state: &LastInputTargetState, target: FrontmostAppWithPid) {
+    if is_prompt_picker_app(&target.app) {
         return;
     }
-    if is_unsafe_autosend_target(&app) {
+    if is_unsafe_autosend_target(&target.app) {
         state.clear();
         return;
     }
-    if !allows_app_only_autosend(&app) {
+    if !allows_app_only_autosend(&target.app) {
         state.clear();
         return;
     }
     state.set(LastInputTarget {
-        app,
+        app: target.app,
+        pid: target.pid,
         observed_at_ms: now_ms(),
         click_point: None,
     });
+}
+
+fn captured_target_matches_frontmost(
+    target: &PromptPickSessionTarget,
+    frontmost: Option<&FrontmostAppWithPid>,
+) -> bool {
+    let Some(frontmost) = frontmost else {
+        return false;
+    };
+    if frontmost.app.bundle_id != target.app.bundle_id {
+        return false;
+    }
+    match (target.pid, frontmost.pid) {
+        (Some(target_pid), Some(frontmost_pid)) => target_pid == frontmost_pid,
+        _ => true,
+    }
 }
 
 fn is_prompt_picker_app(app: &FrontmostApp) -> bool {
@@ -1127,6 +1152,16 @@ mod last_input_target_tests {
     use super::*;
     use crate::platform::macos::AutosendFailureReason;
 
+    fn frontmost_target(name: &str, bundle_id: &str, pid: Option<u32>) -> FrontmostAppWithPid {
+        FrontmostAppWithPid {
+            app: FrontmostApp {
+                name: name.to_string(),
+                bundle_id: bundle_id.to_string(),
+            },
+            pid,
+        }
+    }
+
     #[test]
     fn stores_and_reads_last_input_target() {
         let state = LastInputTargetState::default();
@@ -1135,6 +1170,7 @@ mod last_input_target_tests {
                 name: "Notes".to_string(),
                 bundle_id: "com.apple.Notes".to_string(),
             },
+            pid: None,
             observed_at_ms: 123,
             click_point: None,
         };
@@ -1154,6 +1190,7 @@ mod last_input_target_tests {
                 name: "Codex".to_string(),
                 bundle_id: "com.openai.codex".to_string(),
             },
+            pid: None,
             observed_at_ms: now_ms(),
             click_point: Some(TargetClickPoint { x: 12.0, y: 34.0 }),
         });
@@ -1174,6 +1211,7 @@ mod last_input_target_tests {
                     name: "Codex".to_string(),
                     bundle_id: "com.openai.codex".to_string(),
                 },
+                pid: None,
                 observed_at_ms: now_ms(),
                 click_point: None,
             }
@@ -1332,6 +1370,7 @@ mod last_input_target_tests {
                 name: "Codex".to_string(),
                 bundle_id: "com.openai.codex".to_string(),
             },
+            pid: None,
             observed_at_ms: 123,
             click_point: Some(TargetClickPoint { x: 640.0, y: 720.0 }),
         });
@@ -1423,25 +1462,63 @@ mod last_input_target_tests {
     #[test]
     fn prompt_pick_session_uses_frontmost_business_app() {
         let target = prompt_pick_session_target(
-            Some(FrontmostApp {
-                name: "WeChat".to_string(),
-                bundle_id: "com.tencent.xinWeChat".to_string(),
-            }),
+            Some(frontmost_target("WeChat", "com.tencent.xinWeChat", Some(123))),
             vec![],
             None,
         )
         .unwrap();
 
         assert_eq!(target.app.bundle_id, "com.tencent.xinWeChat");
+        assert_eq!(target.pid, Some(123));
+    }
+
+    #[test]
+    fn captured_target_matches_only_same_bundle_and_pid() {
+        let target = PromptPickSessionTarget {
+            app: FrontmostApp {
+                name: "WeChat".to_string(),
+                bundle_id: "com.tencent.xinWeChat".to_string(),
+            },
+            pid: Some(123),
+            observed_at_ms: now_ms(),
+            click_point: None,
+        };
+        let same = frontmost_target("WeChat", "com.tencent.xinWeChat", Some(123));
+        let different_pid = frontmost_target("WeChat", "com.tencent.xinWeChat", Some(456));
+        let different_bundle = frontmost_target("Notes", "com.apple.Notes", Some(123));
+
+        assert!(captured_target_matches_frontmost(&target, Some(&same)));
+        assert!(!captured_target_matches_frontmost(
+            &target,
+            Some(&different_pid)
+        ));
+        assert!(!captured_target_matches_frontmost(
+            &target,
+            Some(&different_bundle)
+        ));
+        assert!(!captured_target_matches_frontmost(&target, None));
+    }
+
+    #[test]
+    fn captured_target_falls_back_to_bundle_when_pid_is_unavailable() {
+        let target = PromptPickSessionTarget {
+            app: FrontmostApp {
+                name: "Notes".to_string(),
+                bundle_id: "com.apple.Notes".to_string(),
+            },
+            pid: None,
+            observed_at_ms: now_ms(),
+            click_point: None,
+        };
+        let frontmost = frontmost_target("Notes", "com.apple.Notes", Some(123));
+
+        assert!(captured_target_matches_frontmost(&target, Some(&frontmost)));
     }
 
     #[test]
     fn prompt_pick_session_falls_back_from_prompt_picker_to_visible_business_app() {
         let target = prompt_pick_session_target(
-            Some(FrontmostApp {
-                name: "Prompt Picker".to_string(),
-                bundle_id: "local.promptpicker.dev".to_string(),
-            }),
+            Some(frontmost_target("Prompt Picker", "local.promptpicker.dev", Some(1))),
             vec![FrontmostApp {
                 name: "Codex".to_string(),
                 bundle_id: "com.openai.codex".to_string(),
@@ -1456,10 +1533,7 @@ mod last_input_target_tests {
     #[test]
     fn prompt_pick_session_does_not_skip_unsafe_visible_app_to_stale_recent_target() {
         let target = prompt_pick_session_target(
-            Some(FrontmostApp {
-                name: "Prompt Picker".to_string(),
-                bundle_id: "local.promptpicker.dev".to_string(),
-            }),
+            Some(frontmost_target("Prompt Picker", "local.promptpicker.dev", Some(1))),
             vec![
                 FrontmostApp {
                     name: "Finder".to_string(),
@@ -1475,6 +1549,7 @@ mod last_input_target_tests {
                     name: "Codex".to_string(),
                     bundle_id: "com.openai.codex".to_string(),
                 },
+                pid: None,
                 observed_at_ms: 123,
                 click_point: None,
             }),
@@ -1486,16 +1561,14 @@ mod last_input_target_tests {
     #[test]
     fn prompt_pick_session_uses_recent_target_when_prompt_picker_has_no_visible_app() {
         let target = prompt_pick_session_target(
-            Some(FrontmostApp {
-                name: "Prompt Picker".to_string(),
-                bundle_id: "local.promptpicker.dev".to_string(),
-            }),
+            Some(frontmost_target("Prompt Picker", "local.promptpicker.dev", Some(1))),
             vec![],
             Some(LastInputTarget {
                 app: FrontmostApp {
                     name: "WeChat".to_string(),
                     bundle_id: "com.tencent.xinWeChat".to_string(),
                 },
+                pid: Some(456),
                 observed_at_ms: now_ms(),
                 click_point: None,
             }),
@@ -1503,15 +1576,13 @@ mod last_input_target_tests {
         .unwrap();
 
         assert_eq!(target.app.bundle_id, "com.tencent.xinWeChat");
+        assert_eq!(target.pid, Some(456));
     }
 
     #[test]
     fn prompt_pick_session_prefers_recent_target_over_visible_app_when_picker_is_frontmost() {
         let target = prompt_pick_session_target(
-            Some(FrontmostApp {
-                name: "Prompt Picker".to_string(),
-                bundle_id: "local.promptpicker.dev".to_string(),
-            }),
+            Some(frontmost_target("Prompt Picker", "local.promptpicker.dev", Some(1))),
             vec![FrontmostApp {
                 name: "Codex".to_string(),
                 bundle_id: "com.openai.codex".to_string(),
@@ -1521,6 +1592,7 @@ mod last_input_target_tests {
                     name: "WeChat".to_string(),
                     bundle_id: "com.tencent.xinWeChat".to_string(),
                 },
+                pid: None,
                 observed_at_ms: now_ms(),
                 click_point: Some(TargetClickPoint { x: 400.0, y: 700.0 }),
             }),
@@ -1573,6 +1645,7 @@ mod last_input_target_tests {
                 name: "Codex".to_string(),
                 bundle_id: "com.openai.codex".to_string(),
             },
+            pid: None,
             observed_at_ms: now_ms(),
             click_point: Some(TargetClickPoint { x: 640.0, y: 720.0 }),
         });
@@ -1606,6 +1679,7 @@ mod last_input_target_tests {
                     name: "WeChat".to_string(),
                     bundle_id: "com.tencent.xinWeChat".to_string(),
                 },
+                pid: None,
                 observed_at_ms: now_ms(),
                 click_point: None,
             },
@@ -1625,6 +1699,7 @@ mod last_input_target_tests {
                     name: "WeChat".to_string(),
                     bundle_id: "com.tencent.xinWeChat".to_string(),
                 },
+                pid: None,
                 observed_at_ms: now_ms(),
                 click_point: None,
             },
@@ -1639,6 +1714,7 @@ mod last_input_target_tests {
                 name: "Codex".to_string(),
                 bundle_id: "com.openai.codex".to_string(),
             },
+            pid: None,
             observed_at_ms: now_ms(),
             click_point: None,
         });
@@ -1665,6 +1741,7 @@ mod last_input_target_tests {
                 name: "WeChat".to_string(),
                 bundle_id: "com.tencent.xinWeChat".to_string(),
             },
+            pid: None,
             observed_at_ms: 123,
             click_point: Some(TargetClickPoint { x: 420.0, y: 720.0 }),
         });
@@ -1696,6 +1773,7 @@ mod last_input_target_tests {
                 name: "Codex".to_string(),
                 bundle_id: "com.openai.codex".to_string(),
             },
+            pid: None,
             observed_at_ms: 123,
             click_point: None,
         });
@@ -1726,6 +1804,7 @@ mod last_input_target_tests {
                 name: "Codex".to_string(),
                 bundle_id: "com.openai.codex".to_string(),
             },
+            pid: None,
             observed_at_ms: 123,
             click_point: None,
         });
@@ -1756,6 +1835,7 @@ mod last_input_target_tests {
                 name: "WeChat".to_string(),
                 bundle_id: "com.tencent.xinWeChat".to_string(),
             },
+            pid: None,
             observed_at_ms: 123,
             click_point: None,
         });
@@ -1799,6 +1879,7 @@ mod last_input_target_tests {
                 name: "Codex".to_string(),
                 bundle_id: "com.openai.codex".to_string(),
             },
+            pid: None,
             observed_at_ms: 123,
             click_point: None,
         });
@@ -1827,6 +1908,7 @@ mod last_input_target_tests {
                 name: "Codex".to_string(),
                 bundle_id: "com.openai.codex".to_string(),
             },
+            pid: None,
             observed_at_ms: 123,
             click_point: None,
         });
@@ -1894,6 +1976,7 @@ mod last_input_target_tests {
                 name: "WeChat".to_string(),
                 bundle_id: "com.tencent.xinWeChat".to_string(),
             },
+            pid: None,
             observed_at_ms: now_ms(),
             click_point: None,
         });
@@ -1929,6 +2012,7 @@ mod last_input_target_tests {
                 name: "WeChat".to_string(),
                 bundle_id: "com.tencent.xinWeChat".to_string(),
             },
+            pid: None,
             observed_at_ms: 123,
             click_point: None,
         });
@@ -1947,6 +2031,7 @@ mod last_input_target_tests {
                 name: "WeChat".to_string(),
                 bundle_id: "com.tencent.xinWeChat".to_string(),
             },
+            pid: None,
             observed_at_ms: 123,
             click_point: None,
         });
@@ -1965,6 +2050,7 @@ mod last_input_target_tests {
                 name: "Codex".to_string(),
                 bundle_id: "com.openai.codex".to_string(),
             },
+            pid: None,
             observed_at_ms: 123,
             click_point: None,
         });
@@ -1980,6 +2066,7 @@ mod last_input_target_tests {
                 name: "Codex".to_string(),
                 bundle_id: "com.openai.codex".to_string(),
             },
+            pid: None,
             observed_at_ms: 123,
             click_point: None,
         });
@@ -1992,13 +2079,11 @@ mod last_input_target_tests {
         let state = LastInputTargetState::default();
         record_last_app_if_valid(
             &state,
-            FrontmostApp {
-                name: "WeChat".to_string(),
-                bundle_id: "com.tencent.xinWeChat".to_string(),
-            },
+            frontmost_target("WeChat", "com.tencent.xinWeChat", Some(123)),
         );
 
         assert_eq!(state.get().unwrap().app.bundle_id, "com.tencent.xinWeChat");
+        assert_eq!(state.get().unwrap().pid, Some(123));
     }
 
     #[test]
@@ -2006,10 +2091,7 @@ mod last_input_target_tests {
         let state = LastInputTargetState::default();
         record_last_app_if_valid(
             &state,
-            FrontmostApp {
-                name: "Prompt Picker".to_string(),
-                bundle_id: "local.promptpicker.dev".to_string(),
-            },
+            frontmost_target("Prompt Picker", "local.promptpicker.dev", Some(1)),
         );
 
         assert!(state.get().is_none());

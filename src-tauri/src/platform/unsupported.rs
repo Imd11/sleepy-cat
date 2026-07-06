@@ -6,6 +6,12 @@ pub struct FrontmostApp {
     pub bundle_id: String,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct FrontmostAppWithPid {
+    pub app: FrontmostApp,
+    pub pid: Option<u32>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct AccessibilityStatus {
     pub trusted: bool,
@@ -129,6 +135,10 @@ pub fn open_accessibility_settings() -> Result<(), String> {
 }
 
 pub fn frontmost_app() -> Option<FrontmostApp> {
+    None
+}
+
+pub fn frontmost_app_with_pid() -> Option<FrontmostAppWithPid> {
     None
 }
 
