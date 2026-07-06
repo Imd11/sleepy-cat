@@ -540,7 +540,7 @@ pub fn show_prompt_popover_from_button(
     session_state: tauri::State<crate::PromptPickSessionState>,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
-    session_state.begin(session_id);
+    session_state.begin_if_new(session_id);
     let position = button_relative_popover_position(
         &app,
         BUTTON_VISUAL_WIDTH,
@@ -567,7 +567,7 @@ pub fn toggle_prompt_popover_from_button(
         }
     }
 
-    session_state.begin(session_id);
+    session_state.begin_if_new(session_id);
     let position = button_relative_popover_position(
         &app,
         BUTTON_VISUAL_WIDTH,
@@ -1168,6 +1168,21 @@ mod tests {
         assert!(command_source.contains("emit_popover_dismissed(&app)"));
         assert!(command_source.contains("PromptPopoverToggleOutcome { opened: false }"));
         assert!(command_source.contains("PromptPopoverToggleOutcome { opened: true }"));
+    }
+
+    #[test]
+    fn prompt_popover_open_preserves_existing_session_capture() {
+        let source = include_str!("windows.rs");
+        let start = source
+            .find("pub fn toggle_prompt_popover_from_button")
+            .expect("toggle command should exist");
+        let end = source[start..]
+            .find("pub fn show_prompt_button_controls_from_button")
+            .expect("next command should follow toggle");
+        let command_source = &source[start..start + end];
+
+        assert!(command_source.contains("session_state.begin_if_new(session_id);"));
+        assert!(command_source.contains("session_state.begin(session_id);"));
     }
 
     #[test]

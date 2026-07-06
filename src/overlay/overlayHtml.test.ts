@@ -176,7 +176,7 @@ describe("overlay button html", () => {
     );
   });
 
-  it("opens the prompt list without awaiting target session capture", () => {
+  it("captures the prompt target before opening the prompt list", () => {
     const html = readOverlayHtml();
 
     expect(html).toContain("let promptPickSessionId = 0;");
@@ -184,18 +184,16 @@ describe("overlay button html", () => {
     expect(html).toContain("const permission = await invoke('prompt_interaction_permission_status');");
     expect(html).toContain("if (permission?.required && !permission.trusted)");
     expect(html).toContain("await handleMissingPromptInteractionPermission(permission);");
+    expect(html).toContain("await invoke('begin_prompt_pick_session', { sessionId });");
     expect(html).toContain("const toggleResult = await invoke('toggle_prompt_popover_from_button', { sessionId });");
-    expect(html).toContain("if (toggleResult?.opened)");
-    expect(html).toContain("const sessionPromise = invoke('begin_prompt_pick_session', { sessionId });");
-    expect(html).toContain("void sessionPromise.catch(() => null);");
+    expect(html).not.toContain("const sessionPromise = invoke('begin_prompt_pick_session'");
+    expect(html).not.toContain("void sessionPromise.catch");
     expect(html).toContain("resetCalicoMotion();");
-    expect(html).not.toContain("await invoke('begin_prompt_pick_session')");
-    expect(html).not.toContain("await sessionPromise.catch");
     expect(html.indexOf("prompt_interaction_permission_status")).toBeLessThan(
-      html.indexOf("toggle_prompt_popover_from_button")
-    );
-    expect(html.indexOf("toggle_prompt_popover_from_button")).toBeLessThan(
       html.indexOf("begin_prompt_pick_session")
+    );
+    expect(html.indexOf("begin_prompt_pick_session")).toBeLessThan(
+      html.indexOf("toggle_prompt_popover_from_button")
     );
   });
 

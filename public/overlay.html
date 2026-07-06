@@ -514,11 +514,9 @@ btn.addEventListener('pointerup', async (event) => {
       resetCalicoMotion();
     } else {
       const sessionId = ++promptPickSessionId;
+      await invoke('begin_prompt_pick_session', { sessionId });
       const toggleResult = await invoke('toggle_prompt_popover_from_button', { sessionId });
-      if (toggleResult?.opened) {
-        const sessionPromise = invoke('begin_prompt_pick_session', { sessionId });
-        void sessionPromise.catch(() => null);
-      } else {
+      if (!toggleResult?.opened) {
         resetCalicoMotion();
       }
     }

@@ -108,12 +108,13 @@ async fn begin_prompt_pick_session(
     session_id: u64,
     session_state: tauri::State<'_, PromptPickSessionState>,
     recent_state: tauri::State<'_, LastInputTargetState>,
-) -> Result<Option<FrontmostApp>, String> {
-    let session_state = session_state.inner().clone();
-    let recent_state = recent_state.inner().clone();
+    ) -> Result<Option<FrontmostApp>, String> {
+        let session_state = session_state.inner().clone();
+        let recent_state = recent_state.inner().clone();
+        session_state.begin(session_id);
 
-    tauri::async_runtime::spawn_blocking(move || {
-        if let Some(input_target) = platform::macos::current_input_target() {
+        tauri::async_runtime::spawn_blocking(move || {
+            if let Some(input_target) = platform::macos::current_input_target() {
             record_last_input_target_if_valid(&recent_state, &input_target);
         }
 
@@ -777,6 +778,15 @@ pub struct PromptPickSessionState(std::sync::Arc<std::sync::Mutex<PromptPickSess
 impl PromptPickSessionState {
     pub fn begin(&self, session_id: u64) {
         let mut state = self.0.lock().expect("prompt pick session lock poisoned");
+        state.active_session_id = session_id;
+        state.target = None;
+    }
+
+    pub fn begin_if_new(&self, session_id: u64) {
+        let mut state = self.0.lock().expect("prompt pick session lock poisoned");
+        if state.active_session_id == session_id {
+            return;
+        }
         state.active_session_id = session_id;
         state.target = None;
     }
@@ -1465,6 +1475,27 @@ mod last_input_target_tests {
     }
 
     #[test]
+    fn begin_if_new_preserves_target_for_current_session() {
+        let state = PromptPickSessionState::default();
+        state.begin(7);
+        state.set(PromptPickSessionTarget {
+            app: FrontmostApp {
+                name: "Codex".to_string(),
+                bundle_id: "com.openai.codex".to_string(),
+            },
+            pid: None,
+            observed_at_ms: now_ms(),
+            click_point: Some(TargetClickPoint { x: 640.0, y: 720.0 }),
+        });
+
+        state.begin_if_new(7);
+        assert_eq!(state.get().unwrap().app.bundle_id, "com.openai.codex");
+
+        state.begin_if_new(8);
+        assert!(state.get().is_none());
+    }
+
+    #[test]
     fn autosend_and_prompt_capture_commands_use_spawn_blocking() {
         let source = include_str!("lib.rs");
 
@@ -1472,6 +1503,21 @@ mod last_input_target_tests {
         assert!(source.contains("async fn paste_prompt_and_submit_to_last_target"));
         assert!(source.contains("async fn paste_prompt_sequence_and_submit_to_last_target"));
         assert!(source.matches("tauri::async_runtime::spawn_blocking(move ||").count() >= 3);
+    }
+
+    #[test]
+    fn prompt_capture_command_begins_session_before_recording_target() {
+        let source = include_str!("lib.rs");
+        let start = source
+            .find("async fn begin_prompt_pick_session")
+            .expect("begin_prompt_pick_session should exist");
+        let end = source[start..]
+            .find("#[tauri::command]\nfn paste_prompt")
+            .expect("next command should follow begin_prompt_pick_session");
+        let command_source = &source[start..start + end];
+
+        assert!(command_source.contains("session_state.begin(session_id);"));
+        assert!(command_source.contains("record_prompt_pick_session_target_if_valid"));
     }
 
     #[test]
