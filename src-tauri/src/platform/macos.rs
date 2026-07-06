@@ -463,6 +463,42 @@ pub fn focus_preserving_paste_and_submit(submit_key: NativeSubmitKey) -> Autosen
     AutosendOutcome::sent()
 }
 
+pub fn repair_focus_to_editable_element(pid: u32) -> Result<(), String> {
+    ensure_accessibility_trusted_with(is_accessibility_trusted)?;
+    run_system_events_script(&repair_focus_to_editable_element_script(pid))
+        .map_err(|error| format_autosend_error("ax-focus-repair", &error))
+}
+
+fn repair_focus_to_editable_element_script(pid: u32) -> String {
+    format!(
+        r#"on run
+tell application "System Events"
+    tell (first process whose unix id is {})
+        set frontWin to front window
+        try
+            set focusedElem to value of attribute "AXFocusedUIElement" of frontWin
+            if focusedElem is not missing value then
+                set focused of focusedElem to true
+                return "focused-current"
+            end if
+        end try
+        set editableRoles to {{"AXTextArea", "AXTextField", "AXSearchField", "AXComboBox", "AXWebArea"}}
+        repeat with elem in entire contents of frontWin
+            try
+                if role of elem is in editableRoles then
+                    set focused of elem to true
+                    return "focused-editable"
+                end if
+            end try
+        end repeat
+    end tell
+end tell
+error "No editable AX element found"
+end run"#,
+        pid
+    )
+}
+
 fn post_command_return_key() -> Result<(), String> {
     post_key_event(KEY_CODE_COMMAND, true, CG_EVENT_FLAG_MASK_COMMAND)?;
     post_key_tap(KEY_CODE_RETURN, CG_EVENT_FLAG_MASK_COMMAND)?;
@@ -1322,6 +1358,21 @@ mod tests {
     #[test]
     fn native_submit_key_supports_command_enter() {
         assert_eq!(NativeSubmitKey::CommandEnter, NativeSubmitKey::CommandEnter);
+    }
+
+    #[test]
+    fn ax_repair_script_uses_generic_editable_roles_without_app_recipes() {
+        let script = repair_focus_to_editable_element_script(123);
+
+        assert!(script.contains("AXTextArea"));
+        assert!(script.contains("AXTextField"));
+        assert!(script.contains("AXSearchField"));
+        assert!(script.contains("AXComboBox"));
+        assert!(script.contains("AXWebArea"));
+        assert!(script.contains("entire contents of frontWin"));
+        assert!(!script.contains("WeChat"));
+        assert!(!script.contains("Claude"));
+        assert!(!script.contains("Codex"));
     }
 
     #[test]

@@ -183,6 +183,10 @@ pub fn post_focus_preserving_submit_key(_submit_key: NativeSubmitKey) -> Result<
     Err("Focus-preserving submit is only implemented for macOS targets.".to_string())
 }
 
+pub fn repair_focus_to_editable_element(_pid: u32) -> Result<(), String> {
+    Err("AX focus repair is only implemented for macOS targets.".to_string())
+}
+
 pub fn paste_prompt_and_submit_to_app_clipboard_with_copier<C>(
     body: &str,
     _bundle_id: &str,

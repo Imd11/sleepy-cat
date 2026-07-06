@@ -278,6 +278,7 @@ fn paste_prompt_sequence_and_submit_to_last_target_impl(
         submit_key,
         |text| copy_text_to_clipboard(app, text),
         platform::frontmost_app_with_pid,
+        repair_target_focus,
         platform::macos::post_focus_preserving_paste,
         platform::macos::post_focus_preserving_submit_key,
         |delay_ms| std::thread::sleep(std::time::Duration::from_millis(delay_ms)),
@@ -298,6 +299,7 @@ fn paste_prompt_and_submit_to_last_target_impl(
         submit_key,
         |text| copy_text_to_clipboard(app, text),
         platform::frontmost_app_with_pid,
+        repair_target_focus,
         platform::macos::post_focus_preserving_paste,
         platform::macos::post_focus_preserving_submit_key,
         |delay_ms| std::thread::sleep(std::time::Duration::from_millis(delay_ms)),
@@ -330,6 +332,13 @@ fn native_submit_key_from_arg(
     }
 }
 
+fn repair_target_focus(target: &PromptPickSessionTarget) -> Result<(), String> {
+    let Some(pid) = target.pid else {
+        return Err("Captured target pid is unavailable for AX focus repair.".to_string());
+    };
+    platform::macos::repair_focus_to_editable_element(pid)
+}
+
 fn prompt_pick_target_or_recent(
     session_state: &PromptPickSessionState,
     recent_state: Option<&LastInputTargetState>,
@@ -350,13 +359,14 @@ fn prompt_pick_target_or_recent(
         })
 }
 
-fn focus_preserving_prompt_to_last_target_impl<C, F, P, S, W>(
+fn focus_preserving_prompt_to_last_target_impl<C, F, R, P, S, W>(
     body: &str,
     state: &PromptPickSessionState,
     recent_state: Option<&LastInputTargetState>,
     submit_key: platform::macos::NativeSubmitKey,
     copy_sender: C,
     frontmost_reader: F,
+    focus_repair: R,
     paste_sender: P,
     submit_sender: S,
     sleeper: W,
@@ -364,6 +374,7 @@ fn focus_preserving_prompt_to_last_target_impl<C, F, P, S, W>(
 where
     C: FnOnce(&str) -> Result<(), String>,
     F: FnMut() -> Option<FrontmostAppWithPid>,
+    R: FnMut(&PromptPickSessionTarget) -> Result<(), String>,
     P: FnOnce() -> Result<(), String>,
     S: FnOnce(platform::macos::NativeSubmitKey) -> Result<(), String>,
     W: FnOnce(u64),
@@ -402,13 +413,14 @@ where
         submit_key,
         copy_sender,
         frontmost_reader,
+        focus_repair,
         paste_sender,
         submit_sender,
         sleeper,
     ))
 }
 
-fn focus_preserving_prompt_sequence_to_last_target_impl<C, F, P, S, W>(
+fn focus_preserving_prompt_sequence_to_last_target_impl<C, F, R, P, S, W>(
     bodies: &[String],
     interval_ms: u64,
     state: &PromptPickSessionState,
@@ -416,6 +428,7 @@ fn focus_preserving_prompt_sequence_to_last_target_impl<C, F, P, S, W>(
     submit_key: platform::macos::NativeSubmitKey,
     copy_sender: C,
     frontmost_reader: F,
+    focus_repair: R,
     paste_sender: P,
     submit_sender: S,
     sleeper: W,
@@ -423,6 +436,7 @@ fn focus_preserving_prompt_sequence_to_last_target_impl<C, F, P, S, W>(
 where
     C: FnMut(&str) -> Result<(), String>,
     F: FnMut() -> Option<FrontmostAppWithPid>,
+    R: FnMut(&PromptPickSessionTarget) -> Result<(), String>,
     P: FnMut() -> Result<(), String>,
     S: FnMut(platform::macos::NativeSubmitKey) -> Result<(), String>,
     W: FnMut(u64),
@@ -473,19 +487,21 @@ where
         submit_key,
         copy_sender,
         frontmost_reader,
+        focus_repair,
         paste_sender,
         submit_sender,
         sleeper,
     ))
 }
 
-fn focus_preserving_prompt_sequence_for_target_with_senders<C, F, P, S, W>(
+fn focus_preserving_prompt_sequence_for_target_with_senders<C, F, R, P, S, W>(
     clean_bodies: &[String],
     interval_ms: u64,
     target: &PromptPickSessionTarget,
     submit_key: platform::macos::NativeSubmitKey,
     mut copy_sender: C,
     mut frontmost_reader: F,
+    mut focus_repair: R,
     mut paste_sender: P,
     mut submit_sender: S,
     mut sleeper: W,
@@ -493,6 +509,7 @@ fn focus_preserving_prompt_sequence_for_target_with_senders<C, F, P, S, W>(
 where
     C: FnMut(&str) -> Result<(), String>,
     F: FnMut() -> Option<FrontmostAppWithPid>,
+    R: FnMut(&PromptPickSessionTarget) -> Result<(), String>,
     P: FnMut() -> Result<(), String>,
     S: FnMut(platform::macos::NativeSubmitKey) -> Result<(), String>,
     W: FnMut(u64),
@@ -505,6 +522,7 @@ where
             submit_key,
             |text| copy_sender(text),
             || frontmost_reader(),
+            |target| focus_repair(target),
             || paste_sender(),
             |key| submit_sender(key),
             |delay_ms| sleeper(delay_ms),
@@ -520,12 +538,13 @@ where
     AutosendSequenceOutcome::sent_all(clean_bodies.len())
 }
 
-fn guarded_focus_preserving_autosend_with_senders<C, F, P, S, W>(
+fn guarded_focus_preserving_autosend_with_senders<C, F, R, P, S, W>(
     body: &str,
     target: &PromptPickSessionTarget,
     submit_key: platform::macos::NativeSubmitKey,
     copy_sender: C,
     mut frontmost_reader: F,
+    mut focus_repair: R,
     paste_sender: P,
     submit_sender: S,
     sleeper: W,
@@ -533,6 +552,7 @@ fn guarded_focus_preserving_autosend_with_senders<C, F, P, S, W>(
 where
     C: FnOnce(&str) -> Result<(), String>,
     F: FnMut() -> Option<FrontmostAppWithPid>,
+    R: FnMut(&PromptPickSessionTarget) -> Result<(), String>,
     P: FnOnce() -> Result<(), String>,
     S: FnOnce(platform::macos::NativeSubmitKey) -> Result<(), String>,
     W: FnOnce(u64),
@@ -543,9 +563,17 @@ where
 
     let before_paste = frontmost_reader();
     if !captured_target_matches_frontmost(target, before_paste.as_ref()) {
-        return AutosendOutcome::copied_without_send(
-            "Target app changed before paste; prompt was copied instead.".to_string(),
-        );
+        if focus_repair(target).is_err() {
+            return AutosendOutcome::copied_without_send(
+                "Target app changed before paste; prompt was copied instead.".to_string(),
+            );
+        }
+        let after_repair = frontmost_reader();
+        if !captured_target_matches_frontmost(target, after_repair.as_ref()) {
+            return AutosendOutcome::copied_without_send(
+                "Target app changed before paste; prompt was copied instead.".to_string(),
+            );
+        }
     }
 
     if let Err(error) = paste_sender() {
@@ -1813,6 +1841,7 @@ mod last_input_target_tests {
                 Ok(())
             },
             || frontmost.pop_front(),
+            |_| Err("repair unavailable".to_string()),
             || {
                 events.borrow_mut().push("paste");
                 Ok(())
@@ -1828,6 +1857,47 @@ mod last_input_target_tests {
         assert!(!outcome.sent);
         assert_eq!(outcome.reason, Some(AutosendFailureReason::NoSafeTarget));
         assert_eq!(&*events.borrow(), &["copy"]);
+    }
+
+    #[test]
+    fn ax_repair_can_recover_before_paste_if_target_matches_after_repair() {
+        let target = prompt_target("WeChat", "com.tencent.xinWeChat", Some(123));
+        let events = RefCell::new(Vec::new());
+        let mut frontmost = VecDeque::from([
+            frontmost_target("Notes", "com.apple.Notes", Some(9)),
+            frontmost_target("WeChat", "com.tencent.xinWeChat", Some(123)),
+            frontmost_target("WeChat", "com.tencent.xinWeChat", Some(123)),
+        ]);
+
+        let outcome = guarded_focus_preserving_autosend_with_senders(
+            "hello",
+            &target,
+            platform::macos::NativeSubmitKey::Enter,
+            |_| {
+                events.borrow_mut().push("copy");
+                Ok(())
+            },
+            || frontmost.pop_front(),
+            |_| {
+                events.borrow_mut().push("repair");
+                Ok(())
+            },
+            || {
+                events.borrow_mut().push("paste");
+                Ok(())
+            },
+            |_| {
+                events.borrow_mut().push("submit");
+                Ok(())
+            },
+            |_| events.borrow_mut().push("sleep"),
+        );
+
+        assert!(outcome.sent);
+        assert_eq!(
+            &*events.borrow(),
+            &["copy", "repair", "paste", "sleep", "submit"]
+        );
     }
 
     #[test]
@@ -1848,6 +1918,7 @@ mod last_input_target_tests {
                 Ok(())
             },
             || frontmost.pop_front(),
+            |_| Err("repair unavailable".to_string()),
             || {
                 events.borrow_mut().push("paste");
                 Ok(())
@@ -1887,6 +1958,10 @@ mod last_input_target_tests {
                 Ok(())
             },
             || frontmost.pop_front(),
+            |_| {
+                events.borrow_mut().push("repair");
+                Err("repair must not run".to_string())
+            },
             || {
                 events.borrow_mut().push("paste");
                 Ok(())
@@ -1921,6 +1996,7 @@ mod last_input_target_tests {
                 Ok(())
             },
             || frontmost.pop_front(),
+            |_| Err("repair unavailable".to_string()),
             || {
                 events.borrow_mut().push("paste");
                 Ok(())
@@ -1960,6 +2036,7 @@ mod last_input_target_tests {
                 Ok(())
             },
             || frontmost.pop_front(),
+            |_| Err("repair unavailable".to_string()),
             || {
                 events.borrow_mut().push("paste");
                 Ok(())
@@ -2001,6 +2078,7 @@ mod last_input_target_tests {
                 Ok(())
             },
             || frontmost.pop_front(),
+            |_| Err("repair unavailable".to_string()),
             || {
                 events.borrow_mut().push("paste");
                 Ok(())
