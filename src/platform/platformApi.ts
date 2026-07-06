@@ -32,6 +32,8 @@ export type AutosendFailureReason =
   | "return_event_failed"
   | "target_focus_failed";
 
+export type NativeSubmitKey = "none" | "enter" | "command_enter";
+
 export interface AutosendOutcome {
   copied: boolean;
   sent: boolean;
@@ -69,18 +71,23 @@ export async function pastePromptToLastTarget(body: string): Promise<void> {
 }
 
 export async function pastePromptAndSubmitToLastTarget(
-  body: string
+  body: string,
+  submitKey: NativeSubmitKey = "enter"
 ): Promise<AutosendOutcome> {
-  return invoke<AutosendOutcome>("paste_prompt_and_submit_to_last_target", { body });
+  return invoke<AutosendOutcome>("paste_prompt_and_submit_to_last_target", {
+    body,
+    submit_key: submitKey,
+  });
 }
 
 export async function pastePromptSequenceAndSubmitToLastTarget(
   bodies: string[],
-  intervalMs: number
+  intervalMs: number,
+  submitKey: NativeSubmitKey = "enter"
 ): Promise<AutosendSequenceOutcome> {
   return invoke<AutosendSequenceOutcome>(
     "paste_prompt_sequence_and_submit_to_last_target",
-    { bodies, interval_ms: intervalMs }
+    { bodies, interval_ms: intervalMs, submit_key: submitKey }
   );
 }
 

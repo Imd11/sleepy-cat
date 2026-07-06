@@ -39,7 +39,20 @@ describe("prompt store", () => {
     expect(typeof prompt.order).toBe("number");
     expect(prompt.title).toBe("Test");
     expect(prompt.type).toBe("single");
+    expect(prompt.sendBehavior).toBe("inherit");
     expect(prompt.prompts[0].body).toBe("body");
+  });
+
+  it("persists explicit send behavior for new containers", async () => {
+    const store = createTestStore();
+    const prompt = await store.create({
+      title: "Test",
+      body: "body",
+      sendBehavior: "paste_command_enter",
+    });
+
+    expect(prompt.sendBehavior).toBe("paste_command_enter");
+    expect((await store.list())[0].sendBehavior).toBe("paste_command_enter");
   });
 
   it("creates grouped prompt containers with ordered entries", async () => {
@@ -150,6 +163,40 @@ describe("prompt store", () => {
     const list = await store.list();
     expect(list).toHaveLength(1);
     expect(list[0].title).toBe("Imported");
+    expect(list[0].sendBehavior).toBe("inherit");
+  });
+
+  it("normalizes invalid imported send behavior to inherit", async () => {
+    const store = createTestStore();
+    await store.importJson(JSON.stringify({
+      version: 3,
+      categories: [
+        {
+          id: "category-default",
+          name: "Default",
+          order: 0,
+          createdAt: "2026-05-26T00:00:00.000Z",
+          updatedAt: "2026-05-26T00:00:00.000Z"
+        }
+      ],
+      containers: [
+        {
+          id: "container-1",
+          categoryId: "category-default",
+          title: "Imported",
+          type: "single",
+          sendBehavior: "invalid",
+          prompts: [{ id: "entry-1", body: "body", order: 0 }],
+          intervalMs: 700,
+          order: 0,
+          createdAt: "2026-05-26T00:00:00.000Z",
+          updatedAt: "2026-05-26T00:00:00.000Z"
+        }
+      ],
+      activeCategoryId: "category-default",
+    }));
+
+    expect((await store.list())[0].sendBehavior).toBe("inherit");
   });
 
   it("loads legacy v1 prompts as single containers", async () => {

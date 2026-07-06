@@ -8,6 +8,7 @@ import type {
 import {
   DEFAULT_GROUP_INTERVAL_MS,
   clampGroupIntervalMs,
+  normalizePromptSendBehavior,
   normalizePromptTitle,
 } from "./promptTypes";
 
@@ -21,8 +22,9 @@ type PromptStoreDataV1 = {
   prompts: PromptItem[];
 };
 
-type LegacyPromptContainer = Omit<PromptContainer, "categoryId"> & {
+type LegacyPromptContainer = Omit<PromptContainer, "categoryId" | "sendBehavior"> & {
   categoryId?: string;
+  sendBehavior?: unknown;
 };
 
 type PromptStoreDataV2 = {
@@ -121,6 +123,7 @@ function normalizeContainer(
     categoryId,
     title,
     type,
+    sendBehavior: normalizePromptSendBehavior(input.sendBehavior ?? existing?.sendBehavior),
     prompts: usablePrompts.map((prompt, index) => ({ ...prompt, order: index })),
     intervalMs: clampGroupIntervalMs(input.intervalMs ?? existing?.intervalMs),
     order,
@@ -149,6 +152,7 @@ function containerToInput(container: PromptContainer | LegacyPromptContainer): P
   return {
     title: container.title,
     type: container.type,
+    sendBehavior: normalizePromptSendBehavior(container.sendBehavior),
     prompts: sortEntries(container.prompts).map((prompt) => ({
       id: prompt.id,
       body: prompt.body,
@@ -168,6 +172,7 @@ function legacyPromptToContainer(
     categoryId,
     title: prompt.title,
     type: "single",
+    sendBehavior: "inherit",
     prompts: [entryFromBody(prompt.body, 0, `${prompt.id}-entry`)],
     intervalMs: DEFAULT_GROUP_INTERVAL_MS,
     order: prompt.order,
@@ -469,6 +474,7 @@ export function createPromptStore(adapter: StorageAdapter) {
     async create(input: {
       title: string;
       body: string;
+      sendBehavior?: PromptContainerInput["sendBehavior"];
       categoryId?: string;
     }): Promise<PromptContainer> {
       const store = await load();
@@ -483,6 +489,7 @@ export function createPromptStore(adapter: StorageAdapter) {
           type: "single",
           prompts: [{ body: input.body }],
           intervalMs: DEFAULT_GROUP_INTERVAL_MS,
+          sendBehavior: input.sendBehavior,
           categoryId,
         },
         maxOrder + 1,
@@ -500,6 +507,7 @@ export function createPromptStore(adapter: StorageAdapter) {
       title: string;
       prompts: Array<{ body: string }>;
       intervalMs?: number;
+      sendBehavior?: PromptContainerInput["sendBehavior"];
       categoryId?: string;
     }): Promise<PromptContainer> {
       const store = await load();
@@ -514,6 +522,7 @@ export function createPromptStore(adapter: StorageAdapter) {
           type: "group",
           prompts: input.prompts,
           intervalMs: input.intervalMs,
+          sendBehavior: input.sendBehavior,
           categoryId,
         },
         maxOrder + 1,
@@ -535,6 +544,7 @@ export function createPromptStore(adapter: StorageAdapter) {
         type?: "single" | "group";
         prompts?: Array<{ id?: string; body: string; order?: number }>;
         intervalMs?: number;
+        sendBehavior?: PromptContainerInput["sendBehavior"];
       }
     ): Promise<PromptContainer | null> {
       const store = await load();
@@ -552,6 +562,7 @@ export function createPromptStore(adapter: StorageAdapter) {
               : [{ id: existing.prompts[0]?.id, body: input.body, order: 0 }]
           ),
           intervalMs: input.intervalMs ?? existing.intervalMs,
+          sendBehavior: input.sendBehavior ?? existing.sendBehavior,
           categoryId: existing.categoryId,
         },
         existing.order,

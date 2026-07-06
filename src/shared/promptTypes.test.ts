@@ -8,6 +8,7 @@ import {
   getPromptContainerPreview,
   getPromptContainerPreviewLines,
   getPromptPreview,
+  normalizePromptSendBehavior,
   normalizePromptTitle,
 } from "./promptTypes";
 import type { PromptContainer } from "./promptTypes";
@@ -27,6 +28,7 @@ describe("prompt model helpers", () => {
       categoryId: "category-default",
       title: "Single",
       type: "single",
+      sendBehavior: "inherit",
       prompts: [{ id: "entry-1", body: "Use writing-plans skill.", order: 0 }],
       intervalMs: DEFAULT_GROUP_INTERVAL_MS,
       order: 0,
@@ -44,6 +46,7 @@ describe("prompt model helpers", () => {
       categoryId: "category-default",
       title: "Repair flow",
       type: "group",
+      sendBehavior: "inherit",
       prompts: [
         { id: "entry-2", body: "Write a plan.", order: 1 },
         { id: "entry-1", body: "Analyze the root cause.", order: 0 },
@@ -66,6 +69,7 @@ describe("prompt model helpers", () => {
       categoryId: "category-default",
       title: "Single lines",
       type: "single",
+      sendBehavior: "inherit",
       prompts: [{ id: "entry-1", body: "Use brainstorming skill.\nDiscuss first.", order: 0 }],
       intervalMs: DEFAULT_GROUP_INTERVAL_MS,
       order: 0,
@@ -84,6 +88,7 @@ describe("prompt model helpers", () => {
       categoryId: "category-default",
       title: "Group lines",
       type: "group",
+      sendBehavior: "inherit",
       prompts: [
         { id: "entry-2", body: "Second prompt", order: 1 },
         { id: "entry-1", body: "First prompt", order: 0 },
@@ -106,5 +111,13 @@ describe("prompt model helpers", () => {
     expect(clampGroupIntervalMs(50)).toBe(MIN_GROUP_INTERVAL_MS);
     expect(clampGroupIntervalMs(10_000)).toBe(MAX_GROUP_INTERVAL_MS);
     expect(clampGroupIntervalMs(undefined)).toBe(DEFAULT_GROUP_INTERVAL_MS);
+  });
+
+  it("normalizes prompt send behavior values", () => {
+    expect(normalizePromptSendBehavior("paste_only")).toBe("paste_only");
+    expect(normalizePromptSendBehavior("paste_enter")).toBe("paste_enter");
+    expect(normalizePromptSendBehavior("paste_command_enter")).toBe("paste_command_enter");
+    expect(normalizePromptSendBehavior("bad")).toBe("inherit");
+    expect(normalizePromptSendBehavior(undefined)).toBe("inherit");
   });
 });

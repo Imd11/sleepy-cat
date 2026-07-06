@@ -8,6 +8,7 @@ export type PromptItem = {
 };
 
 export type PromptContainerType = "single" | "group";
+export type PromptSendBehavior = "inherit" | "paste_only" | "paste_enter" | "paste_command_enter";
 
 export type PromptCategory = {
   id: string;
@@ -28,6 +29,7 @@ export type PromptContainer = {
   categoryId: string;
   title: string;
   type: PromptContainerType;
+  sendBehavior: PromptSendBehavior;
   prompts: PromptEntry[];
   intervalMs: number;
   order: number;
@@ -38,6 +40,7 @@ export type PromptContainer = {
 export type PromptContainerInput = {
   title: string;
   type: PromptContainerType;
+  sendBehavior?: PromptSendBehavior;
   prompts: Array<{ id?: string; body: string; order?: number }>;
   intervalMs?: number;
   categoryId?: string;
@@ -57,6 +60,17 @@ export function clampGroupIntervalMs(value: number | undefined): number {
     MAX_GROUP_INTERVAL_MS,
     Math.max(MIN_GROUP_INTERVAL_MS, Math.round(value ?? DEFAULT_GROUP_INTERVAL_MS))
   );
+}
+
+export function normalizePromptSendBehavior(value: unknown): PromptSendBehavior {
+  if (
+    value === "paste_only" ||
+    value === "paste_enter" ||
+    value === "paste_command_enter"
+  ) {
+    return value;
+  }
+  return "inherit";
 }
 
 export function getPromptPreview(body: string, maxLength = 80): string {

@@ -16,14 +16,13 @@ import {
   getPromptLibraryFileMetadata,
   hidePromptButton,
   hidePromptPopover,
-  pastePromptToLastTarget,
   pastePromptAndSubmitToLastTarget,
   pastePromptSequenceAndSubmitToLastTarget,
   readPromptLibraryFile,
   setMenuLanguage,
   writePromptLibraryFile,
 } from "./platform/platformApi";
-import type { AutosendOutcome, AutosendSequenceOutcome } from "./platform/platformApi";
+import type { AutosendOutcome, AutosendSequenceOutcome, NativeSubmitKey } from "./platform/platformApi";
 import { useInputTargetPolling } from "./overlay/useInputTargetPolling";
 import { PromptQuickList } from "./ui/PromptQuickList";
 import { PromptManager } from "./ui/PromptManager";
@@ -114,13 +113,34 @@ function pasteOnlyBody(prompt: PromptContainer, bodies: string[]): string {
   return bodies[0] ?? "";
 }
 
-function statusForAutosendOutcome(outcome: AutosendOutcome, t: Messages): {
+function effectiveSubmitKey(
+  prompt: PromptContainer,
+  globalMode: PromptInsertionMode
+): NativeSubmitKey {
+  switch (prompt.sendBehavior) {
+    case "paste_only":
+      return "none";
+    case "paste_enter":
+      return "enter";
+    case "paste_command_enter":
+      return "command_enter";
+    case "inherit":
+    default:
+      return globalMode === "paste_only" ? "none" : "enter";
+  }
+}
+
+function statusForAutosendOutcome(
+  outcome: AutosendOutcome,
+  t: Messages,
+  successMessage = t.autosend.sent
+): {
   kind: AutosendStatusKind;
   message: string;
   requiresAttention?: boolean;
 } {
   if (outcome.sent) {
-    return { kind: "sent", message: t.autosend.sent };
+    return { kind: "sent", message: successMessage };
   }
 
   switch (outcome.reason) {
@@ -475,19 +495,20 @@ export function App({
         prompt.type === "group" ? "working-conducting" : "working-typing",
         prompt.type === "group" ? "group-autosend" : "single-autosend"
       );
-      if (activeSettings.promptInsertion.mode === "paste_only") {
-        await pastePromptToLastTarget(pasteOnlyBody(prompt, bodies));
-        emitCalicoMotion("happy", "paste-only-success", 3000);
-        await emitAutosendStatus("sent", t.autosend.insertedIntoInput);
-        return;
-      }
-      const status = prompt.type === "group"
+      const submitKey = effectiveSubmitKey(prompt, activeSettings.promptInsertion.mode);
+      const status = submitKey === "none"
+        ? statusForAutosendOutcome(
+          await pastePromptAndSubmitToLastTarget(pasteOnlyBody(prompt, bodies), submitKey),
+          t,
+          t.autosend.insertedIntoInput
+        )
+        : prompt.type === "group"
         ? statusForAutosendSequenceOutcome(
-          await pastePromptSequenceAndSubmitToLastTarget(bodies, prompt.intervalMs),
+          await pastePromptSequenceAndSubmitToLastTarget(bodies, prompt.intervalMs, submitKey),
           t
         )
         : statusForAutosendOutcome(
-          await pastePromptAndSubmitToLastTarget(bodies[0]),
+          await pastePromptAndSubmitToLastTarget(bodies[0], submitKey),
           t
         );
       if (status.kind === "sent") {

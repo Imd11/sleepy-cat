@@ -1774,6 +1774,30 @@ mod last_input_target_tests {
     }
 
     #[test]
+    fn send_behavior_submit_key_parser_accepts_known_values() {
+        assert_eq!(
+            native_submit_key_from_arg(None).unwrap(),
+            platform::macos::NativeSubmitKey::Enter
+        );
+        assert_eq!(
+            native_submit_key_from_arg(Some("none".to_string())).unwrap(),
+            platform::macos::NativeSubmitKey::None
+        );
+        assert_eq!(
+            native_submit_key_from_arg(Some("command_enter".to_string())).unwrap(),
+            platform::macos::NativeSubmitKey::CommandEnter
+        );
+    }
+
+    #[test]
+    fn send_behavior_submit_key_parser_rejects_unknown_values() {
+        assert_eq!(
+            native_submit_key_from_arg(Some("space".to_string())).unwrap_err(),
+            "Invalid submit key: space"
+        );
+    }
+
+    #[test]
     fn focus_preserving_autosend_stops_before_paste_when_frontmost_changed() {
         let target = prompt_target("WeChat", "com.tencent.xinWeChat", Some(123));
         let events = RefCell::new(Vec::new());

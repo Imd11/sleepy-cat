@@ -76,6 +76,7 @@ function makeContainer(overrides: Partial<PromptContainer>): PromptContainer {
     categoryId: "cat-dev",
     title: "Prompt",
     type: "single",
+    sendBehavior: "inherit",
     prompts: [{ id: "entry", body: "body", order: 0 }],
     intervalMs: 700,
     order: 0,
@@ -855,8 +856,90 @@ describe("app", () => {
     await waitFor(() => {
       expect(vi.mocked(invoke)).toHaveBeenCalledWith(
         "paste_prompt_and_submit_to_last_target",
-        { body: "Test body" }
+        { body: "Test body", submit_key: "enter" }
       );
+    });
+  });
+
+  it("uses command-enter when a prompt requests command-enter send behavior", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === "paste_prompt_and_submit_to_last_target") {
+        return { copied: true, sent: true, error: null, reason: null };
+      }
+      return undefined;
+    });
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      JSON.stringify({
+        version: 3,
+        categories: [devCategory],
+        containers: [
+          makeContainer({
+            id: "command-enter",
+            title: "Command Enter",
+            prompts: [{ id: "entry", body: "Command body", order: 0 }],
+            sendBehavior: "paste_command_enter",
+          }),
+        ],
+        activeCategoryId: devCategory.id,
+      })
+    );
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    fireEvent.click(await screen.findByText("Command Enter"));
+
+    await waitFor(() => {
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith(
+        "paste_prompt_and_submit_to_last_target",
+        { body: "Command body", submit_key: "command_enter" }
+      );
+    });
+  });
+
+  it("lets prompt paste-only behavior override global paste-and-submit", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === "paste_prompt_and_submit_to_last_target") {
+        return { copied: true, sent: true, error: null, reason: null };
+      }
+      return undefined;
+    });
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      JSON.stringify({
+        version: 3,
+        categories: [devCategory],
+        containers: [
+          makeContainer({
+            id: "paste-only",
+            title: "Paste Only",
+            prompts: [{ id: "entry", body: "Paste body", order: 0 }],
+            sendBehavior: "paste_only",
+          }),
+        ],
+        activeCategoryId: devCategory.id,
+      })
+    );
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    fireEvent.click(await screen.findByText("Paste Only"));
+
+    await waitFor(() => {
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith(
+        "paste_prompt_and_submit_to_last_target",
+        { body: "Paste body", submit_key: "none" }
+      );
+    });
+    expect(emitMock).toHaveBeenCalledWith("prompt-autosend-status", {
+      kind: "sent",
+      message: "已填入输入框",
     });
   });
 
@@ -930,7 +1013,12 @@ describe("app", () => {
   it("pastes without pressing return when prompt insertion mode is paste only", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockClear();
-    vi.mocked(invoke).mockResolvedValue(undefined);
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === "paste_prompt_and_submit_to_last_target") {
+        return { copied: true, sent: true, error: null, reason: null };
+      }
+      return undefined;
+    });
     const { readTextFile } = await import("@tauri-apps/plugin-fs");
     (readTextFile as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce(JSON.stringify({ version: 1, prompts: mockPrompts }))
@@ -956,12 +1044,13 @@ describe("app", () => {
     fireEvent.click(screen.getByText("Test Prompt"));
 
     await waitFor(() => {
-      expect(vi.mocked(invoke)).toHaveBeenCalledWith("paste_prompt_to_last_target", {
-        body: "Test body",
-      });
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith(
+        "paste_prompt_and_submit_to_last_target",
+        { body: "Test body", submit_key: "none" }
+      );
     });
     expect(vi.mocked(invoke)).not.toHaveBeenCalledWith(
-      "paste_prompt_and_submit_to_last_target",
+      "paste_prompt_sequence_and_submit_to_last_target",
       expect.anything()
     );
     expect(emitMock).toHaveBeenCalledWith("prompt-autosend-status", {
@@ -977,6 +1066,9 @@ describe("app", () => {
     const calls: string[] = [];
     vi.mocked(invoke).mockImplementation(async (command: string) => {
       calls.push(`invoke:${command}`);
+      if (command === "paste_prompt_and_submit_to_last_target") {
+        return { copied: true, sent: true, error: null, reason: null };
+      }
       return undefined;
     });
     emitMock.mockImplementation(async (event: string, payload?: unknown) => {
@@ -1000,13 +1092,13 @@ describe("app", () => {
     fireEvent.click(await screen.findByText("Test Prompt"));
 
     await waitFor(() => {
-      expect(calls).toContain("invoke:paste_prompt_to_last_target");
+      expect(calls).toContain("invoke:paste_prompt_and_submit_to_last_target");
       expect(calls).toContain('emit:prompt-autosend-activity:{"active":false}');
     });
     expect(calls.indexOf('emit:prompt-autosend-activity:{"active":true}')).toBeLessThan(
-      calls.indexOf("invoke:paste_prompt_to_last_target")
+      calls.indexOf("invoke:paste_prompt_and_submit_to_last_target")
     );
-    expect(calls.indexOf("invoke:paste_prompt_to_last_target")).toBeLessThan(
+    expect(calls.indexOf("invoke:paste_prompt_and_submit_to_last_target")).toBeLessThan(
       calls.indexOf('emit:prompt-autosend-activity:{"active":false}')
     );
   });
@@ -1015,8 +1107,13 @@ describe("app", () => {
     const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockClear();
     vi.mocked(invoke).mockImplementation(async (command: string) => {
-      if (command === "paste_prompt_to_last_target") {
-        throw new Error("Accessibility permission required for prompt insertion.");
+      if (command === "paste_prompt_and_submit_to_last_target") {
+        return {
+          copied: false,
+          sent: false,
+          error: "Accessibility permission required for prompt insertion.",
+          reason: "missing_accessibility_permission",
+        };
       }
       return undefined;
     });
@@ -1074,7 +1171,7 @@ describe("app", () => {
     await waitFor(() => {
       expect(vi.mocked(invoke)).toHaveBeenCalledWith(
         "paste_prompt_and_submit_to_last_target",
-        { body: "Test body" }
+        { body: "Test body", submit_key: "enter" }
       );
     });
     expect(callOrder.indexOf("invoke:hide_prompt_popover")).toBeLessThan(
@@ -1136,6 +1233,7 @@ describe("app", () => {
         {
           bodies: ["First prompt", "Second prompt"],
           interval_ms: 700,
+          submit_key: "enter",
         }
       );
     });
@@ -1197,6 +1295,7 @@ describe("app", () => {
         {
           bodies: ["First prompt", "Second prompt"],
           interval_ms: 700,
+          submit_key: "enter",
         }
       );
     });
@@ -1372,7 +1471,7 @@ describe("app", () => {
       await waitFor(() => {
         expect(vi.mocked(invoke)).toHaveBeenCalledWith(
           "paste_prompt_and_submit_to_last_target",
-          { body: "Test body" }
+          { body: "Test body", submit_key: "enter" }
         );
       });
     } finally {
@@ -1404,7 +1503,7 @@ describe("app", () => {
       expect(vi.mocked(invoke)).toHaveBeenCalledWith("hide_prompt_popover");
       expect(vi.mocked(invoke)).toHaveBeenCalledWith(
         "paste_prompt_and_submit_to_last_target",
-        { body: "Test body" }
+        { body: "Test body", submit_key: "enter" }
       );
     });
 
@@ -1474,7 +1573,7 @@ describe("app", () => {
     await waitFor(() => {
       expect(vi.mocked(invoke)).toHaveBeenCalledWith(
         "paste_prompt_and_submit_to_last_target",
-        { body: "Test body" }
+        { body: "Test body", submit_key: "enter" }
       );
     });
 
