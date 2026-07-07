@@ -413,8 +413,7 @@ fn show_popover_mode(x: f64, y: f64, mode: &str, app: &tauri::AppHandle) -> Resu
             } else {
                 set_outside_click_monitor_active(false);
             }
-            window.show().map_err(|e| e.to_string())?;
-            crate::macos_panels::configure_non_activating_panel(&window)?;
+            show_non_activating_overlay_window(&window)?;
             emit_popover_opened(app, mode);
             return Ok(());
         }
@@ -431,6 +430,8 @@ fn show_popover_mode(x: f64, y: f64, mode: &str, app: &tauri::AppHandle) -> Resu
         .always_on_top(true)
         .accept_first_mouse(true)
         .skip_taskbar(true)
+        .focusable(false)
+        .visible(false)
         .position(window_x, window_y)
         .build()
         .map_err(|e| e.to_string())?;
@@ -440,9 +441,26 @@ fn show_popover_mode(x: f64, y: f64, mode: &str, app: &tauri::AppHandle) -> Resu
     } else {
         set_outside_click_monitor_active(false);
     }
-    crate::macos_panels::configure_non_activating_panel(&window)?;
+    show_non_activating_overlay_window(&window)?;
     set_popover_mode(Some(mode));
     emit_popover_opened(app, mode);
+    Ok(())
+}
+
+fn show_non_activating_overlay_window(window: &tauri::WebviewWindow) -> Result<(), String> {
+    window.set_focusable(false).map_err(|e| e.to_string())?;
+    crate::macos_panels::configure_non_activating_panel(window)?;
+
+    if !window.is_visible().unwrap_or(false) {
+        window.show().map_err(|e| e.to_string())?;
+        window.set_focusable(false).map_err(|e| e.to_string())?;
+        crate::macos_panels::configure_non_activating_panel(window)?;
+    }
+
+    if !window.is_visible().unwrap_or(false) {
+        return Err("Overlay window did not become visible.".to_string());
+    }
+
     Ok(())
 }
 
@@ -466,6 +484,8 @@ fn build_prompt_button_window(
     .always_on_top(true)
     .accept_first_mouse(true)
     .skip_taskbar(true)
+    .focusable(false)
+    .visible(false)
     .position(window_x, window_y)
     .build()
     .map_err(|e| e.to_string())?;
@@ -473,7 +493,7 @@ fn build_prompt_button_window(
     if BUTTON_WINDOW_TRANSPARENT {
         crate::macos_panels::configure_transparent_webview_window(&window)?;
     }
-    crate::macos_panels::configure_non_activating_panel(&window)?;
+    show_non_activating_overlay_window(&window)?;
     Ok(window)
 }
 
@@ -505,11 +525,10 @@ pub fn show_prompt_button(x: f64, y: f64, app: tauri::AppHandle) -> Result<(), S
                 .map_err(|e| e.to_string())?;
         }
         if !visible {
-            window.show().map_err(|e| e.to_string())?;
             if BUTTON_WINDOW_TRANSPARENT {
                 crate::macos_panels::configure_transparent_webview_window(&window)?;
             }
-            crate::macos_panels::configure_non_activating_panel(&window)?;
+            show_non_activating_overlay_window(&window)?;
         }
         Ok(())
     } else {
@@ -1245,8 +1264,91 @@ mod tests {
 
         assert!(reuse_source.contains("should_reuse_popover("));
         assert!(reuse_source.contains("set_position(logical_position(window_x, window_y))"));
-        assert!(reuse_source.contains("window.show().map_err"));
+        assert!(reuse_source.contains("show_non_activating_overlay_window(&window)?"));
         assert!(reuse_source.contains("emit_popover_opened(app, mode)"));
+    }
+
+    #[test]
+    fn popover_builder_creates_hidden_non_focusable_window_before_panel_configuration() {
+        let source = include_str!("windows.rs");
+        let start = source
+            .find("let window = WebviewWindowBuilder::new(app, POPOVER_WINDOW_LABEL")
+            .expect("popover builder should exist");
+        let end = source[start..]
+            .find("set_popover_mode(Some(mode));")
+            .expect("popover builder block should set mode");
+        let block = &source[start..start + end];
+
+        assert!(block.contains(".visible(false)"));
+        assert!(block.contains(".focusable(false)"));
+        assert!(block.contains("show_non_activating_overlay_window(&window)?"));
+    }
+
+    #[test]
+    fn prompt_button_builder_creates_hidden_non_focusable_window() {
+        let source = include_str!("windows.rs");
+        let start = source
+            .find("fn build_prompt_button_window")
+            .expect("prompt button builder should exist");
+        let end = source[start..]
+            .find("#[tauri::command]\npub fn show_prompt_button")
+            .expect("show_prompt_button should follow builder");
+        let block = &source[start..start + end];
+
+        assert!(block.contains(".visible(false)"));
+        assert!(block.contains(".focusable(false)"));
+        assert!(block.contains("show_non_activating_overlay_window(&window)?"));
+    }
+
+    #[test]
+    fn reused_popover_configures_panel_before_any_show_call() {
+        let source = include_str!("windows.rs");
+        let start = source
+            .find("if should_reuse_popover")
+            .expect("reused popover branch should exist");
+        let end = source[start..]
+            .find("return Ok(());")
+            .expect("reused popover branch should return");
+        let block = &source[start..start + end];
+
+        assert!(block.contains("show_non_activating_overlay_window(&window)?"));
+        assert!(!block.contains("window.show().map_err"));
+    }
+
+    #[test]
+    fn overlay_visibility_uses_single_non_activating_show_helper() {
+        let source = include_str!("windows.rs");
+
+        assert!(source.contains("fn show_non_activating_overlay_window"));
+        assert!(source.contains("window.set_focusable(false)"));
+        assert!(source.contains("configure_non_activating_panel"));
+        assert!(source.contains("window.is_visible().unwrap_or(false)"));
+        assert!(source.contains("Overlay window did not become visible."));
+    }
+
+    #[test]
+    fn popover_toggle_still_uses_visible_state_to_close_open_prompt_list() {
+        let source = include_str!("windows.rs");
+        let start = source
+            .find("pub fn toggle_prompt_popover_from_button")
+            .expect("toggle command should exist");
+        let end = source[start..]
+            .find("pub fn show_prompt_button_controls_from_button")
+            .expect("button controls command should follow toggle command");
+        let block = &source[start..start + end];
+
+        assert!(block.contains("window.is_visible().unwrap_or(false)"));
+        assert!(block.contains("should_close_prompt_popover_on_toggle"));
+        assert!(block.contains("window.hide().map_err"));
+    }
+
+    #[test]
+    fn outside_click_paths_keep_using_visible_state() {
+        let source = include_str!("windows.rs");
+
+        assert!(source.contains("fn handle_prompt_popover_outside_click"));
+        assert!(source.contains("popover_window.is_visible().unwrap_or(false)"));
+        assert!(source.contains("window_rect(&app, POPOVER_WINDOW_LABEL)"));
     }
 
     #[test]
@@ -1262,7 +1364,7 @@ mod tests {
 
         assert!(command_source.contains("should_use_transparent_popover_window(Some(mode))"));
         assert!(command_source.contains("configure_transparent_webview_window(&window)?"));
-        assert!(command_source.contains("configure_non_activating_panel(&window)?"));
+        assert!(command_source.contains("show_non_activating_overlay_window(&window)?"));
     }
 
     #[test]
