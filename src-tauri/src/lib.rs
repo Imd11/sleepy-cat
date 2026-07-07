@@ -2060,6 +2060,23 @@ mod last_input_target_tests {
     }
 
     #[test]
+    fn recovery_click_point_uses_pointer_before_generic_fallback() {
+        let pointer = Some(TargetClickPoint { x: 120.0, y: 140.0 });
+        let fallback = Some(TargetClickPoint { x: 500.0, y: 735.0 });
+        let window = CandidateInput {
+            x: 100.0,
+            y: 100.0,
+            width: 600.0,
+            height: 500.0,
+        };
+
+        assert_eq!(
+            choose_recovery_click_point(None, pointer, Some(&window), fallback),
+            pointer
+        );
+    }
+
+    #[test]
     fn recovery_click_point_rejects_pointer_outside_target_window() {
         let pointer = Some(TargetClickPoint { x: 300.0, y: 300.0 });
         let fallback = Some(TargetClickPoint { x: 500.0, y: 735.0 });
