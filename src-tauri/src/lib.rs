@@ -2,7 +2,7 @@ use tauri::{
     image::Image,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
-    Emitter, Manager, WindowEvent,
+    Emitter, Listener, Manager, WindowEvent,
 };
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
@@ -861,6 +861,57 @@ impl PromptPickSessionState {
     }
 }
 
+#[derive(Clone, Copy)]
+struct PromptButtonHealthSnapshot {
+    first_seen: Option<std::time::Instant>,
+    last_seen: Option<std::time::Instant>,
+    safe_to_rebuild: bool,
+}
+
+impl Default for PromptButtonHealthSnapshot {
+    fn default() -> Self {
+        Self {
+            first_seen: None,
+            last_seen: None,
+            safe_to_rebuild: false,
+        }
+    }
+}
+
+#[derive(Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PromptButtonHealthPayload {
+    started_at: Option<u64>,
+    updated_at: Option<u64>,
+    motion_state: Option<String>,
+    safe_to_rebuild: Option<bool>,
+}
+
+#[derive(Clone, Default)]
+struct PromptButtonHealthState {
+    snapshot: std::sync::Arc<std::sync::Mutex<PromptButtonHealthSnapshot>>,
+}
+
+fn should_rebuild_prompt_button(
+    now: std::time::Instant,
+    last_seen: Option<std::time::Instant>,
+    first_seen: Option<std::time::Instant>,
+    safe_to_rebuild: bool,
+    popover_visible: bool,
+) -> bool {
+    if popover_visible {
+        return false;
+    }
+    let stale_heartbeat = last_seen
+        .map(|seen| now.duration_since(seen) > std::time::Duration::from_secs(45))
+        .unwrap_or(false);
+    let aged_out = first_seen
+        .map(|seen| now.duration_since(seen) > std::time::Duration::from_secs(30 * 60))
+        .unwrap_or(false);
+
+    stale_heartbeat || (safe_to_rebuild && aged_out)
+}
+
 fn record_prompt_pick_session_target_if_valid(
     state: &PromptPickSessionState,
     target: PromptPickSessionTarget,
@@ -1376,6 +1427,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(LastInputTargetState::default())
         .manage(PromptPickSessionState::default())
+        .manage(PromptButtonHealthState::default())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -1415,6 +1467,26 @@ pub fn run() {
 
             setup_menu_bar_app(app.handle())?;
 
+            let health_state = app.state::<PromptButtonHealthState>().inner().clone();
+            app.handle().listen("prompt-button-health", move |event| {
+                let Ok(payload) =
+                    serde_json::from_str::<PromptButtonHealthPayload>(event.payload())
+                else {
+                    return;
+                };
+                let _ = (payload.started_at, payload.updated_at, payload.motion_state.as_deref());
+                let now = std::time::Instant::now();
+                let mut snapshot = health_state
+                    .snapshot
+                    .lock()
+                    .expect("prompt button health lock poisoned");
+                if snapshot.first_seen.is_none() {
+                    snapshot.first_seen = Some(now);
+                }
+                snapshot.last_seen = Some(now);
+                snapshot.safe_to_rebuild = payload.safe_to_rebuild.unwrap_or(false);
+            });
+
             let window = app.get_webview_window("main").unwrap();
             window.set_title("Prompt Picker").unwrap();
             let main_window = window.clone();
@@ -1426,6 +1498,49 @@ pub fn run() {
             });
             let (x, y) = startup_prompt_button_position(app.handle());
             let _ = show_prompt_button(x, y, app.handle().clone());
+            let watchdog_app = app.handle().clone();
+            let watchdog_health = app.state::<PromptButtonHealthState>().inner().clone();
+            std::thread::spawn(move || loop {
+                std::thread::sleep(std::time::Duration::from_secs(15));
+
+                let Some(button) =
+                    watchdog_app.get_webview_window(crate::windows::BUTTON_WINDOW_LABEL)
+                else {
+                    continue;
+                };
+                if !button.is_visible().unwrap_or(false) {
+                    continue;
+                }
+                let popover_visible = watchdog_app
+                    .get_webview_window(crate::windows::POPOVER_WINDOW_LABEL)
+                    .and_then(|window| window.is_visible().ok())
+                    .unwrap_or(false);
+
+                let snapshot = *watchdog_health
+                    .snapshot
+                    .lock()
+                    .expect("prompt button health lock poisoned");
+
+                if should_rebuild_prompt_button(
+                    std::time::Instant::now(),
+                    snapshot.last_seen,
+                    snapshot.first_seen,
+                    snapshot.safe_to_rebuild,
+                    popover_visible,
+                ) {
+                    let rebuild_app = watchdog_app.clone();
+                    let rebuild_health = watchdog_health.clone();
+                    let _ = watchdog_app.run_on_main_thread(move || {
+                        if crate::windows::rebuild_prompt_button_window(&rebuild_app).is_ok() {
+                            *rebuild_health
+                                .snapshot
+                                .lock()
+                                .expect("prompt button health lock poisoned") =
+                                PromptButtonHealthSnapshot::default();
+                        }
+                    });
+                }
+            });
             Ok(())
         })
         .run(tauri::generate_context!())
@@ -3053,5 +3168,53 @@ mod menu_bar_app_tests {
         let capabilities = include_str!("../capabilities/default.json");
 
         assert!(!capabilities.contains("\"dialog:allow-message\""));
+    }
+
+    #[test]
+    fn prompt_button_watchdog_rebuilds_when_heartbeat_is_stale() {
+        let now = std::time::Instant::now();
+
+        assert!(should_rebuild_prompt_button(
+            now,
+            Some(now - std::time::Duration::from_secs(60)),
+            Some(now - std::time::Duration::from_secs(60)),
+            false,
+            false
+        ));
+    }
+
+    #[test]
+    fn prompt_button_watchdog_does_not_rebuild_while_popover_is_visible() {
+        let now = std::time::Instant::now();
+
+        assert!(!should_rebuild_prompt_button(
+            now,
+            Some(now - std::time::Duration::from_secs(60)),
+            Some(now - std::time::Duration::from_secs(60)),
+            true,
+            true
+        ));
+    }
+
+    #[test]
+    fn prompt_button_watchdog_does_not_rebuild_only_because_overlay_is_safe() {
+        let now = std::time::Instant::now();
+
+        assert!(!should_rebuild_prompt_button(
+            now,
+            Some(now - std::time::Duration::from_secs(10)),
+            Some(now - std::time::Duration::from_secs(10)),
+            true,
+            false
+        ));
+    }
+
+    #[test]
+    fn prompt_button_watchdog_rebuilds_on_main_thread() {
+        let source = include_str!("lib.rs");
+
+        assert!(source.contains("run_on_main_thread"));
+        assert!(source.contains("rebuild_prompt_button_window"));
+        assert!(source.contains("PromptButtonHealthSnapshot::default()"));
     }
 }
