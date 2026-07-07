@@ -997,7 +997,7 @@ fn record_prompt_pick_session_target_if_valid(
 
 fn prompt_pick_session_target(
     frontmost: Option<FrontmostAppWithPid>,
-    _visible_apps: Vec<FrontmostApp>,
+    visible_apps: Vec<FrontmostApp>,
     recent_target: Option<LastInputTarget>,
 ) -> Option<PromptPickSessionTarget> {
     let frontmost = frontmost?;
@@ -1008,8 +1008,8 @@ fn prompt_pick_session_target(
     // we must NOT use it as the autosend target. Instead we fall through to the
     // recent_target fallback below — returning early would drop that fallback
     // and surface "Copied. Paste manually." in the UI.
-    let is_prompt_picker = frontmost.pid == Some(std::process::id())
-        || is_prompt_picker_app(&frontmost.app);
+    let is_prompt_picker =
+        frontmost.pid == Some(std::process::id()) || is_prompt_picker_app(&frontmost.app);
 
     if !is_prompt_picker && is_usable_autosend_app(&frontmost.app) {
         let click_point = recent_target
@@ -1038,6 +1038,18 @@ fn prompt_pick_session_target(
             pid: target.pid,
             observed_at_ms: now_ms(),
             click_point: target.click_point,
+        });
+    }
+
+    if let Some(app) = visible_apps
+        .into_iter()
+        .find(|app| !is_prompt_picker_app(app) && is_usable_autosend_app(app))
+    {
+        return Some(PromptPickSessionTarget {
+            app,
+            pid: None,
+            observed_at_ms: now_ms(),
+            click_point: None,
         });
     }
 
@@ -2780,7 +2792,7 @@ mod last_input_target_tests {
     }
 
     #[test]
-    fn prompt_pick_session_does_not_use_arbitrary_visible_app_without_recent_target() {
+    fn prompt_pick_session_uses_first_safe_visible_app_without_recent_target() {
         let target = prompt_pick_session_target(
             Some(frontmost_target(
                 "Prompt Picker",
@@ -2792,13 +2804,15 @@ mod last_input_target_tests {
                 bundle_id: "com.openai.codex".to_string(),
             }],
             None,
-        );
+        )
+        .unwrap();
 
-        assert!(target.is_none());
+        assert_eq!(target.app.bundle_id, "com.openai.codex");
+        assert!(target.click_point.is_none());
     }
 
     #[test]
-    fn prompt_pick_session_does_not_skip_unsafe_visible_app_to_stale_recent_target() {
+    fn prompt_pick_session_skips_unsafe_visible_app_before_safe_visible_fallback() {
         let target = prompt_pick_session_target(
             Some(frontmost_target(
                 "Prompt Picker",
@@ -2824,9 +2838,11 @@ mod last_input_target_tests {
                 observed_at_ms: 123,
                 click_point: None,
             }),
-        );
+        )
+        .unwrap();
 
-        assert!(target.is_none());
+        assert_eq!(target.app.bundle_id, "com.openai.codex");
+        assert!(target.click_point.is_none());
     }
 
     #[test]
@@ -2913,20 +2929,26 @@ mod last_input_target_tests {
     }
 
     #[test]
-    fn prompt_pick_session_returns_none_when_picker_pid_frontmost_and_no_recent_target() {
-        // Same PID-match scenario but with no recent target → no fallback
-        // possible, so return None (UI will show "Copied. Paste manually.").
+    fn prompt_pick_session_uses_visible_app_when_picker_pid_frontmost_and_no_recent_target() {
+        // Same PID-match scenario but with no recent target. This still can
+        // recover by using the front-to-back visible app list, matching the
+        // older app-level autosend behavior for AX-hostile apps.
         let target = prompt_pick_session_target(
             Some(frontmost_target(
                 "UnknownApp",
                 "unknown.bundle.id",
                 Some(std::process::id()),
             )),
-            vec![],
+            vec![FrontmostApp {
+                name: "Claude".to_string(),
+                bundle_id: "com.anthropic.claudefordesktop".to_string(),
+            }],
             None,
-        );
+        )
+        .unwrap();
 
-        assert!(target.is_none());
+        assert_eq!(target.app.bundle_id, "com.anthropic.claudefordesktop");
+        assert!(target.click_point.is_none());
     }
 
     #[test]
