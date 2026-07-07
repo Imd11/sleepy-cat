@@ -52,6 +52,8 @@ body {
   --calico-hover-y: 0px;
   --calico-press-y: 0px;
   --calico-rotate: 0deg;
+  position: absolute;
+  inset: 50% auto auto 50%;
   width: var(--calico-sprite-size);
   height: var(--calico-sprite-size);
   object-fit: contain;
@@ -59,12 +61,16 @@ body {
   transform-origin: 45% 76%;
   transform:
     translate(
-      var(--calico-offset-x),
-      calc(var(--calico-offset-y) + var(--calico-hover-y) + var(--calico-press-y))
+      calc(-50% + var(--calico-offset-x)),
+      calc(-50% + var(--calico-offset-y) + var(--calico-hover-y) + var(--calico-press-y))
     )
     rotate(var(--calico-rotate))
     scale(var(--calico-scale));
   transition: transform 140ms ease;
+}
+
+.calico-sprite[hidden] {
+  display: none;
 }
 
 .calico-entry:hover .calico-sprite {
@@ -89,8 +95,8 @@ body {
   from {
     transform:
       translate(
-        var(--calico-offset-x),
-        calc(var(--calico-offset-y) + var(--calico-hover-y) + var(--calico-press-y))
+        calc(-50% + var(--calico-offset-x)),
+        calc(-50% + var(--calico-offset-y) + var(--calico-hover-y) + var(--calico-press-y))
       )
       rotate(var(--calico-rotate))
       scale(var(--calico-scale));
@@ -98,8 +104,8 @@ body {
   to {
     transform:
       translate(
-        var(--calico-offset-x),
-        calc(var(--calico-offset-y) + var(--calico-hover-y) + var(--calico-press-y) - 1px)
+        calc(-50% + var(--calico-offset-x)),
+        calc(-50% + var(--calico-offset-y) + var(--calico-hover-y) + var(--calico-press-y) - 1px)
       )
       rotate(var(--calico-rotate))
       scale(var(--calico-scale));

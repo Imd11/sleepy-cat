@@ -34,6 +34,7 @@ describe("overlay button html", () => {
     const html = readOverlayHtml();
 
     expect(html).toContain("calico-entry");
+    expect(html).toContain('id="calicoSprite"');
     expect(html).toContain("calico-sprite");
     expect(html).toContain("calico-idle-follow.svg");
     expect(html).toContain("calico-react-drag.apng");
@@ -122,6 +123,8 @@ describe("overlay button html", () => {
     expect(html).toContain("height: var(--calico-hit-area-size);");
     expect(html).toContain("width: var(--calico-sprite-size);");
     expect(html).toContain("height: var(--calico-sprite-size);");
+    expect(html).toContain(".calico-sprite[hidden]");
+    expect(html).toContain("calc(-50% + var(--calico-offset-x))");
     expect(html).toContain("btn.addEventListener('pointerdown'");
     expect(html).toContain("btn.addEventListener('pointerup'");
     expect(html).toContain("btn.addEventListener('pointermove'");
