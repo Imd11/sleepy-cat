@@ -1563,15 +1563,20 @@ mod tests {
     }
 
     #[test]
-    fn legacy_activating_paste_script_is_not_present() {
+    fn activating_clipboard_sender_is_available_without_prompt_body_scripting() {
         let source = include_str!("macos.rs");
-        let production_source = source
-            .split("#[cfg(test)]")
-            .next()
-            .expect("production source should precede tests");
+        let start = source
+            .find("pub fn paste_prompt_and_submit_to_app_clipboard_with_copier")
+            .expect("activating sender should exist");
+        let end = source[start..]
+            .find("#[allow(dead_code)]")
+            .expect("next legacy helper should follow activating sender");
+        let sender_source = &source[start..start + end];
 
-        assert!(!production_source.contains(concat!("fn paste", "_to_app_script")));
-        assert!(!production_source.contains(concat!("pub fn paste_prompt", "_to_app_with_copier")));
+        assert!(sender_source.contains("recover_target_app_for_autosend"));
+        assert!(sender_source.contains("post_focus_preserving_submit_key"));
+        assert!(!sender_source.contains("keystroke \"{body}\""));
+        assert!(!sender_source.contains("keystroke \"Test body\""));
     }
 
     #[test]
