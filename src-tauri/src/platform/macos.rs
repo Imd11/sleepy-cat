@@ -505,6 +505,7 @@ pub fn recover_target_app_for_autosend(
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn repair_focus_to_editable_element(pid: u32) -> Result<(), String> {
     ensure_accessibility_trusted_with(is_accessibility_trusted)?;
     run_system_events_script(&repair_focus_to_editable_element_script(pid))
@@ -661,37 +662,71 @@ where
     Ok(())
 }
 
-#[allow(dead_code)]
 pub fn paste_prompt_and_submit_to_app_clipboard_with_copier<C>(
     body: &str,
     bundle_id: &str,
     click_point: Option<(f64, f64)>,
+    submit_key: NativeSubmitKey,
     copy_sender: C,
 ) -> AutosendOutcome
 where
     C: FnOnce(&str) -> Result<(), String>,
 {
-    if let Some(outcome) = missing_accessibility_outcome_if_untrusted_with(is_accessibility_trusted)
-    {
-        return outcome;
+    paste_prompt_and_submit_to_app_clipboard_with_ops(
+        body,
+        bundle_id,
+        click_point,
+        submit_key,
+        copy_sender,
+        is_accessibility_trusted,
+        recover_target_app_for_autosend,
+        post_paste_shortcut,
+        post_focus_preserving_submit_key,
+        std::thread::sleep,
+    )
+}
+
+fn paste_prompt_and_submit_to_app_clipboard_with_ops<C, T, R, P, S, W>(
+    body: &str,
+    bundle_id: &str,
+    click_point: Option<(f64, f64)>,
+    submit_key: NativeSubmitKey,
+    copy_sender: C,
+    is_trusted: T,
+    recover_target: R,
+    paste_sender: P,
+    submit_sender: S,
+    sleeper: W,
+) -> AutosendOutcome
+where
+    C: FnOnce(&str) -> Result<(), String>,
+    T: FnOnce() -> bool,
+    R: FnOnce(&str, Option<(f64, f64)>) -> Result<(), String>,
+    P: FnOnce() -> Result<(), String>,
+    S: FnOnce(NativeSubmitKey) -> Result<(), String>,
+    W: FnOnce(Duration),
+{
+    if !is_trusted() {
+        return AutosendOutcome::missing_accessibility_permission();
     }
     if let Err(error) = copy_sender(body) {
         return AutosendOutcome::copy_failed(error);
     }
-
-    if let Err(error) = recover_target_app_for_autosend(bundle_id, click_point) {
+    if let Err(error) = recover_target(bundle_id, click_point) {
         return AutosendOutcome::target_focus_failed(error);
     }
-
-    if let Err(error) = post_paste_shortcut() {
+    if let Err(error) = paste_sender() {
         return AutosendOutcome::paste_event_failed(format_autosend_error("native-paste", &error));
     }
 
-    std::thread::sleep(Duration::from_millis(220));
+    sleeper(Duration::from_millis(220));
 
-    if let Err(error) = post_return_key() {
+    if submit_key == NativeSubmitKey::None {
+        return AutosendOutcome::sent();
+    }
+    if let Err(error) = submit_sender(submit_key) {
         return AutosendOutcome::return_event_failed(format_autosend_error(
-            "native-return",
+            "native-submit",
             &error,
         ));
     }
@@ -1212,6 +1247,58 @@ fn input_click_point_for_frame(frame: &CandidateInput) -> (f64, f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
+
+    fn run_activating_sender_with_ops(
+        submit_key: NativeSubmitKey,
+        click_point: Option<(f64, f64)>,
+        trusted: bool,
+    ) -> (
+        AutosendOutcome,
+        Vec<String>,
+        Option<NativeSubmitKey>,
+        Option<Option<(f64, f64)>>,
+    ) {
+        let events = RefCell::new(Vec::new());
+        let submitted_key = RefCell::new(None);
+        let recovered_point = RefCell::new(None);
+        let outcome = paste_prompt_and_submit_to_app_clipboard_with_ops(
+            "hello",
+            "com.openai.codex",
+            click_point,
+            submit_key,
+            |body| {
+                events.borrow_mut().push(format!("copy:{body}"));
+                Ok(())
+            },
+            || {
+                events.borrow_mut().push("permission".to_string());
+                trusted
+            },
+            |bundle_id, point| {
+                events.borrow_mut().push(format!("recover:{bundle_id}"));
+                recovered_point.replace(Some(point));
+                Ok(())
+            },
+            || {
+                events.borrow_mut().push("paste".to_string());
+                Ok(())
+            },
+            |key| {
+                events.borrow_mut().push("submit".to_string());
+                submitted_key.replace(Some(key));
+                Ok(())
+            },
+            |_| events.borrow_mut().push("sleep".to_string()),
+        );
+
+        (
+            outcome,
+            events.into_inner(),
+            submitted_key.into_inner(),
+            recovered_point.into_inner(),
+        )
+    }
 
     #[test]
     fn autosend_outcome_reports_copy_failure() {
@@ -1332,6 +1419,103 @@ mod tests {
         assert!(outcome.sent);
         assert!(outcome.error.is_none());
         assert!(outcome.reason.is_none());
+    }
+
+    #[test]
+    fn activating_clipboard_sender_pastes_and_presses_return() {
+        let (outcome, events, submitted_key, recovered_point) =
+            run_activating_sender_with_ops(NativeSubmitKey::Enter, Some((640.0, 720.0)), true);
+
+        assert!(outcome.sent);
+        assert_eq!(
+            events,
+            vec![
+                "permission".to_string(),
+                "copy:hello".to_string(),
+                "recover:com.openai.codex".to_string(),
+                "paste".to_string(),
+                "sleep".to_string(),
+                "submit".to_string(),
+            ]
+        );
+        assert_eq!(submitted_key, Some(NativeSubmitKey::Enter));
+        assert_eq!(recovered_point, Some(Some((640.0, 720.0))));
+    }
+
+    #[test]
+    fn activating_clipboard_sender_respects_command_enter() {
+        let (outcome, _events, submitted_key, _recovered_point) =
+            run_activating_sender_with_ops(NativeSubmitKey::CommandEnter, None, true);
+
+        assert!(outcome.sent);
+        assert_eq!(submitted_key, Some(NativeSubmitKey::CommandEnter));
+    }
+
+    #[test]
+    fn activating_clipboard_sender_respects_submit_key_none() {
+        let (outcome, events, submitted_key, _recovered_point) =
+            run_activating_sender_with_ops(NativeSubmitKey::None, None, true);
+
+        assert!(outcome.sent);
+        assert_eq!(
+            events,
+            vec![
+                "permission".to_string(),
+                "copy:hello".to_string(),
+                "recover:com.openai.codex".to_string(),
+                "paste".to_string(),
+                "sleep".to_string(),
+            ]
+        );
+        assert_eq!(submitted_key, None);
+    }
+
+    #[test]
+    fn activating_clipboard_sender_does_not_copy_without_accessibility_permission() {
+        let outcome = paste_prompt_and_submit_to_app_clipboard_with_ops(
+            "hello",
+            "com.openai.codex",
+            None,
+            NativeSubmitKey::Enter,
+            |_| panic!("copy must not run before accessibility permission"),
+            || false,
+            |_, _| panic!("recover must not run without accessibility permission"),
+            || panic!("paste must not run without accessibility permission"),
+            |_| panic!("submit must not run without accessibility permission"),
+            |_| panic!("sleep must not run without accessibility permission"),
+        );
+
+        assert!(!outcome.copied);
+        assert!(!outcome.sent);
+        assert_eq!(
+            outcome.reason,
+            Some(AutosendFailureReason::MissingAccessibilityPermission)
+        );
+    }
+
+    #[test]
+    fn activating_clipboard_sender_pastes_without_click_point() {
+        let (outcome, events, _submitted_key, recovered_point) =
+            run_activating_sender_with_ops(NativeSubmitKey::Enter, None, true);
+
+        assert!(outcome.sent);
+        assert!(events.contains(&"paste".to_string()));
+        assert_eq!(recovered_point, Some(None));
+    }
+
+    #[test]
+    fn activating_clipboard_sender_does_not_call_ax_repair() {
+        let source = include_str!("macos.rs");
+        let start = source
+            .find("pub fn paste_prompt_and_submit_to_app_clipboard_with_copier")
+            .expect("activating sender should exist");
+        let end = source[start..]
+            .find("#[allow(dead_code)]")
+            .expect("next legacy helper should follow activating sender");
+        let sender_source = &source[start..start + end];
+
+        assert!(!sender_source.contains("repair_focus_to_editable_element"));
+        assert!(!sender_source.contains("AXFocusedUIElement"));
     }
 
     #[test]

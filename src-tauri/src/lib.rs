@@ -231,17 +231,22 @@ fn paste_prompt_sequence_and_submit_to_last_target_impl(
     app: &tauri::AppHandle,
     submit_key: platform::macos::NativeSubmitKey,
 ) -> Result<AutosendSequenceOutcome, String> {
-    focus_preserving_prompt_sequence_to_last_target_impl(
+    paste_prompt_sequence_and_submit_to_session_target_with_senders(
         bodies,
         interval_ms,
         state,
         Some(recent_state),
         submit_key,
+        |body, bundle_id, click_point, submit_key| {
+            platform::macos::paste_prompt_and_submit_to_app_clipboard_with_copier(
+                body,
+                bundle_id,
+                click_point.map(|point| (point.x, point.y)),
+                submit_key,
+                |text| copy_text_to_clipboard(app, text),
+            )
+        },
         |text| copy_text_to_clipboard(app, text),
-        platform::frontmost_app_with_pid,
-        recover_target_for_autosend,
-        platform::macos::post_focus_preserving_paste,
-        platform::macos::post_focus_preserving_submit_key,
         |delay_ms| std::thread::sleep(std::time::Duration::from_millis(delay_ms)),
     )
 }
@@ -253,17 +258,21 @@ fn paste_prompt_and_submit_to_last_target_impl(
     app: &tauri::AppHandle,
     submit_key: platform::macos::NativeSubmitKey,
 ) -> Result<AutosendOutcome, String> {
-    focus_preserving_prompt_to_last_target_impl(
+    paste_prompt_and_submit_to_session_target_with_senders(
         body,
         state,
         Some(recent_state),
         submit_key,
+        |body, bundle_id, click_point, submit_key| {
+            platform::macos::paste_prompt_and_submit_to_app_clipboard_with_copier(
+                body,
+                bundle_id,
+                click_point.map(|point| (point.x, point.y)),
+                submit_key,
+                |text| copy_text_to_clipboard(app, text),
+            )
+        },
         |text| copy_text_to_clipboard(app, text),
-        platform::frontmost_app_with_pid,
-        recover_target_for_autosend,
-        platform::macos::post_focus_preserving_paste,
-        platform::macos::post_focus_preserving_submit_key,
-        |delay_ms| std::thread::sleep(std::time::Duration::from_millis(delay_ms)),
     )
 }
 
@@ -293,6 +302,7 @@ fn native_submit_key_from_arg(
     }
 }
 
+#[allow(dead_code)]
 fn repair_target_focus(target: &PromptPickSessionTarget) -> Result<(), String> {
     let Some(pid) = target.pid else {
         return Err("Captured target pid is unavailable for AX focus repair.".to_string());
@@ -300,6 +310,7 @@ fn repair_target_focus(target: &PromptPickSessionTarget) -> Result<(), String> {
     platform::macos::repair_focus_to_editable_element(pid)
 }
 
+#[allow(dead_code)]
 fn recover_target_for_autosend(target: &PromptPickSessionTarget) -> Result<(), String> {
     platform::macos::recover_target_app_for_autosend(
         &target.app.bundle_id,
@@ -333,6 +344,7 @@ fn prompt_pick_target_or_recent(
         })
 }
 
+#[allow(dead_code)]
 fn focus_preserving_prompt_to_last_target_impl<C, F, R, P, S, W>(
     body: &str,
     state: &PromptPickSessionState,
@@ -394,6 +406,7 @@ where
     ))
 }
 
+#[allow(dead_code)]
 fn focus_preserving_prompt_sequence_to_last_target_impl<C, F, R, P, S, W>(
     bodies: &[String],
     interval_ms: u64,
@@ -631,11 +644,17 @@ fn paste_prompt_and_submit_to_session_target_with_senders<A, C>(
     body: &str,
     state: &PromptPickSessionState,
     recent_state: Option<&LastInputTargetState>,
+    submit_key: platform::macos::NativeSubmitKey,
     app_sender: A,
     copy_sender: C,
 ) -> Result<AutosendOutcome, String>
 where
-    A: FnOnce(&str, &str, Option<TargetClickPoint>) -> AutosendOutcome,
+    A: FnOnce(
+        &str,
+        &str,
+        Option<TargetClickPoint>,
+        platform::macos::NativeSubmitKey,
+    ) -> AutosendOutcome,
     C: FnOnce(&str) -> Result<(), String>,
 {
     let Some(target) = prompt_pick_target_or_recent(state, recent_state) else {
@@ -662,7 +681,12 @@ where
         ));
     }
 
-    Ok(app_sender(body, &target.app.bundle_id, target.click_point))
+    Ok(app_sender(
+        body,
+        &target.app.bundle_id,
+        target.click_point,
+        submit_key,
+    ))
 }
 
 fn paste_prompt_sequence_and_submit_to_session_target_with_senders<A, C, S>(
@@ -670,12 +694,18 @@ fn paste_prompt_sequence_and_submit_to_session_target_with_senders<A, C, S>(
     interval_ms: u64,
     state: &PromptPickSessionState,
     recent_state: Option<&LastInputTargetState>,
+    submit_key: platform::macos::NativeSubmitKey,
     mut app_sender: A,
     copy_sender: C,
     mut sleeper: S,
 ) -> Result<AutosendSequenceOutcome, String>
 where
-    A: FnMut(&str, &str, Option<TargetClickPoint>) -> AutosendOutcome,
+    A: FnMut(
+        &str,
+        &str,
+        Option<TargetClickPoint>,
+        platform::macos::NativeSubmitKey,
+    ) -> AutosendOutcome,
     C: FnOnce(&str) -> Result<(), String>,
     S: FnMut(u64),
 {
@@ -712,7 +742,7 @@ where
 
     let delay_ms = clamp_sequence_interval_ms(interval_ms);
     for (index, body) in clean_bodies.iter().enumerate() {
-        let outcome = app_sender(body, &target.app.bundle_id, target.click_point);
+        let outcome = app_sender(body, &target.app.bundle_id, target.click_point, submit_key);
         if !outcome.sent {
             return Ok(AutosendSequenceOutcome::from_failure(
                 outcome,
@@ -967,7 +997,7 @@ fn record_prompt_pick_session_target_if_valid(
 
 fn prompt_pick_session_target(
     frontmost: Option<FrontmostAppWithPid>,
-    visible_apps: Vec<FrontmostApp>,
+    _visible_apps: Vec<FrontmostApp>,
     recent_target: Option<LastInputTarget>,
 ) -> Option<PromptPickSessionTarget> {
     let frontmost = frontmost?;
@@ -999,21 +1029,6 @@ fn prompt_pick_session_target(
             observed_at_ms: now_ms(),
             click_point: target.click_point,
         });
-    }
-
-    if let Some(app) = visible_apps
-        .into_iter()
-        .find(|app| !is_prompt_picker_app(app))
-    {
-        if is_usable_autosend_app(&app) {
-            return Some(PromptPickSessionTarget {
-                app,
-                pid: None,
-                observed_at_ms: now_ms(),
-                click_point: None,
-            });
-        }
-        return None;
     }
 
     recent_target
@@ -1805,6 +1820,35 @@ mod last_input_target_tests {
 
         assert!(command_source.contains("session_state.begin(session_id);"));
         assert!(command_source.contains("record_prompt_pick_session_target_if_valid"));
+    }
+
+    #[test]
+    fn autosend_command_impls_use_activating_session_sender() {
+        let source = include_str!("lib.rs");
+        let single_start = source
+            .find("fn paste_prompt_and_submit_to_last_target_impl")
+            .expect("single autosend impl should exist");
+        let single_end = source[single_start..]
+            .find("fn copy_text_to_clipboard")
+            .expect("copy helper should follow single autosend impl");
+        let single_source = &source[single_start..single_start + single_end];
+
+        assert!(single_source.contains("paste_prompt_and_submit_to_session_target_with_senders"));
+        assert!(single_source.contains("paste_prompt_and_submit_to_app_clipboard_with_copier"));
+        assert!(!single_source.contains("focus_preserving_prompt_to_last_target_impl("));
+
+        let sequence_start = source
+            .find("fn paste_prompt_sequence_and_submit_to_last_target_impl")
+            .expect("sequence autosend impl should exist");
+        let sequence_end = source[sequence_start..]
+            .find("fn paste_prompt_and_submit_to_last_target_impl")
+            .expect("single autosend impl should follow sequence autosend impl");
+        let sequence_source = &source[sequence_start..sequence_start + sequence_end];
+
+        assert!(sequence_source
+            .contains("paste_prompt_sequence_and_submit_to_session_target_with_senders"));
+        assert!(sequence_source.contains("paste_prompt_and_submit_to_app_clipboard_with_copier"));
+        assert!(!sequence_source.contains("focus_preserving_prompt_sequence_to_last_target_impl("));
     }
 
     #[test]
@@ -2726,7 +2770,7 @@ mod last_input_target_tests {
     }
 
     #[test]
-    fn prompt_pick_session_falls_back_from_prompt_picker_to_visible_business_app() {
+    fn prompt_pick_session_does_not_use_arbitrary_visible_app_without_recent_target() {
         let target = prompt_pick_session_target(
             Some(frontmost_target(
                 "Prompt Picker",
@@ -2738,10 +2782,9 @@ mod last_input_target_tests {
                 bundle_id: "com.openai.codex".to_string(),
             }],
             None,
-        )
-        .unwrap();
+        );
 
-        assert_eq!(target.app.bundle_id, "com.openai.codex");
+        assert!(target.is_none());
     }
 
     #[test]
@@ -2836,7 +2879,8 @@ mod last_input_target_tests {
             "hello",
             &state,
             None,
-            |_, _, _| panic!("app sender must not run without a target"),
+            platform::macos::NativeSubmitKey::Enter,
+            |_, _, _, _| panic!("app sender must not run without a target"),
             |body| {
                 assert_eq!(body, "hello");
                 Ok(())
@@ -2867,10 +2911,12 @@ mod last_input_target_tests {
             "hello",
             &session_state,
             Some(&recent_state),
-            |body, bundle_id, click_point| {
+            platform::macos::NativeSubmitKey::Enter,
+            |body, bundle_id, click_point, submit_key| {
                 assert_eq!(body, "hello");
                 assert_eq!(bundle_id, "com.openai.codex");
                 assert_eq!(click_point.unwrap().x, 640.0);
+                assert_eq!(submit_key, platform::macos::NativeSubmitKey::Enter);
                 AutosendOutcome::sent()
             },
             |_| panic!("copy sender must not run when recent target is usable"),
@@ -2936,8 +2982,10 @@ mod last_input_target_tests {
             "hello",
             &session_state,
             Some(&recent_state),
-            |_, bundle_id, _| {
+            platform::macos::NativeSubmitKey::Enter,
+            |_, bundle_id, _, submit_key| {
                 assert_eq!(bundle_id, "com.openai.codex");
+                assert_eq!(submit_key, platform::macos::NativeSubmitKey::Enter);
                 AutosendOutcome::sent()
             },
             |_| panic!("copy sender must not run when recent target is usable"),
@@ -2963,10 +3011,12 @@ mod last_input_target_tests {
             "hello",
             &state,
             None,
-            |body, bundle_id, click_point| {
+            platform::macos::NativeSubmitKey::Enter,
+            |body, bundle_id, click_point, submit_key| {
                 assert_eq!(body, "hello");
                 assert_eq!(bundle_id, "com.tencent.xinWeChat");
                 assert_eq!(click_point.unwrap().y, 720.0);
+                assert_eq!(submit_key, platform::macos::NativeSubmitKey::Enter);
                 AutosendOutcome::sent()
             },
             |_| panic!("copy sender must not run for a safe app-only target"),
@@ -2995,10 +3045,12 @@ mod last_input_target_tests {
             "hello",
             &state,
             None,
-            |body, bundle_id, click_point| {
+            platform::macos::NativeSubmitKey::Enter,
+            |body, bundle_id, click_point, submit_key| {
                 assert_eq!(body, "hello");
                 assert_eq!(bundle_id, "com.openai.codex");
                 assert!(click_point.is_none());
+                assert_eq!(submit_key, platform::macos::NativeSubmitKey::Enter);
                 AutosendOutcome::sent()
             },
             |_| panic!("copy sender must not run when a click point exists"),
@@ -3026,7 +3078,8 @@ mod last_input_target_tests {
             "hello",
             &state,
             None,
-            |_, _, _| AutosendOutcome::paste_event_failed("app paste failed".to_string()),
+            platform::macos::NativeSubmitKey::Enter,
+            |_, _, _, _| AutosendOutcome::paste_event_failed("app paste failed".to_string()),
             |_| panic!("copy sender must not run when a click point exists"),
         );
 
@@ -3061,7 +3114,9 @@ mod last_input_target_tests {
             700,
             &state,
             None,
-            |body, bundle_id, _| {
+            platform::macos::NativeSubmitKey::Enter,
+            |body, bundle_id, _, submit_key| {
+                assert_eq!(submit_key, platform::macos::NativeSubmitKey::Enter);
                 sent.push((body.to_string(), bundle_id.to_string()));
                 AutosendOutcome::sent()
             },
@@ -3104,7 +3159,8 @@ mod last_input_target_tests {
             10,
             &state,
             None,
-            |_, _, _| AutosendOutcome::sent(),
+            platform::macos::NativeSubmitKey::Enter,
+            |_, _, _, _| AutosendOutcome::sent(),
             |_| panic!("copy sender must not run when target exists"),
             |delay_ms| sleeps.push(delay_ms),
         )
@@ -3134,7 +3190,8 @@ mod last_input_target_tests {
             700,
             &state,
             None,
-            |body, _, _| {
+            platform::macos::NativeSubmitKey::Enter,
+            |body, _, _, _| {
                 sent.push(body.to_string());
                 if body == "two" {
                     return AutosendOutcome::paste_event_failed("paste failed".to_string());
@@ -3164,7 +3221,8 @@ mod last_input_target_tests {
             700,
             &state,
             None,
-            |_, _, _| panic!("app sender must not run without target"),
+            platform::macos::NativeSubmitKey::Enter,
+            |_, _, _, _| panic!("app sender must not run without target"),
             |body| {
                 copied = body.to_string();
                 Ok(())
@@ -3201,7 +3259,9 @@ mod last_input_target_tests {
             700,
             &session_state,
             Some(&recent_state),
-            |body, bundle_id, click_point| {
+            platform::macos::NativeSubmitKey::Enter,
+            |body, bundle_id, click_point, submit_key| {
+                assert_eq!(submit_key, platform::macos::NativeSubmitKey::Enter);
                 sent.push((body.to_string(), bundle_id.to_string(), click_point));
                 AutosendOutcome::sent()
             },
