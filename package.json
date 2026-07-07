@@ -1,6 +1,6 @@
 {
   "name": "prompt-picker",
-  "version": "1.0.5",
+  "version": "1.0.8",
   "description": "Local macOS Prompt Picker that detects input panels and inserts prompts",
   "type": "module",
   "scripts": {
