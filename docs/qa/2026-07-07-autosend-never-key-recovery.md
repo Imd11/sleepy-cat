@@ -45,16 +45,48 @@ Passed:
 - No legacy `paste_prompt_to_app`, `paste_prompt_to_last_target`, `pastePromptToApp`, `pastePromptToLastTarget`, or `paste_to_app_script` references were found in `src` or `src-tauri/src`.
 - Codex bundle-id references remain only in unit tests and script fixtures, not in production fallback selection logic.
 
-## Manual Verification Still Needed
+## Manual Diagnostic Verification
 
-The following require real app interaction and were not claimed as passed by automation:
+Run command:
 
-- Codex: click the pet, select a prompt, confirm it pastes and submits without falling back to manual paste.
-- Claude: click the pet, select a prompt, confirm it pastes and submits when the input remains focused.
-- WeChat: click the pet, select a prompt, confirm it pastes and submits when the input remains focused.
-- Focus break safety: click the pet, deliberately switch to another app before selecting a prompt, confirm Prompt Picker copies only and does not send to the wrong app.
-- Optional diagnostics: run with `PROMPT_PICKER_FOCUS_DIAGNOSTICS=1` and confirm the prompt button/popover reports non-key behavior while opening.
+`PROMPT_PICKER_FOCUS_DIAGNOSTICS=1 npm run tauri -- dev`
+
+Temporary diagnostic setup:
+
+- The local `local.promptpicker.dev` settings and prompt library were backed up before testing.
+- The app was temporarily configured with a single paste-only diagnostic prompt:
+  `PROMPT_PICKER_DIAGNOSTIC_TEST`.
+- The original `settings.json` and `prompts.json` were restored after testing.
+
+Captured diagnostic evidence:
+
+```text
+prompt-picker-panel label=prompt-button class=NSKVONotifying_TaoWindow action=ManagedTauriRuntime can_become_key=false can_become_main=false
+```
+
+| Scenario | prompt-button key? | prompt-popover key? | Classification | Recovery Used | Outcome | Notes |
+|---|---:|---:|---|---:|---|---|
+| Codex normal autosend | false | NOT RUN | NOT RUN | NOT RUN | NOT RUN | Computer Use refuses to operate `com.openai.codex`, so this row could not be executed safely by the agent. |
+| Claude normal autosend | false | NOT OBSERVED | NOT OBSERVED | NOT OBSERVED | NOT RUN | Claude input was focused and the pet opened the popover. Available automation could not reliably trigger the prompt row's real `onClick`; the popover closed without changing the clipboard or producing autosend diagnostics. |
+| WeChat normal autosend | false | NOT RUN | NOT RUN | NOT RUN | NOT RUN | Not executed after prompt-row selection could not be triggered reliably; avoiding unsafe interaction with an active chat. |
+| Focus-break safety | n/a | n/a | NOT RUN | NOT RUN | NOT RUN | Not executed because a trustworthy prompt selection event could not be produced from automation. |
+
+Manual diagnostic matrix result: **FAIL / NOT READY**.
+
+The only trusted live diagnostic evidence from this run is that the prompt button window is a Tao-managed runtime window but reports `can_become_key=false` and `can_become_main=false`. The prompt popover and autosend classification rows were not observed, so this QA does not claim Codex, Claude, WeChat, or focus-break acceptance.
 
 ## Notes
 
-The Tao/Wry class guard was not removed. The plan made this conditional on diagnostics proving the runtime-managed window class still steals focus after the show-ordering fix. No such diagnostic evidence was produced during automated verification.
+The Tao/Wry class guard was not removed. The plan made this conditional on diagnostics proving the runtime-managed window class still steals focus after the show-ordering fix. This run produced the opposite evidence for the prompt button (`can_become_key=false`) and did not produce enough popover/autosend evidence to justify changing the guard.
+
+## Final Acceptance Status
+
+Automated verification: PENDING
+
+Manual diagnostic matrix: FAIL / NOT READY
+
+Task 4 required: unknown; no trigger evidence was produced
+
+Task 4 executed: no
+
+Acceptance recommendation: NEEDS FIX / MANUAL DIAGNOSTIC REQUIRED
