@@ -62,6 +62,65 @@
       URL.revokeObjectURL(objectUrl);
       report.objectUrlRevoked = true;
     }
+
+    var rendererModule = await import("/calico/frame-renderer.js?v=surface-probe-v1");
+    var renderer = rendererModule.createCalicoFrameRenderer({
+      canvas: canvas,
+      maxDecodedSheets: 2,
+      assetVersion: "surface-probe-v1"
+    });
+    var maxima = {
+      decodedSheetCount: 0,
+      liveSurfaceCount: 0,
+      pendingDecodeCount: 0,
+      queuedRequestCount: 0,
+      activeTimerCount: 0
+    };
+    function sampleRenderer() {
+      var diagnostics = renderer.diagnostics();
+      Object.keys(maxima).forEach(function (key) {
+        maxima[key] = Math.max(maxima[key], diagnostics[key]);
+      });
+      return diagnostics;
+    }
+    var probeSheets = ["a", "b", "c"].map(function (name) {
+      return {
+        file: "/calico/runtime-probe-" + name + ".png",
+        pixelFormat: "rgba",
+        frameWidth: 2,
+        frameHeight: 2,
+        frameCount: 1,
+        columns: 1,
+        rows: 1,
+        gutter: 0,
+        strideX: 2,
+        strideY: 2,
+        sheetWidth: 2,
+        sheetHeight: 2,
+        frameDurationsMs: [40],
+        plays: 0
+      };
+    });
+    for (var requestIndex = 0; requestIndex < 600; requestIndex += 1) {
+      void renderer.play("probe-" + requestIndex, probeSheets[requestIndex % 3], { restart: true });
+      sampleRenderer();
+    }
+    var settleDeadline = Date.now() + 5000;
+    var beforeDispose = sampleRenderer();
+    while (Date.now() < settleDeadline) {
+      await new Promise(function (resolve) { setTimeout(resolve, 20); });
+      beforeDispose = sampleRenderer();
+      if (beforeDispose.pendingDecodeCount === 0
+          && beforeDispose.queuedRequestCount === 0
+          && beforeDispose.visualReady) break;
+    }
+    if (!beforeDispose.visualReady) throw new Error("Production renderer stress did not draw");
+    renderer.dispose();
+    report.rendererDiagnostics = {
+      maxima: maxima,
+      beforeDispose: beforeDispose,
+      afterDispose: renderer.diagnostics()
+    };
   } catch (error) {
     report.error = error instanceof Error ? error.message : String(error);
   }

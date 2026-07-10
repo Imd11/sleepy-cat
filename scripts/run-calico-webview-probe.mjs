@@ -20,7 +20,6 @@ const targetDir = process.env.CARGO_TARGET_DIR
 const artifactsDir = join(targetDir, "calico-probe-artifacts");
 const resultPath = join(artifactsDir, "surface-probe.json");
 const logPath = join(artifactsDir, "surface-probe.log");
-const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 
 const probePngs = {
   // A: opaque red at (0,0), transparent at (1,1), plus blue and half-alpha green.
@@ -55,9 +54,7 @@ function run(command, args, options = {}) {
 }
 
 function assertCleanBeforeProbe() {
-  if (run("git", ["status", "--short", "--", "public/calico"]).trim()) {
-    throw new Error("public/calico must be clean before the WebView probe.");
-  }
+  const initialPublicStatus = run("git", ["status", "--short", "--", "public/calico"]).trim();
   const distDiff = spawnSync("git", ["diff", "--quiet", "--", "dist"], { cwd: root });
   if (distDiff.status !== 0) throw new Error("Tracked dist files must be clean before the probe.");
   for (const suffix of ["surface-probe.html", "probe-a.png", "probe-b.png", "probe-c.png"]) {
@@ -65,6 +62,7 @@ function assertCleanBeforeProbe() {
       throw new Error(`Temporary probe input already exists: runtime-${suffix}`);
     }
   }
+  return initialPublicStatus;
 }
 
 async function launchProbe(executable) {
@@ -105,9 +103,30 @@ function validate(report) {
       && (!report.preferredBackendDrawn || !report.imageBitmapCloseAvailable)) {
     throw new Error("preferred backend was available without successful draw and close support");
   }
+  if (!report.rendererDiagnostics) throw new Error("production renderer diagnostics are missing");
+  const maxima = report.rendererDiagnostics.maxima;
+  for (const key of ["decodedSheetCount", "liveSurfaceCount"]) {
+    if (maxima[key] > 2) throw new Error(`${key} exceeded 2: ${maxima[key]}`);
+  }
+  for (const key of ["pendingDecodeCount", "queuedRequestCount", "activeTimerCount"]) {
+    if (maxima[key] > 1) throw new Error(`${key} exceeded 1: ${maxima[key]}`);
+  }
+  if (report.rendererDiagnostics.beforeDispose.staleGenerationDrawCount !== 0) {
+    throw new Error("a stale renderer generation drew a frame");
+  }
+  const afterDispose = report.rendererDiagnostics.afterDispose;
+  for (const key of [
+    "decodedSheetCount", "liveSurfaceCount", "pendingDecodeCount",
+    "queuedRequestCount", "activeTimerCount",
+  ]) {
+    if (afterDispose[key] !== 0) throw new Error(`${key} was not released on dispose`);
+  }
+  if (afterDispose.state !== "disposed" || afterDispose.visualReady !== false) {
+    throw new Error("renderer did not enter a clean disposed state");
+  }
 }
 
-assertCleanBeforeProbe();
+const initialPublicStatus = assertCleanBeforeProbe();
 rmSync(artifactsDir, { recursive: true, force: true });
 mkdirSync(artifactsDir, { recursive: true });
 writeFileSync(logPath, "");
@@ -118,7 +137,9 @@ try {
     writeFileSync(join(publicCalico, `runtime-probe-${name}.png`), Buffer.from(base64, "base64"));
   }
 
-  run(npmCommand, ["run", "tauri", "--", "build", "--debug", "--no-bundle"]);
+  run("npm", ["run", "tauri", "--", "build", "--debug", "--no-bundle"], {
+    shell: process.platform === "win32",
+  });
   const executable = join(targetDir, "debug", process.platform === "win32"
     ? "prompt-picker.exe"
     : "prompt-picker");
@@ -137,6 +158,9 @@ try {
     throw new Error(`probe JSON parser failure: ${error.message}`);
   }
   validate(report);
+  const maximaLine = `Renderer maxima: ${JSON.stringify(report.rendererDiagnostics.maxima)}`;
+  appendFileSync(logPath, `${maximaLine}\n`);
+  console.log(maximaLine);
   console.log(`Backend decision: ${report.createImageBitmapAvailable ? "preferred+compatibility" : "compatibility"}`);
 } catch (error) {
   console.error(`Calico WebView probe failed: ${error.message}`);
@@ -153,7 +177,9 @@ try {
   }
   spawnSync("git", ["restore", "--worktree", "--", "dist"], { cwd: root });
   const publicStatus = run("git", ["status", "--short", "--", "public/calico"]).trim();
-  if (publicStatus) throw new Error(`probe cleanup left public/calico dirty:\n${publicStatus}`);
+  if (publicStatus !== initialPublicStatus) {
+    throw new Error(`probe cleanup changed public/calico status:\n${publicStatus}`);
+  }
   const distDiff = spawnSync("git", ["diff", "--quiet", "--", "dist"], { cwd: root });
   if (distDiff.status !== 0) throw new Error("probe cleanup left tracked dist files dirty");
 }
