@@ -21,28 +21,12 @@ body {
   place-items: center;
 }
 
-.calico-entry {
+.calico-visual {
   width: var(--calico-hit-area-size);
   height: var(--calico-hit-area-size);
-  padding: 0;
-  border: 0;
-  background: transparent;
-  cursor: grab;
   display: grid;
   place-items: center;
   position: relative;
-  -webkit-user-select: none;
-  user-select: none;
-}
-
-.calico-entry:active {
-  cursor: grabbing;
-}
-
-.calico-entry:focus-visible {
-  outline: 2px solid rgba(74, 144, 217, 0.9);
-  outline-offset: -10px;
-  border-radius: 20px;
 }
 
 .calico-sprite {
@@ -73,21 +57,21 @@ body {
   display: none;
 }
 
-.calico-entry:hover .calico-sprite {
+.calico-visual.is-hovering .calico-sprite {
   --calico-hover-y: -2px;
 }
 
-.calico-entry.is-pressing .calico-sprite {
+.calico-visual.is-pressing .calico-sprite {
   --calico-press-y: 1px;
 }
 
-.calico-entry[data-motion-state="react-drag"] .calico-sprite,
-.calico-entry.is-dragging .calico-sprite {
+.calico-visual[data-motion-state="react-drag"] .calico-sprite,
+.calico-visual.is-dragging .calico-sprite {
   --calico-rotate: -2deg;
 }
 
-.calico-entry[data-motion-state="idle-follow"] .calico-sprite,
-.calico-entry[data-motion-state="idle"] .calico-sprite {
+.calico-visual[data-motion-state="idle-follow"] .calico-sprite,
+.calico-visual[data-motion-state="idle"] .calico-sprite {
   animation: calico-idle-breath 1800ms ease-in-out infinite alternate;
 }
 
@@ -156,35 +140,19 @@ body {
 </style></head>
 <body>
 <div id="statusBubble" class="calico-status-bubble" aria-live="polite"></div>
-<button
-  id="btn"
-  class="calico-entry"
-  title="Open Prompt Picker"
-  aria-label="Open Prompt Picker"
-  data-motion-state="idle-follow"
->
+<div id="calicoVisual" class="calico-visual" data-motion-state="idle-follow">
   <canvas id="calicoCanvas" class="calico-sprite" width="252" height="252" aria-hidden="true"></canvas>
-</button>
+</div>
 <script type="module">
-const btn = document.getElementById('btn');
+const visual = document.getElementById('calicoVisual');
 const calicoCanvas = document.getElementById('calicoCanvas');
 const statusBubble = document.getElementById('statusBubble');
 const tauri = window.__TAURI__;
-const DRAG_START_DISTANCE_PX = 10;
 const CALICO_ASSET_VERSION = '1.0.8-calico-bounded-canvas-v1';
 const rendererInstanceId = Number(new URLSearchParams(window.location.search).get('rendererInstanceId'));
-let start = null;
-let dragging = false;
-let lastMove = null;
-let animationFrame = 0;
-let contextMenuOpened = false;
-let pointerSequence = 0;
-let promptPickSessionId = 0;
-let dragStartedEmitted = false;
-let dragPopoverHidden = false;
 let motionResetTimer = 0;
 let statusTimer = 0;
-let lastAccessibilitySettingsOpenAt = 0;
+let interactionActive = false;
 let calicoRenderer = null;
 let calicoMotion = null;
 let calicoIdleDirector = null;
@@ -200,21 +168,6 @@ let fatalRecoveryPromise = null;
 let resizePromise = null;
 let queuedDpr = null;
 let currentDpr = 2;
-const permissionMessages = {
-  'zh-CN': {
-    nativePrompt: '请在系统弹窗中授权',
-    nativePromptFallback: '未看到弹窗？再点小猫',
-    settingsOpened: '请启用 Prompt Picker',
-    settingsOpenFailed: '请手动打开系统设置中的辅助功能权限'
-  },
-  'en-US': {
-    nativePrompt: 'Use the system prompt',
-    nativePromptFallback: 'No prompt? Click Calico again',
-    settingsOpened: 'Enable Prompt Picker in Accessibility',
-    settingsOpenFailed: 'Open Accessibility manually in System Settings'
-  }
-};
-
 function clearMotionTimers() {
   window.clearTimeout(motionResetTimer);
 }
@@ -304,8 +257,8 @@ function buildIdleDirector() {
   calicoIdleDirector = createCalicoIdleDirector({
     applyMotion: applyCalicoMotion,
     resetMotion: resetCalicoMotion,
-    getCurrentState: () => btn.dataset.motionState || calicoManifest.defaultState,
-    isUserActive: () => Boolean(start || dragging || contextMenuOpened),
+    getCurrentState: () => visual.dataset.motionState || calicoManifest.defaultState,
+    isUserActive: () => interactionActive,
     motionDurations,
   });
   calicoIdleDirector.start();
@@ -334,7 +287,7 @@ async function initializeCalicoMotionOnce() {
     if (!calicoMotion) {
       calicoMotion = createCalicoMotionRuntime({
         renderer: calicoRenderer,
-        host: btn,
+        host: visual,
         manifest: calicoManifest,
         sheetManifest: calicoSheetManifest,
       });
@@ -472,10 +425,6 @@ async function resizeCalicoBackingStore(nextDpr) {
   }
 }
 
-function distance(a, b) {
-  return Math.hypot(a.screenX - b.screenX, a.screenY - b.screenY);
-}
-
 async function invoke(command, args) {
   if (!tauri?.core?.invoke) {
     console.error("Tauri invoke API is unavailable in overlay.html");
@@ -496,21 +445,6 @@ async function invokeOrThrow(command, args) {
   return tauri.core.invoke(command, args);
 }
 
-async function emit(event, payload) {
-  if (!tauri?.event?.emit) return;
-  try {
-    await tauri.event.emit(event, payload);
-  } catch (error) {
-    console.error(`Tauri event failed: ${event}`, error);
-  }
-}
-
-async function hidePromptPopoverForDrag() {
-  if (dragPopoverHidden) return;
-  dragPopoverHidden = true;
-  await invoke('hide_prompt_popover');
-}
-
 function hideStatusBubble() {
   if (!statusBubble) return;
   statusBubble.classList.remove('is-visible');
@@ -525,42 +459,6 @@ function showStatusBubble(payload) {
   statusBubble.title = '';
   statusBubble.className = `calico-status-bubble is-visible is-${kind}`;
   statusTimer = window.setTimeout(hideStatusBubble, 1800);
-}
-
-function permissionText(permission, key) {
-  const language = permission?.language === 'en-US' ? 'en-US' : 'zh-CN';
-  return permissionMessages[language][key];
-}
-
-async function handleMissingPromptInteractionPermission(permission) {
-  if (!permission.native_prompt_requested) {
-    showStatusBubble({ kind: 'failed', message: permissionText(permission, 'nativePrompt') });
-    const status = await invoke('request_prompt_interaction_permission');
-    if (status?.trusted) {
-      hideStatusBubble();
-      return;
-    }
-    window.clearTimeout(statusTimer);
-    statusTimer = window.setTimeout(() => {
-      showStatusBubble({ kind: 'failed', message: permissionText(permission, 'nativePromptFallback') });
-    }, 1900);
-    return;
-  }
-
-  const now = Date.now();
-  if (now - lastAccessibilitySettingsOpenAt < 4_000) {
-    showStatusBubble({ kind: 'failed', message: permissionText(permission, 'settingsOpened') });
-    return;
-  }
-
-  try {
-    await invokeOrThrow('open_accessibility_settings');
-    lastAccessibilitySettingsOpenAt = now;
-    showStatusBubble({ kind: 'failed', message: permissionText(permission, 'settingsOpened') });
-  } catch (error) {
-    console.error('Failed to open Accessibility settings', error);
-    showStatusBubble({ kind: 'failed', message: permissionText(permission, 'settingsOpenFailed') });
-  }
 }
 
 function listenForAutosendStatus() {
@@ -595,156 +493,51 @@ function listenForPromptPopoverDismissed() {
   });
 }
 
-async function openButtonControls(event) {
-  event.preventDefault();
-  contextMenuOpened = true;
-  start = null;
-  dragging = false;
-  lastMove = null;
-  btn.classList.remove('is-pressing', 'is-dragging');
-  resetCalicoMotion();
-  pauseIdleForPointerInteraction(6_000);
-  await invoke('show_prompt_button_controls_from_button');
-}
-
-async function flushMove() {
-  animationFrame = 0;
-  if (!lastMove || !start || !start.positionReady) return;
-  await invoke('move_prompt_button_to', {
-    x: start.windowX + lastMove.screenX - start.screenX,
-    y: start.windowY + lastMove.screenY - start.screenY
-  });
-}
-
-function handleCalicoPointerEnter() {
-  calicoIdleDirector?.handleAttention();
-}
-
-btn.addEventListener('pointerdown', (event) => {
-  if (event.button === 2 || (event.button === 0 && event.ctrlKey)) {
-    openButtonControls(event);
-    return;
-  }
-
-  pauseIdleForPointerInteraction(5_000);
-  const sequence = ++pointerSequence;
-  start = {
-    screenX: event.screenX,
-    screenY: event.screenY,
-    windowX: 0,
-    windowY: 0,
-    positionReady: false,
-    pointerId: event.pointerId,
-    sequence,
-    positionPromise: null
-  };
-  dragging = false;
-  lastMove = null;
-  contextMenuOpened = false;
-  dragStartedEmitted = false;
-  dragPopoverHidden = false;
-  btn.classList.add('is-pressing');
-  try {
-    btn.setPointerCapture(event.pointerId);
-  } catch {}
-
-  start.positionPromise = invoke('prompt_button_position_cmd');
-  start.positionPromise.then((position) => {
-    if (!position || !start || start.sequence !== sequence) return;
-    start.windowX = position.x;
-    start.windowY = position.y;
-    start.positionReady = true;
-    if (dragging && lastMove && !animationFrame) {
-      animationFrame = requestAnimationFrame(flushMove);
-    }
-  }).catch(() => {
-    if (start?.sequence === sequence) start.positionReady = false;
-  });
-});
-
-btn.addEventListener('pointermove', (event) => {
-  if (!start) return;
-  const current = { screenX: event.screenX, screenY: event.screenY };
-  if (!dragging && distance(start, current) < DRAG_START_DISTANCE_PX) return;
-  if (!dragStartedEmitted) {
-    dragStartedEmitted = true;
-    calicoIdleDirector?.pause(4000);
-    hidePromptPopoverForDrag().catch(() => {});
-    emit('prompt-button-drag-started').catch(() => {});
-  }
-  dragging = true;
-  btn.classList.remove('is-pressing');
-  btn.classList.add('is-dragging');
-  calicoIdleDirector?.pause(4_000);
-  if (btn.dataset.motionState !== 'react-drag') {
-    applyCalicoMotion({ state: 'react-drag', reason: 'drag' });
-  }
-  lastMove = current;
-  if (!animationFrame) {
-    animationFrame = requestAnimationFrame(flushMove);
-  }
-});
-
-btn.addEventListener('pointerup', async (event) => {
-  if (contextMenuOpened) {
-    contextMenuOpened = false;
-    start = null;
-    dragging = false;
-    lastMove = null;
-    btn.classList.remove('is-pressing', 'is-dragging');
-    calicoIdleDirector?.resetIdleClock();
-    resetCalicoMotion();
-    return;
-  }
-  if (!start) return;
-  const wasDragging = dragging;
-  try {
-    btn.releasePointerCapture(event.pointerId);
-  } catch {}
-  if (wasDragging) {
-    if (!start.positionReady && start.positionPromise) {
-      await start.positionPromise.catch(() => null);
-    }
-    await flushMove();
-    const position = await invoke('prompt_button_position_cmd');
-    if (position) {
-      await emit('prompt-button-drag-ended', position);
-    }
-  } else {
-    pauseIdleForPointerInteraction(6_000);
-    const permission = await invoke('prompt_interaction_permission_status');
-    if (permission?.required && !permission.trusted) {
-      await handleMissingPromptInteractionPermission(permission);
-      resetCalicoMotion();
-    } else {
-      const sessionId = ++promptPickSessionId;
-      await invoke('begin_prompt_pick_session', { sessionId });
-      const toggleResult = await invoke('toggle_prompt_popover_from_button', { sessionId });
-      if (!toggleResult?.opened) {
-        resetCalicoMotion();
+function handleCalicoInteraction(payload = {}) {
+  switch (payload.type) {
+    case 'hover-attention':
+      visual.classList.add('is-hovering');
+      calicoIdleDirector?.handleAttention();
+      break;
+    case 'hover-end':
+      visual.classList.remove('is-hovering');
+      break;
+    case 'press':
+      interactionActive = true;
+      visual.classList.add('is-pressing');
+      pauseIdleForPointerInteraction(5_000);
+      break;
+    case 'drag-start':
+      interactionActive = true;
+      visual.classList.remove('is-pressing');
+      visual.classList.add('is-dragging');
+      pauseIdleForPointerInteraction(4_000);
+      if (visual.dataset.motionState !== 'react-drag') {
+        applyCalicoMotion({ state: 'react-drag', reason: 'drag' });
       }
-    }
-  }
-  start = null;
-  dragging = false;
-  lastMove = null;
-  dragStartedEmitted = false;
-  btn.classList.remove('is-pressing', 'is-dragging');
-  calicoIdleDirector?.resetIdleClock();
-  if (wasDragging) {
-    if (calicoIdleDirector) {
-      calicoIdleDirector.resetToBaseline();
-    } else {
+      break;
+    case 'release':
+      interactionActive = false;
+      visual.classList.remove('is-pressing', 'is-dragging');
+      calicoIdleDirector?.resetIdleClock();
+      if (payload.wasDragging) {
+        calicoIdleDirector?.resetToBaseline();
+      }
+      break;
+    case 'context-menu':
+      interactionActive = false;
+      visual.classList.remove('is-pressing', 'is-dragging');
       resetCalicoMotion();
-    }
+      pauseIdleForPointerInteraction(6_000);
+      break;
+    case 'reset':
+      resetCalicoMotion();
+      break;
+    case 'status':
+      showStatusBubble(payload.status);
+      break;
   }
-});
-
-btn.addEventListener('pointerenter', handleCalicoPointerEnter);
-
-btn.addEventListener('contextmenu', async (event) => {
-  await openButtonControls(event);
-});
+}
 
 window.addEventListener('pagehide', () => {
   lifecycleGeneration += 1;
@@ -780,6 +573,9 @@ window.addEventListener('unload', () => {
 });
 
 if (tauri?.event?.listen) {
+  tauri.event.listen('calico-interaction', (event) => {
+    handleCalicoInteraction(event.payload);
+  }).catch((error) => console.error('Failed to listen for Calico interaction', error));
   tauri.event.listen('prompt-button-renderer-resume-requested', () => {
     resumeAndReportReady().catch(reportFatalRendererError);
   }).catch((error) => console.error('Failed to listen for renderer resume', error));

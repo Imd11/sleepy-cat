@@ -5,6 +5,10 @@ function readOverlayHtml(): string {
   return readFileSync("public/overlay.html", "utf8");
 }
 
+function readOverlayInteractionHtml(): string {
+  return readFileSync("public/overlay-interaction.html", "utf8");
+}
+
 describe("overlay button html", () => {
   it("enables global Tauri for the vanilla overlay html", () => {
     const config = JSON.parse(readFileSync("src-tauri/tauri.conf.json", "utf8"));
@@ -13,7 +17,7 @@ describe("overlay button html", () => {
   });
 
   it("opens Tauri button controls on right click instead of an inline menu", () => {
-    const html = readOverlayHtml();
+    const html = readOverlayInteractionHtml();
 
     expect(html).toContain("window.__TAURI__");
     expect(html).toContain("contextmenu");
@@ -32,8 +36,9 @@ describe("overlay button html", () => {
 
   it("renders Calico through exactly one visible canvas", () => {
     const html = readOverlayHtml();
+    const interactionHtml = readOverlayInteractionHtml();
 
-    expect(html).toContain("calico-entry");
+    expect(html).toContain("calico-visual");
     expect(html).toContain('id="calicoCanvas"');
     expect(html).toContain('class="calico-sprite"');
     expect(html).toContain('width="252" height="252"');
@@ -43,7 +48,7 @@ describe("overlay button html", () => {
     expect(html).toContain('data-motion-state="idle-follow"');
     expect(html).not.toContain("calico-projectile");
     expect(html).not.toContain("promptProjectile");
-    expect(html).toContain('aria-label="Open Prompt Picker"');
+    expect(interactionHtml).toContain('aria-label="Open Prompt Picker"');
     expect(html).not.toContain("calico-rig");
     expect(html).not.toContain("calico-body");
     expect(html).not.toContain("calico-head");
@@ -82,8 +87,8 @@ describe("overlay button html", () => {
     expect(html).toContain("calicoIdleDirector = createCalicoIdleDirector");
     expect(html).toContain("applyMotion: applyCalicoMotion");
     expect(html).toContain("resetMotion: resetCalicoMotion");
-    expect(html).toContain("getCurrentState: () => btn.dataset.motionState || calicoManifest.defaultState");
-    expect(html).toContain("isUserActive: () => Boolean(start || dragging || contextMenuOpened)");
+    expect(html).toContain("getCurrentState: () => visual.dataset.motionState || calicoManifest.defaultState");
+    expect(html).toContain("isUserActive: () => interactionActive");
     expect(html).toContain("calicoIdleDirector.start();");
     expect(html.indexOf("const baselineReady = await calicoRenderer.showBaseline()")).toBeLessThan(
       html.indexOf("calicoMotion = createCalicoMotionRuntime")
@@ -97,12 +102,12 @@ describe("overlay button html", () => {
     expect(html).toContain("pauseIdleForPointerInteraction(5_000);");
     expect(html).toContain("pauseIdleForPointerInteraction(6_000);");
     expect(html).toContain("calicoIdleDirector?.resetIdleClock();");
-    expect(html).toContain("calicoIdleDirector?.pause(4_000);");
+    expect(html).toContain("pauseIdleForPointerInteraction(4_000);");
     expect(html).toContain("calicoIdleDirector.resetToBaseline();");
   });
 
   it("opens the prompt list without changing Calico motion state on click", () => {
-    const html = readOverlayHtml();
+    const html = readOverlayInteractionHtml();
     const clickBlock = html.slice(
       html.indexOf("const permission = await invoke('prompt_interaction_permission_status');"),
       html.indexOf("start = null;", html.indexOf("const permission = await invoke('prompt_interaction_permission_status');"))
@@ -115,7 +120,7 @@ describe("overlay button html", () => {
   });
 
   it("keeps existing drag and click commands for the Calico entry", () => {
-    const html = readOverlayHtml();
+    const html = readOverlayInteractionHtml();
 
     expect(html).toContain("prompt_button_position_cmd");
     expect(html).toContain("move_prompt_button_to");
@@ -126,25 +131,27 @@ describe("overlay button html", () => {
     expect(html).toContain("releasePointerCapture");
   });
 
-  it("keeps Calico click hover and drag bound to the centered entry hit area", () => {
-    const html = readFileSync("public/overlay.html", "utf8");
+  it("separates the mouse-transparent visual canvas from the centered interaction hit area", () => {
+    const html = readOverlayHtml();
+    const interactionHtml = readOverlayInteractionHtml();
 
     expect(html).toContain("--calico-hit-area-size: 132px");
     expect(html).toContain("--calico-sprite-size: 126px");
-    expect(html).toContain("width: var(--calico-hit-area-size);");
-    expect(html).toContain("height: var(--calico-hit-area-size);");
     expect(html).toContain("width: var(--calico-sprite-size);");
     expect(html).toContain("height: var(--calico-sprite-size);");
     expect(html).toContain(".calico-sprite[hidden]");
     expect(html).toContain("calc(-50% + var(--calico-offset-x))");
-    expect(html).toContain("btn.addEventListener('pointerdown'");
-    expect(html).toContain("btn.addEventListener('pointerup'");
-    expect(html).toContain("btn.addEventListener('pointermove'");
-    expect(html).toContain("btn.addEventListener('pointerenter'");
-    expect(html).toContain("handleCalicoPointerEnter");
-    expect(html).toContain("calicoIdleDirector?.handleAttention();");
-    expect(html).not.toContain("body.addEventListener('pointerenter'");
-    expect(html).not.toContain("window.addEventListener('pointerenter'");
+    expect(html).not.toContain("btn.addEventListener('pointerdown'");
+    expect(html).not.toContain("btn.addEventListener('pointerup'");
+    expect(html).not.toContain("btn.addEventListener('pointermove'");
+    expect(interactionHtml).toContain("--calico-hit-area-size: 132px");
+    expect(interactionHtml).toContain("btn.addEventListener('pointerdown'");
+    expect(interactionHtml).toContain("btn.addEventListener('pointerup'");
+    expect(interactionHtml).toContain("btn.addEventListener('pointermove'");
+    expect(interactionHtml).toContain("btn.addEventListener('pointerenter'");
+    expect(interactionHtml).toContain("setPointerCapture");
+    expect(interactionHtml).toContain("releasePointerCapture");
+    expect(interactionHtml).toContain("calico-interaction");
   });
 
   it("starts and pauses the Calico idle director from overlay events", () => {
@@ -171,6 +178,13 @@ describe("overlay button html", () => {
     expect(html).not.toContain("startOverlayHealthHeartbeat");
     expect(html).not.toContain("prompt-button-health");
     expect(html).not.toContain("sprite.naturalWidth");
+  });
+
+  it("keeps the renderer readiness command on a throwing invoke path", () => {
+    const html = readOverlayHtml();
+
+    expect(html).toContain("async function invokeOrThrow(command, args)");
+    expect(html).toContain("return invokeOrThrow('set_prompt_button_renderer_ready'");
   });
 
   it("suspends reversibly and recovers the same canvas lifecycle", () => {
@@ -208,7 +222,7 @@ describe("overlay button html", () => {
   });
 
   it("keeps click-to-open neutral and separate from hover attention", () => {
-    const html = readFileSync("public/overlay.html", "utf8");
+    const html = readOverlayInteractionHtml();
     const clickBlock = html.slice(
       html.indexOf("const permission = await invoke('prompt_interaction_permission_status');"),
       html.indexOf("start = null;", html.indexOf("const permission = await invoke('prompt_interaction_permission_status');"))
@@ -220,7 +234,7 @@ describe("overlay button html", () => {
   });
 
   it("hides the prompt popover when Calico dragging starts", () => {
-    const html = readOverlayHtml();
+    const html = readOverlayInteractionHtml();
 
     expect(html).toContain("hidePromptPopoverForDrag");
     expect(html).toContain("await invoke('hide_prompt_popover')");
@@ -230,7 +244,7 @@ describe("overlay button html", () => {
   });
 
   it("captures the prompt target before opening the prompt list", () => {
-    const html = readOverlayHtml();
+    const html = readOverlayInteractionHtml();
 
     expect(html).toContain("let promptPickSessionId = 0;");
     expect(html).toContain("const sessionId = ++promptPickSessionId;");
@@ -241,7 +255,7 @@ describe("overlay button html", () => {
     expect(html).toContain("const toggleResult = await invoke('toggle_prompt_popover_from_button', { sessionId });");
     expect(html).not.toContain("const sessionPromise = invoke('begin_prompt_pick_session'");
     expect(html).not.toContain("void sessionPromise.catch");
-    expect(html).toContain("resetCalicoMotion();");
+    expect(html).toContain("await notifyVisual('reset');");
     expect(html.indexOf("prompt_interaction_permission_status")).toBeLessThan(
       html.indexOf("begin_prompt_pick_session")
     );
@@ -251,11 +265,12 @@ describe("overlay button html", () => {
   });
 
   it("requires deliberate pointer movement before treating a click as drag", () => {
-    const html = readOverlayHtml();
+    const html = readOverlayInteractionHtml();
+    const visualHtml = readOverlayHtml();
 
     expect(html).toContain("const DRAG_START_DISTANCE_PX = 10;");
     expect(html).toContain("distance(start, current) < DRAG_START_DISTANCE_PX");
-    expect(html).toContain("applyCalicoMotion({ state: 'react-drag'");
+    expect(visualHtml).toContain("applyCalicoMotion({ state: 'react-drag'");
     expect(html).not.toContain("distance(start, current) < 4");
   });
 
@@ -276,7 +291,7 @@ describe("overlay button html", () => {
   });
 
   it("checks Accessibility permission from the Calico click before opening prompts", () => {
-    const html = readOverlayHtml();
+    const html = readOverlayInteractionHtml();
 
     expect(html).toContain("prompt_interaction_permission_status");
     expect(html).toContain("request_prompt_interaction_permission");
@@ -293,7 +308,7 @@ describe("overlay button html", () => {
   });
 
   it("only debounces Accessibility settings after the settings open command succeeds", () => {
-    const html = readOverlayHtml();
+    const html = readOverlayInteractionHtml();
     const settingsBlock = html.slice(
       html.indexOf("const now = Date.now();"),
       html.indexOf("} catch (error)", html.indexOf("const now = Date.now();"))
@@ -304,7 +319,7 @@ describe("overlay button html", () => {
   });
 
   it("opens prompts without switching Calico into a throw-ready pose", () => {
-    const html = readOverlayHtml();
+    const html = readOverlayInteractionHtml();
 
     expect(html).toContain("toggle_prompt_popover_from_button");
     expect(html).not.toContain("setMotionState('ready'");

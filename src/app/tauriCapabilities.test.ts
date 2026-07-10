@@ -8,7 +8,12 @@ describe("Tauri capabilities", () => {
     ) as { windows?: string[] };
 
     expect(capability.windows).toEqual(
-      expect.arrayContaining(["main", "prompt-button", "prompt-popover"])
+      expect.arrayContaining([
+        "main",
+        "prompt-button",
+        "prompt-button-input",
+        "prompt-popover"
+      ])
     );
     expect(capability.windows).not.toContain("paper-plane-flight");
   });

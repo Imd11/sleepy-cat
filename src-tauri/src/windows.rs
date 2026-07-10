@@ -11,6 +11,7 @@ use objc2_app_kit::{NSEvent, NSEventMask};
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 pub const BUTTON_WINDOW_LABEL: &str = "prompt-button";
+pub const BUTTON_INPUT_WINDOW_LABEL: &str = "prompt-button-input";
 pub const POPOVER_WINDOW_LABEL: &str = "prompt-popover";
 
 pub const BUTTON_VISUAL_WIDTH: f64 = 132.0;
@@ -503,6 +504,7 @@ pub fn move_prompt_button_to(x: f64, y: f64, app: tauri::AppHandle) -> Result<()
         window
             .set_position(prompt_button_position_from_visual(x, y))
             .map_err(|e| e.to_string())?;
+        ensure_prompt_button_input_window(&app, x, y)?;
     }
     Ok(())
 }
@@ -670,6 +672,58 @@ fn build_prompt_button_window(
     if BUTTON_WINDOW_TRANSPARENT {
         crate::macos_panels::configure_transparent_webview_window(&window)?;
     }
+    build_prompt_button_input_window(app, x, y)?;
+    Ok(window)
+}
+
+fn build_prompt_button_input_window(
+    app: &tauri::AppHandle,
+    x: f64,
+    y: f64,
+) -> Result<tauri::WebviewWindow, String> {
+    let window = WebviewWindowBuilder::new(
+        app,
+        BUTTON_INPUT_WINDOW_LABEL,
+        WebviewUrl::App("overlay-interaction.html".into()),
+    )
+    .title("Prompt Button Input")
+    .inner_size(BUTTON_VISUAL_WIDTH, BUTTON_VISUAL_HEIGHT)
+    .resizable(false)
+    .decorations(false)
+    .always_on_top(true)
+    .accept_first_mouse(true)
+    .skip_taskbar(true)
+    .focusable(false)
+    .visible(false)
+    .position(x, y)
+    .build()
+    .map_err(|e| e.to_string())?;
+
+    if BUTTON_WINDOW_TRANSPARENT {
+        crate::macos_panels::configure_transparent_webview_window(&window)?;
+    }
+    Ok(window)
+}
+
+fn ensure_prompt_button_input_window(
+    app: &tauri::AppHandle,
+    x: f64,
+    y: f64,
+) -> Result<tauri::WebviewWindow, String> {
+    let window = match app.get_webview_window(BUTTON_INPUT_WINDOW_LABEL) {
+        Some(window) => window,
+        None => return build_prompt_button_input_window(app, x, y),
+    };
+
+    window
+        .set_size(tauri::Size::Logical(tauri::LogicalSize {
+            width: BUTTON_VISUAL_WIDTH,
+            height: BUTTON_VISUAL_HEIGHT,
+        }))
+        .map_err(|e| e.to_string())?;
+    window
+        .set_position(logical_position(x, y))
+        .map_err(|e| e.to_string())?;
     Ok(window)
 }
 
@@ -677,10 +731,26 @@ pub(crate) fn show_ready_prompt_button_window(app: &tauri::AppHandle) -> Result<
     let Some(window) = app.get_webview_window(BUTTON_WINDOW_LABEL) else {
         return Err("Prompt button window is missing.".to_string());
     };
+    let position = window.outer_position().map_err(|e| e.to_string())?;
+    let scale = window.scale_factor().unwrap_or(1.0);
+    let (x, y) = prompt_button_window_to_visual_position(
+        position.x as f64 / scale,
+        position.y as f64 / scale,
+    );
+    let input = ensure_prompt_button_input_window(app, x, y)?;
     if BUTTON_WINDOW_TRANSPARENT {
         crate::macos_panels::configure_transparent_webview_window(&window)?;
+        crate::macos_panels::configure_transparent_webview_window(&input)?;
     }
-    show_non_activating_overlay_window(&window)
+    show_non_activating_overlay_window(&window)?;
+    window
+        .set_ignore_cursor_events(true)
+        .map_err(|e| e.to_string())?;
+    show_non_activating_overlay_window(&input)?;
+    input
+        .set_ignore_cursor_events(false)
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -715,6 +785,10 @@ pub fn show_prompt_button(x: f64, y: f64, app: tauri::AppHandle) -> Result<(), S
             window
                 .set_position(prompt_button_position_from_visual(x, y))
                 .map_err(|e| e.to_string())?;
+        }
+        let input = ensure_prompt_button_input_window(&app, x, y)?;
+        if visible && !input.is_visible().unwrap_or(false) {
+            show_ready_prompt_button_window(&app)?;
         }
         if !visible {
             if app
@@ -751,6 +825,9 @@ pub fn show_prompt_button(x: f64, y: f64, app: tauri::AppHandle) -> Result<(), S
 #[tauri::command]
 pub fn hide_prompt_button(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(BUTTON_WINDOW_LABEL) {
+        window.hide().map_err(|e| e.to_string())?;
+    }
+    if let Some(window) = app.get_webview_window(BUTTON_INPUT_WINDOW_LABEL) {
         window.hide().map_err(|e| e.to_string())?;
     }
     Ok(())
@@ -1178,6 +1255,31 @@ mod tests {
     }
 
     #[test]
+    fn calico_visual_window_is_click_through_while_input_window_is_centered_on_the_hit_area() {
+        let source = include_str!("windows.rs");
+
+        assert!(source.contains("pub const BUTTON_INPUT_WINDOW_LABEL: &str = \"prompt-button-input\";"));
+        assert!(source.contains("overlay-interaction.html"));
+        assert!(source.contains("set_ignore_cursor_events(true)"));
+        assert!(source.contains("BUTTON_VISUAL_WIDTH, BUTTON_VISUAL_HEIGHT"));
+    }
+
+    #[test]
+    fn visible_calico_recovers_a_missing_or_hidden_input_window() {
+        let source = include_str!("windows.rs");
+        let start = source
+            .find("pub fn show_prompt_button")
+            .expect("show_prompt_button command should exist");
+        let end = source[start..]
+            .find("#[tauri::command]\npub fn hide_prompt_button")
+            .expect("hide_prompt_button should follow show_prompt_button");
+        let command = &source[start..start + end];
+
+        assert!(command.contains("if visible && !input.is_visible().unwrap_or(false)"));
+        assert!(command.contains("show_ready_prompt_button_window(&app)?"));
+    }
+
+    #[test]
     fn clamps_calico_button_inside_monitor() {
         let bounds = MonitorBounds {
             x: 0.0,
@@ -1516,8 +1618,8 @@ mod tests {
             .find("fn build_prompt_button_window")
             .expect("prompt button builder should exist");
         let end = source[start..]
-            .find("#[tauri::command]\npub fn show_prompt_button")
-            .expect("show_prompt_button should follow builder");
+            .find("fn build_prompt_button_input_window")
+            .expect("input builder should follow the visual builder");
         let block = &source[start..start + end];
 
         assert!(block.contains(".visible(false)"));

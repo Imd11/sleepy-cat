@@ -1,0 +1,285 @@
+<!doctype html>
+<html>
+<head><style>
+:root {
+  --calico-hit-area-size: 132px;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  background: transparent;
+  overflow: hidden;
+}
+
+body {
+  display: grid;
+  place-items: center;
+}
+
+.calico-interaction {
+  width: var(--calico-hit-area-size);
+  height: var(--calico-hit-area-size);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: grab;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.calico-interaction:active {
+  cursor: grabbing;
+}
+
+.calico-interaction:focus-visible {
+  outline: none;
+}
+</style></head>
+<body>
+<button id="btn" class="calico-interaction" title="Open Prompt Picker" aria-label="Open Prompt Picker"></button>
+<script type="module">
+const btn = document.getElementById('btn');
+const tauri = window.__TAURI__;
+const DRAG_START_DISTANCE_PX = 10;
+let start = null;
+let dragging = false;
+let lastMove = null;
+let animationFrame = 0;
+let contextMenuOpened = false;
+let pointerSequence = 0;
+let promptPickSessionId = 0;
+let dragStartedEmitted = false;
+let dragPopoverHidden = false;
+let lastAccessibilitySettingsOpenAt = 0;
+
+const permissionMessages = {
+  'zh-CN': {
+    nativePrompt: '请在系统弹窗中授权',
+    nativePromptFallback: '未看到弹窗？再点小猫',
+    settingsOpened: '请启用 Prompt Picker',
+    settingsOpenFailed: '请手动打开系统设置中的辅助功能权限'
+  },
+  'en-US': {
+    nativePrompt: 'Use the system prompt',
+    nativePromptFallback: 'No prompt? Click Calico again',
+    settingsOpened: 'Enable Prompt Picker in Accessibility',
+    settingsOpenFailed: 'Open Accessibility manually in System Settings'
+  }
+};
+
+function distance(a, b) {
+  return Math.hypot(a.screenX - b.screenX, a.screenY - b.screenY);
+}
+
+async function invoke(command, args) {
+  if (!tauri?.core?.invoke) {
+    console.error('Tauri invoke API is unavailable in overlay-interaction.html');
+    return null;
+  }
+  try {
+    return await tauri.core.invoke(command, args);
+  } catch (error) {
+    console.error(`Tauri command failed: ${command}`, error);
+    return null;
+  }
+}
+
+async function invokeOrThrow(command, args) {
+  if (!tauri?.core?.invoke) {
+    throw new Error('Tauri invoke API is unavailable in overlay-interaction.html');
+  }
+  return tauri.core.invoke(command, args);
+}
+
+async function emit(event, payload) {
+  if (!tauri?.event?.emit) return;
+  try {
+    await tauri.event.emit(event, payload);
+  } catch (error) {
+    console.error(`Tauri event failed: ${event}`, error);
+  }
+}
+
+function notifyVisual(type, extra = {}) {
+  return emit('calico-interaction', { type, ...extra });
+}
+
+function showStatusBubble(status) {
+  return notifyVisual('status', { status });
+}
+
+function permissionText(permission, key) {
+  const language = permission?.language === 'en-US' ? 'en-US' : 'zh-CN';
+  return permissionMessages[language][key];
+}
+
+async function handleMissingPromptInteractionPermission(permission) {
+  if (!permission.native_prompt_requested) {
+    await showStatusBubble({ kind: 'failed', message: permissionText(permission, 'nativePrompt') });
+    const status = await invoke('request_prompt_interaction_permission');
+    if (status?.trusted) {
+      return;
+    }
+    window.setTimeout(() => {
+      showStatusBubble({ kind: 'failed', message: permissionText(permission, 'nativePromptFallback') });
+    }, 1900);
+    return;
+  }
+
+  const now = Date.now();
+  if (now - lastAccessibilitySettingsOpenAt < 4_000) {
+    await showStatusBubble({ kind: 'failed', message: permissionText(permission, 'settingsOpened') });
+    return;
+  }
+
+  try {
+    await invokeOrThrow('open_accessibility_settings');
+    lastAccessibilitySettingsOpenAt = now;
+    await showStatusBubble({ kind: 'failed', message: permissionText(permission, 'settingsOpened') });
+  } catch (error) {
+    console.error('Failed to open Accessibility settings', error);
+    await showStatusBubble({ kind: 'failed', message: permissionText(permission, 'settingsOpenFailed') });
+  }
+}
+
+async function hidePromptPopoverForDrag() {
+  if (dragPopoverHidden) return;
+  dragPopoverHidden = true;
+  await invoke('hide_prompt_popover');
+}
+
+async function openButtonControls(event) {
+  event.preventDefault();
+  if (contextMenuOpened) return;
+  contextMenuOpened = true;
+  start = null;
+  dragging = false;
+  lastMove = null;
+  await notifyVisual('context-menu');
+  await invoke('show_prompt_button_controls_from_button');
+}
+
+async function flushMove() {
+  animationFrame = 0;
+  if (!lastMove || !start || !start.positionReady) return;
+  await invoke('move_prompt_button_to', {
+    x: start.windowX + lastMove.screenX - start.screenX,
+    y: start.windowY + lastMove.screenY - start.screenY
+  });
+}
+
+btn.addEventListener('pointerdown', (event) => {
+  if (event.button === 2 || (event.button === 0 && event.ctrlKey)) {
+    openButtonControls(event);
+    return;
+  }
+
+  const sequence = ++pointerSequence;
+  start = {
+    screenX: event.screenX,
+    screenY: event.screenY,
+    windowX: 0,
+    windowY: 0,
+    positionReady: false,
+    pointerId: event.pointerId,
+    sequence,
+    positionPromise: null
+  };
+  dragging = false;
+  lastMove = null;
+  contextMenuOpened = false;
+  dragStartedEmitted = false;
+  dragPopoverHidden = false;
+  notifyVisual('press').catch(() => {});
+  try {
+    btn.setPointerCapture(event.pointerId);
+  } catch {}
+
+  start.positionPromise = invoke('prompt_button_position_cmd');
+  start.positionPromise.then((position) => {
+    if (!position || !start || start.sequence !== sequence) return;
+    start.windowX = position.x;
+    start.windowY = position.y;
+    start.positionReady = true;
+    if (dragging && lastMove && !animationFrame) {
+      animationFrame = requestAnimationFrame(flushMove);
+    }
+  }).catch(() => {
+    if (start?.sequence === sequence) start.positionReady = false;
+  });
+});
+
+btn.addEventListener('pointermove', (event) => {
+  if (!start) return;
+  const current = { screenX: event.screenX, screenY: event.screenY };
+  if (!dragging && distance(start, current) < DRAG_START_DISTANCE_PX) return;
+  if (!dragStartedEmitted) {
+    dragStartedEmitted = true;
+    hidePromptPopoverForDrag().catch(() => {});
+    emit('prompt-button-drag-started').catch(() => {});
+    notifyVisual('drag-start').catch(() => {});
+  }
+  dragging = true;
+  lastMove = current;
+  if (!animationFrame) {
+    animationFrame = requestAnimationFrame(flushMove);
+  }
+});
+
+btn.addEventListener('pointerup', async (event) => {
+  if (contextMenuOpened) {
+    contextMenuOpened = false;
+    return;
+  }
+  if (!start) return;
+  const wasDragging = dragging;
+  try {
+    btn.releasePointerCapture(event.pointerId);
+  } catch {}
+  if (wasDragging) {
+    if (!start.positionReady && start.positionPromise) {
+      await start.positionPromise.catch(() => null);
+    }
+    await flushMove();
+    const position = await invoke('prompt_button_position_cmd');
+    if (position) {
+      await emit('prompt-button-drag-ended', position);
+    }
+  } else {
+    const permission = await invoke('prompt_interaction_permission_status');
+    if (permission?.required && !permission.trusted) {
+      await handleMissingPromptInteractionPermission(permission);
+      await notifyVisual('reset');
+    } else {
+      const sessionId = ++promptPickSessionId;
+      await invoke('begin_prompt_pick_session', { sessionId });
+      const toggleResult = await invoke('toggle_prompt_popover_from_button', { sessionId });
+      if (!toggleResult?.opened) {
+        await notifyVisual('reset');
+      }
+    }
+  }
+  start = null;
+  dragging = false;
+  lastMove = null;
+  dragStartedEmitted = false;
+  await notifyVisual('release', { wasDragging });
+});
+
+btn.addEventListener('pointerenter', () => {
+  notifyVisual('hover-attention').catch(() => {});
+});
+
+btn.addEventListener('pointerleave', () => {
+  notifyVisual('hover-end').catch(() => {});
+});
+
+btn.addEventListener('contextmenu', async (event) => {
+  await openButtonControls(event);
+});
+</script>
+</body>
+</html>
