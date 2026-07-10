@@ -663,6 +663,10 @@ fn build_prompt_button_window(
     .build()
     .map_err(|e| e.to_string())?;
 
+    let recovery_url = window.url().map_err(|error| error.to_string())?;
+    app.state::<crate::PromptButtonRecoveryUrlState>()
+        .store(recovery_url);
+
     if BUTTON_WINDOW_TRANSPARENT {
         crate::macos_panels::configure_transparent_webview_window(&window)?;
     }

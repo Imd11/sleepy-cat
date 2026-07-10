@@ -166,6 +166,7 @@ git commit -m "fix: share calico surface budget with baseline"
 ### Task 4: Make WebContent Termination Recovery Observable and Retryable
 
 **Files:**
+- Modify: `src-tauri/Cargo.toml` (enable Tauri's mock runtime only for tests)
 - Modify: `src-tauri/src/lib.rs`
 - Modify: `src-tauri/src/windows.rs`
 

@@ -980,6 +980,24 @@ pub(crate) struct PromptButtonRendererState {
     inner: std::sync::Mutex<PromptButtonRendererInner>,
 }
 
+#[derive(Default)]
+pub(crate) struct PromptButtonRecoveryUrlState {
+    url: std::sync::Mutex<Option<tauri::Url>>,
+}
+
+impl PromptButtonRecoveryUrlState {
+    pub(crate) fn store(&self, url: tauri::Url) {
+        *self.url.lock().expect("recovery URL state lock poisoned") = Some(url);
+    }
+
+    fn get(&self) -> Option<tauri::Url> {
+        self.url
+            .lock()
+            .expect("recovery URL state lock poisoned")
+            .clone()
+    }
+}
+
 impl PromptButtonRendererState {
     pub(crate) fn allocate_instance(&self) -> u64 {
         let mut inner = self.inner.lock().expect("renderer state lock poisoned");
@@ -1137,30 +1155,150 @@ fn is_prompt_button_webview(label: &str) -> bool {
     label == crate::windows::BUTTON_WINDOW_LABEL
 }
 
-fn handle_prompt_button_webcontent_termination(app: &tauri::AppHandle, label: &str) -> bool {
+const PROMPT_BUTTON_TERMINATION_RETRY_DELAYS_MS: [u64; 3] = [0, 100, 400];
+
+fn prompt_button_termination_retry_delay(attempt: usize) -> Option<u64> {
+    PROMPT_BUTTON_TERMINATION_RETRY_DELAYS_MS
+        .get(attempt)
+        .copied()
+}
+
+fn prompt_button_recovery_url(
+    current_url: Result<tauri::Url, String>,
+    stored_url: Option<tauri::Url>,
+    instance_id: u64,
+) -> Result<tauri::Url, String> {
+    let mut url = current_url.or_else(|_| {
+        stored_url.ok_or_else(|| "Prompt button recovery URL is missing.".to_string())
+    })?;
+    url.set_path("/overlay.html");
+    url.set_query(Some(&format!("rendererInstanceId={instance_id}")));
+    Ok(url)
+}
+
+fn perform_prompt_button_webview_recovery<Hide, CurrentUrl, Navigate>(
+    stored_url: Option<tauri::Url>,
+    instance_id: u64,
+    hide: Hide,
+    current_url: CurrentUrl,
+    navigate: Navigate,
+) -> Result<tauri::Url, String>
+where
+    Hide: FnOnce() -> Result<(), String>,
+    CurrentUrl: FnOnce() -> Result<tauri::Url, String>,
+    Navigate: FnOnce(tauri::Url) -> Result<(), String>,
+{
+    hide().map_err(|error| format!("Failed to hide terminated prompt button WebView: {error}"))?;
+    let recovery_url = prompt_button_recovery_url(current_url(), stored_url, instance_id)?;
+    navigate(recovery_url.clone())
+        .map_err(|error| format!("Failed to navigate terminated prompt button WebView: {error}"))?;
+    Ok(recovery_url)
+}
+
+fn recover_prompt_button_webview_once<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    instance_id: u64,
+) -> Result<(), String> {
+    let renderer_state = app.state::<PromptButtonRendererState>();
+    if !renderer_state.instance_is_current_unready(instance_id) {
+        return Err(format!(
+            "Prompt button renderer instance {instance_id} is no longer current."
+        ));
+    }
+    let window = app
+        .get_webview_window(crate::windows::BUTTON_WINDOW_LABEL)
+        .ok_or_else(|| "Prompt button window is missing during WebContent recovery.".to_string())?;
+    let stored_url = app.state::<PromptButtonRecoveryUrlState>().get();
+    let recovery_url = perform_prompt_button_webview_recovery(
+        stored_url,
+        instance_id,
+        || window.hide().map_err(|error| error.to_string()),
+        || window.url().map_err(|error| error.to_string()),
+        |url| window.navigate(url).map_err(|error| error.to_string()),
+    )?;
+    app.state::<PromptButtonRecoveryUrlState>()
+        .store(recovery_url);
+    Ok(())
+}
+
+fn queue_prompt_button_webcontent_recovery<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    instance_id: u64,
+    attempt: usize,
+) -> Result<(), String> {
+    let queued_app = app.clone();
+    app.run_on_main_thread(move || {
+        match recover_prompt_button_webview_once(&queued_app, instance_id) {
+            Ok(()) => {
+                eprintln!(
+                    "Recovered prompt button WebContent in the existing window on attempt {}.",
+                    attempt + 1
+                );
+            }
+            Err(error) => {
+                eprintln!(
+                    "Prompt button WebContent recovery attempt {} failed: {error}",
+                    attempt + 1
+                );
+                let renderer_state = queued_app.state::<PromptButtonRendererState>();
+                if renderer_state.instance_is_current_unready(instance_id)
+                    && prompt_button_termination_retry_delay(attempt + 1).is_some()
+                {
+                    if let Err(schedule_error) = schedule_prompt_button_webcontent_recovery(
+                        queued_app.clone(),
+                        instance_id,
+                        attempt + 1,
+                    ) {
+                        eprintln!(
+                            "Failed to schedule prompt button WebContent recovery attempt {}: {schedule_error}",
+                            attempt + 2
+                        );
+                    }
+                }
+            }
+        }
+    })
+    .map_err(|error| format!("Failed to queue prompt button WebContent recovery: {error}"))
+}
+
+fn schedule_prompt_button_webcontent_recovery<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    instance_id: u64,
+    attempt: usize,
+) -> Result<(), String> {
+    let delay_ms = prompt_button_termination_retry_delay(attempt)
+        .ok_or_else(|| "Prompt button WebContent recovery attempts are exhausted.".to_string())?;
+    if delay_ms == 0 {
+        return queue_prompt_button_webcontent_recovery(app, instance_id, attempt);
+    }
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+        if let Err(error) = queue_prompt_button_webcontent_recovery(app, instance_id, attempt) {
+            eprintln!(
+                "Failed to queue prompt button WebContent recovery attempt {}: {error}",
+                attempt + 1
+            );
+        }
+    });
+    Ok(())
+}
+
+fn handle_prompt_button_webcontent_termination<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    label: &str,
+) -> bool {
     if !is_prompt_button_webview(label) {
         return false;
     }
     let renderer_state = app.state::<PromptButtonRendererState>();
     let instance_id = renderer_state.allocate_instance();
-    let queued_app = app.clone();
-    let _ = app.run_on_main_thread(move || {
-        let renderer_state = queued_app.state::<PromptButtonRendererState>();
-        if !renderer_state.instance_is_current_unready(instance_id) {
-            return;
+    match schedule_prompt_button_webcontent_recovery(app.clone(), instance_id, 0) {
+        Ok(()) => true,
+        Err(error) => {
+            eprintln!("Failed to start prompt button WebContent recovery: {error}");
+            false
         }
-        let Some(window) = queued_app.get_webview_window(crate::windows::BUTTON_WINDOW_LABEL)
-        else {
-            return;
-        };
-        let _ = window.hide();
-        if let Ok(mut url) = window.url() {
-            url.set_path("/overlay.html");
-            url.set_query(Some(&format!("rendererInstanceId={instance_id}")));
-            let _ = window.navigate(url);
-        }
-    });
-    true
+    }
 }
 
 #[cfg(debug_assertions)]
@@ -2022,6 +2160,7 @@ pub fn run() {
             app.manage(settings_state);
             app.manage(visibility_state);
             app.manage(PromptButtonRendererState::default());
+            app.manage(PromptButtonRecoveryUrlState::default());
             app.manage(crate::windows::PopoverModeRequestState::default());
 
             setup_menu_bar_app(app.handle())?;
@@ -2146,6 +2285,102 @@ mod prompt_button_renderer_tests {
             crate::windows::POPOVER_WINDOW_LABEL
         ));
         assert!(!is_prompt_button_webview("main"));
+    }
+
+    #[test]
+    fn termination_recovery_hides_and_navigates_the_existing_window() {
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        app.manage(PromptButtonRendererState::default());
+        app.manage(PromptButtonRecoveryUrlState::default());
+        let window = tauri::WebviewWindowBuilder::new(
+            &app,
+            crate::windows::BUTTON_WINDOW_LABEL,
+            tauri::WebviewUrl::App("overlay.html?rendererInstanceId=1".into()),
+        )
+        .visible(true)
+        .build()
+        .unwrap();
+        app.state::<PromptButtonRecoveryUrlState>()
+            .store(window.url().unwrap());
+        let instance_id = app.state::<PromptButtonRendererState>().allocate_instance();
+
+        recover_prompt_button_webview_once(app.handle(), instance_id).unwrap();
+
+        let recovered = app
+            .get_webview_window(crate::windows::BUTTON_WINDOW_LABEL)
+            .unwrap();
+        let url = recovered.url().unwrap();
+        assert_eq!(url.path(), "/overlay.html");
+        assert_eq!(
+            url.query_pairs()
+                .find(|(key, _)| key == "rendererInstanceId")
+                .map(|(_, value)| value.into_owned()),
+            Some(instance_id.to_string())
+        );
+    }
+
+    #[test]
+    fn termination_recovery_url_falls_back_to_the_stored_creation_url() {
+        let hidden = std::cell::Cell::new(false);
+        let navigated = std::cell::RefCell::new(None);
+        let stored =
+            tauri::Url::parse("tauri://localhost/overlay.html?rendererInstanceId=1&source=stored")
+                .unwrap();
+
+        let recovered = perform_prompt_button_webview_recovery(
+            Some(stored),
+            7,
+            || {
+                hidden.set(true);
+                Ok(())
+            },
+            || Err("terminated webview URL unavailable".to_string()),
+            |url| {
+                *navigated.borrow_mut() = Some(url);
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert!(hidden.get());
+        assert_eq!(navigated.borrow().as_ref(), Some(&recovered));
+        assert_eq!(recovered.path(), "/overlay.html");
+        assert_eq!(recovered.query(), Some("rendererInstanceId=7"));
+        assert!(prompt_button_recovery_url(Err("unavailable".into()), None, 7).is_err());
+    }
+
+    #[test]
+    fn termination_recovery_has_three_bounded_attempts() {
+        assert_eq!(prompt_button_termination_retry_delay(0), Some(0));
+        assert_eq!(prompt_button_termination_retry_delay(1), Some(100));
+        assert_eq!(prompt_button_termination_retry_delay(2), Some(400));
+        assert_eq!(prompt_button_termination_retry_delay(3), None);
+    }
+
+    #[test]
+    fn termination_recovery_propagates_hide_and_navigation_failures() {
+        let stored = tauri::Url::parse("tauri://localhost/overlay.html").unwrap();
+        let hide_error = perform_prompt_button_webview_recovery(
+            Some(stored.clone()),
+            2,
+            || Err("hide failed".to_string()),
+            || Ok(stored.clone()),
+            |_| Ok(()),
+        )
+        .unwrap_err();
+        assert!(hide_error.contains("hide failed"));
+
+        let navigate_error = perform_prompt_button_webview_recovery(
+            Some(stored.clone()),
+            2,
+            || Ok(()),
+            || Ok(stored),
+            |_| Err("navigate failed".to_string()),
+        )
+        .unwrap_err();
+        assert!(navigate_error.contains("navigate failed"));
     }
 }
 
