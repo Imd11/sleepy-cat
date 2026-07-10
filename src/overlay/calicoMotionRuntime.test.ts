@@ -1,10 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const manifest = {
-  defaultState: "idle-follow",
+  defaultState: "idle",
   states: {
     "idle-follow": {
       file: "/calico/calico-idle-follow.svg",
+      priority: 0,
+      durationMs: 0,
+      minMs: 0,
+      replay: false,
+      scale: 1,
+      offsetX: 0,
+      offsetY: 0,
+    },
+    idle: {
       priority: 0,
       durationMs: 0,
       minMs: 0,
@@ -45,6 +54,7 @@ const manifest = {
 
 const sheetManifest = {
   states: {
+    idle: { file: "/calico/sheets/idle.png", plays: 0 },
     happy: { file: "/calico/sheets/happy.png", plays: 1 },
     error: { file: "/calico/sheets/error.png", plays: 1 },
     "react-drag": { file: "/calico/sheets/react-drag.png", plays: 0 },
@@ -93,16 +103,18 @@ describe("Calico motion runtime", () => {
     expect(renderer.showBaseline).not.toHaveBeenCalled();
   });
 
-  it("renders the default state through the static baseline", async () => {
+  it("renders the default state through the neutral idle sheet", async () => {
     const { createCalicoMotionRuntime } = await loadRuntime();
     const { options, renderer } = setup();
     const runtime = createCalicoMotionRuntime(options);
 
     expect(runtime.reset()).toBe(true);
 
-    expect(options.host.dataset.motionState).toBe("idle-follow");
-    expect(renderer.showBaseline).toHaveBeenCalledWith(manifest.states["idle-follow"]);
-    expect(renderer.play).not.toHaveBeenCalled();
+    expect(options.host.dataset.motionState).toBe("idle");
+    expect(renderer.play).toHaveBeenCalledWith("idle", sheetManifest.states.idle, {
+      restart: false,
+    });
+    expect(renderer.showBaseline).not.toHaveBeenCalled();
   });
 
   it("preserves priority and minimum-display rules", async () => {
@@ -126,8 +138,10 @@ describe("Calico motion runtime", () => {
     runtime.apply({ state: "error" });
     expect(runtime.reset()).toBe(true);
 
-    expect(options.host.dataset.motionState).toBe("idle-follow");
-    expect(renderer.showBaseline).toHaveBeenCalledTimes(1);
+    expect(options.host.dataset.motionState).toBe("idle");
+    expect(renderer.play).toHaveBeenLastCalledWith("idle", sheetManifest.states.idle, {
+      restart: false,
+    });
   });
 
   it("auto-return is independent of intrinsic sheet playback", async () => {
@@ -139,9 +153,11 @@ describe("Calico motion runtime", () => {
     runtime.apply({ state: "happy", durationMs: 100 });
     await vi.advanceTimersByTimeAsync(100);
 
-    expect(renderer.play).toHaveBeenCalledTimes(1);
-    expect(renderer.showBaseline).toHaveBeenCalledTimes(1);
-    expect(options.host.dataset.motionState).toBe("idle-follow");
+    expect(renderer.play).toHaveBeenCalledTimes(2);
+    expect(renderer.play).toHaveBeenLastCalledWith("idle", sheetManifest.states.idle, {
+      restart: false,
+    });
+    expect(options.host.dataset.motionState).toBe("idle");
   });
 
   it("keeps durationless drag active until explicit reset", async () => {
@@ -155,6 +171,21 @@ describe("Calico motion runtime", () => {
 
     expect(options.host.dataset.motionState).toBe("react-drag");
     expect(renderer.showBaseline).not.toHaveBeenCalled();
+  });
+
+  it("plays a compatible sequence before returning to neutral idle", async () => {
+    vi.useFakeTimers();
+    const { createCalicoMotionRuntime } = await loadRuntime();
+    const { options, renderer } = setup(() => Date.now());
+    const runtime = createCalicoMotionRuntime(options);
+
+    runtime.apply({ state: "happy", durationMs: 100, sequence: ["error"] });
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(options.host.dataset.motionState).toBe("error");
+    expect(renderer.play).toHaveBeenLastCalledWith("error", sheetManifest.states.error, {
+      restart: true,
+    });
   });
 
   it("replay metadata changes timing without creating resource URLs", async () => {

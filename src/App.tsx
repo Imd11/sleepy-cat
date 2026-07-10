@@ -85,7 +85,8 @@ type CalicoMotionState =
   | "working-sweeping"
   | "notification"
   | "error"
-  | "happy";
+  | "happy"
+  | "react-poke";
 
 type CalicoMotionPayload = {
   state: CalicoMotionState;
@@ -548,14 +549,10 @@ export function App({
       await emitAutosendActivity(true);
       const bodies = getPromptContainerBodies(prompt);
       if (bodies.length === 0) {
-        emitCalicoMotion("error", "autosend-empty-prompt", 5000);
+        emitCalicoMotion("notification", "autosend-empty-prompt", 5200);
         await emitAutosendStatus("failed", t.autosend.genericFailed);
         return;
       }
-      emitCalicoMotion(
-        prompt.type === "group" ? "working-conducting" : "working-typing",
-        prompt.type === "group" ? "group-autosend" : "single-autosend"
-      );
       const submitKey = effectiveSubmitKey(prompt, activeSettings.promptInsertion.mode);
       const status = submitKey === "none"
         ? statusForAutosendOutcome(
@@ -576,9 +573,9 @@ export function App({
         emitCalicoMotion("happy", "autosend-success", 3000);
       } else {
         emitCalicoMotion(
-          status.requiresAttention ? "notification" : "error",
+          "notification",
           status.requiresAttention ? "autosend-action-required" : "autosend-failed",
-          status.requiresAttention ? 5200 : 5000
+          5200
         );
       }
       await emitAutosendStatus(status.kind, status.message);
@@ -588,7 +585,7 @@ export function App({
         emitCalicoMotion("notification", "autosend-accessibility-required", 5200);
         await emitAutosendStatus("failed", t.autosend.enableAccessibility);
       } else {
-        emitCalicoMotion("error", "autosend-exception", 5000);
+        emitCalicoMotion("notification", "autosend-exception", 5200);
         await emitAutosendStatus("failed", t.autosend.genericFailed);
       }
     } finally {
@@ -676,7 +673,7 @@ export function App({
       setPendingPromptImport({ path: file, content, linkAndSync: false });
     } catch (e) {
       console.error("Import failed:", e);
-      emitCalicoMotion("error", "import-prompts-failed", 5000);
+      emitCalicoMotion("notification", "import-prompts-failed", 5200);
       alert(t.manager.importFailed);
     }
   };
@@ -684,7 +681,6 @@ export function App({
   const confirmPromptImport = async () => {
     if (!pendingPromptImport) return;
     try {
-      emitCalicoMotion("working-carrying", "import-prompts");
       await settingsStoreRef.current.clearPromptLibraryLink();
       applyActiveSettings(await settingsStoreRef.current.get());
       await appDataPromptStoreRef.current.importJson(pendingPromptImport.content);
@@ -707,7 +703,7 @@ export function App({
       emitCalicoMotion("happy", "import-prompts-success", 3000);
     } catch (e) {
       console.error("Import failed:", e);
-      emitCalicoMotion("error", "import-prompts-failed", 5000);
+      emitCalicoMotion("notification", "import-prompts-failed", 5200);
       alert(t.manager.importFailed);
     }
   };
@@ -745,36 +741,29 @@ export function App({
               setMode("settings");
             }}
             onCreate={async (input) => {
-              emitCalicoMotion("working-typing", "create-prompt");
               await storeRef.current.create({ ...input, categoryId: activeCategory?.id });
               await reloadPromptData();
               emitCalicoMotion("happy", "create-prompt-success", 3000);
             }}
             onCreateGroup={async (input) => {
-              emitCalicoMotion("working-building", "create-group");
               await storeRef.current.createGroup({ ...input, categoryId: activeCategory?.id });
               await reloadPromptData();
               emitCalicoMotion("happy", "create-group-success", 3000);
             }}
             onUpdate={async (id, input) => {
-              emitCalicoMotion(
-                input.type === "group" || input.prompts ? "working-building" : "working-typing",
-                "update-prompt"
-              );
               await storeRef.current.update(id, input);
               await reloadPromptData();
               emitCalicoMotion("happy", "update-prompt-success", 3000);
             }}
             onDelete={async (id) => {
-              emitCalicoMotion("working-sweeping", "delete-prompt");
               await storeRef.current.remove(id);
               await reloadPromptData();
               emitCalicoMotion("happy", "delete-prompt-success", 2200);
             }}
             onReorder={async (ids) => {
-              emitCalicoMotion("working-carrying", "reorder-prompts", 1600);
               await storeRef.current.reorder(ids, activeCategory?.id);
               await reloadPromptData();
+              emitCalicoMotion("react-poke", "reorder-prompts", 2500);
             }}
             onImport={openPromptImportChoice}
             onExport={async () => {
@@ -784,14 +773,13 @@ export function App({
                   defaultPath: "prompts.json",
                 });
                 if (path) {
-                  emitCalicoMotion("working-carrying", "export-prompts");
                   const json = await storeRef.current.exportJson();
                   await writeTextFile(path, json);
                   emitCalicoMotion("happy", "export-prompts-success", 3000);
                 }
               } catch (e) {
                 console.error("Export failed:", e);
-                emitCalicoMotion("error", "export-prompts-failed", 5000);
+                emitCalicoMotion("notification", "export-prompts-failed", 5200);
                 alert(t.manager.exportFailed);
               }
             }}
@@ -892,7 +880,7 @@ export function App({
           submittingPromptId={submittingPromptId}
           hoverResetKey={hoverResetKey}
           onGroupPreview={() => {
-            emitCalicoMotion("working-juggling", "group-preview", 1600);
+            emitCalicoMotion("react-poke", "group-preview", 2500);
           }}
         />
       </div>

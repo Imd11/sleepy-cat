@@ -97,7 +97,7 @@ describe("Calico manifest", () => {
 
     expect(manifest.schemaVersion).toBe(1);
     expect(manifest.assetSource).toBe("authorized upstream");
-    expect(manifest.defaultState).toBe("idle-follow");
+    expect(manifest.defaultState).toBe("idle");
     expect(manifest.phase1States).toEqual(phase1States);
     expect(manifest.reservedStates).toEqual(reservedStates);
     expect(Object.keys(manifest.states).sort()).toEqual(
@@ -110,7 +110,7 @@ describe("Calico manifest", () => {
     const sheetManifest = readSheetManifest();
 
     for (const [stateName, state] of Object.entries(manifest.states)) {
-      if (stateName === manifest.defaultState) {
+      if (stateName === "idle-follow") {
         expect(state.file, stateName).toBe("/calico/calico-idle-follow.svg");
         expect(existsSync(`public${state.file}`), stateName).toBe(true);
       } else {
@@ -147,9 +147,7 @@ describe("Calico manifest", () => {
       expect(existsSync(`public${sheetManifest.states[state].file}`), state).toBe(true);
     }
     expect(manifest.states.waking).toBeDefined();
-    expect(manifest.states["mini-happy"]).toBeDefined();
     expect(existsSync(`public${sheetManifest.states.waking.file}`)).toBe(true);
-    expect(existsSync(`public${sheetManifest.states["mini-happy"].file}`)).toBe(true);
   });
 
   it("does not ship APNG runtime assets", () => {
@@ -157,7 +155,7 @@ describe("Calico manifest", () => {
     expect(publicApng).toEqual([]);
   });
 
-  it("routes every authorized non-default state to its generated sheet", async () => {
+  it("routes every generated Calico state to its sheet and preserves the SVG baseline", async () => {
     const manifest = readManifest();
     const sheetManifest = readSheetManifest();
     const { createCalicoMotionRuntime } = await loadMotionRuntime();
@@ -181,7 +179,7 @@ describe("Calico manifest", () => {
     }
 
     expect(new Set(renderer.play.mock.calls.map((call) => call[0]))).toEqual(
-      new Set(Object.keys(manifest.states).filter((state) => state !== manifest.defaultState))
+      new Set(Object.keys(manifest.states).filter((state) => state !== "idle-follow"))
     );
     expect(renderer.showBaseline).toHaveBeenCalledTimes(1);
     runtime.dispose();

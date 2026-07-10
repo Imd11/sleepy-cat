@@ -21,12 +21,31 @@ export function createCalicoMotionRuntime({
 
   function render(state, entry) {
     renderer.setPresentation(entry);
-    const operation = state === manifest.defaultState
-      ? renderer.showBaseline(entry)
-      : renderer.play(state, sheetManifest.states[state], { restart: entry.replay === true });
+    const sheet = sheetManifest.states[state];
+    const operation = sheet
+      ? renderer.play(state, sheet, { restart: entry.replay === true })
+      : renderer.showBaseline(entry);
     Promise.resolve(operation).catch((error) => {
       console.error(`Failed to render Calico motion: ${state}`, error);
     });
+  }
+
+  function transitionAfter(durationMs, sequence, priority, reason) {
+    if (durationMs <= 0) return;
+    autoReturnTimer = window.setTimeout(() => {
+      const [nextState, ...remaining] = sequence;
+      if (nextState) {
+        apply({
+          state: nextState,
+          priority,
+          reason,
+          sequence: remaining,
+          force: true,
+        });
+        return;
+      }
+      reset();
+    }, durationMs);
   }
 
   function apply(payload = {}) {
@@ -34,7 +53,7 @@ export function createCalicoMotionRuntime({
     const state = stateFor(payload.state);
     const entry = entryFor(state);
     if (!entry) return false;
-    if (state !== manifest.defaultState && !sheetManifest.states[state]) return false;
+    if (!sheetManifest.states[state] && !entry.file) return false;
 
     const priority = Number.isFinite(payload.priority) ? payload.priority : entry.priority;
     if (!payload.force && now() < minUntil && priority < currentPriority) return false;
@@ -47,9 +66,10 @@ export function createCalicoMotionRuntime({
     render(state, entry);
 
     const durationMs = payload.durationMs ?? entry.durationMs;
-    if (durationMs > 0) {
-      autoReturnTimer = window.setTimeout(reset, durationMs);
-    }
+    const sequence = Array.isArray(payload.sequence)
+      ? payload.sequence.filter((candidate) => manifest.states[candidate])
+      : [];
+    transitionAfter(durationMs, sequence, priority, payload.reason);
     return true;
   }
 

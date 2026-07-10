@@ -997,7 +997,7 @@ describe("app", () => {
     );
   });
 
-  it("emits typing then happy Calico motion for single prompt autosend success", async () => {
+  it("emits happy Calico motion for single prompt autosend success", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockImplementation(async (command: string) => {
       if (command === "paste_prompt_and_submit_to_last_target") {
@@ -1019,12 +1019,7 @@ describe("app", () => {
     await waitFor(() => {
       expectCalicoMotion("happy");
     });
-    expect(calicoMotionStates()).toEqual(
-      expect.arrayContaining(["working-typing", "happy"])
-    );
-    expect(calicoMotionStates().indexOf("working-typing")).toBeLessThan(
-      calicoMotionStates().indexOf("happy")
-    );
+    expect(calicoMotionStates()).not.toContain("working-typing");
   });
 
   it("pastes without pressing return when prompt insertion mode is paste only", async () => {
@@ -1074,7 +1069,6 @@ describe("app", () => {
       kind: "sent",
       message: "已填入输入框",
     });
-    expectCalicoMotion("working-typing");
     expectCalicoMotion("happy");
   });
 
@@ -1258,7 +1252,6 @@ describe("app", () => {
       "paste_prompt_and_submit_to_last_target",
       expect.anything()
     );
-    expectCalicoMotion("working-conducting");
     expectCalicoMotion("happy");
   });
 
@@ -1424,7 +1417,7 @@ describe("app", () => {
         message: "已填入输入框，未发送",
       });
     });
-    expectCalicoMotion("error");
+    expectCalicoMotion("notification");
   });
 
   it("emits a manual paste status when guarded autosend only copied", async () => {
@@ -1593,7 +1586,7 @@ describe("app", () => {
         expect.any(Error)
       );
     });
-    expectCalicoMotion("error");
+    expectCalicoMotion("notification");
     warn.mockRestore();
   });
 
@@ -1757,11 +1750,10 @@ describe("app", () => {
     await waitFor(() => {
       expect(screen.getByText("My Prompt")).toBeTruthy();
     });
-    expectCalicoMotion("working-typing");
     expectCalicoMotion("happy");
   });
 
-  it("emits building then happy after creating a prompt group", async () => {
+  it("emits happy after creating a prompt group", async () => {
     await renderMainPromptManager();
 
     fireEvent.click(screen.getByRole("button", { name: "+ 添加提示词" }));
@@ -1777,15 +1769,10 @@ describe("app", () => {
     await waitFor(() => {
       expect(screen.getByText("Grouped Work")).toBeTruthy();
     });
-    expect(calicoMotionStates()).toEqual(
-      expect.arrayContaining(["working-building", "happy"])
-    );
-    expect(calicoMotionStates().indexOf("working-building")).toBeLessThan(
-      calicoMotionStates().indexOf("happy")
-    );
+    expectCalicoMotion("happy");
   });
 
-  it("emits sweeping motion when deleting a prompt", async () => {
+  it("emits happy motion when deleting a prompt", async () => {
     await renderMainPromptManager([
       {
         id: "delete-1",
@@ -1807,11 +1794,10 @@ describe("app", () => {
     await waitFor(() => {
       expect(screen.queryByText("Delete Me")).toBeNull();
     });
-    expectCalicoMotion("working-sweeping");
     expectCalicoMotion("happy");
   });
 
-  it("emits carrying motion for reorder, import, and export", async () => {
+  it("uses neutral feedback for reorder, import, and export", async () => {
     const files = await renderMainPromptManager([
       {
         id: "first",
@@ -1845,7 +1831,7 @@ describe("app", () => {
 
     fireEvent.click(screen.getAllByText("↓")[0]);
     await waitFor(() => {
-      expectCalicoMotion("working-carrying");
+      expectCalicoMotion("react-poke");
     });
 
     fireEvent.click(screen.getByRole("button", { name: "导入" }));
@@ -1859,8 +1845,7 @@ describe("app", () => {
       expect(files.has("export.json")).toBe(true);
     });
 
-    expect(calicoMotionStates().filter((state) => state === "working-carrying").length)
-      .toBeGreaterThanOrEqual(3);
+    expect(calicoMotionStates()).not.toContain("working-carrying");
   });
 
   it("loads prompts from a linked prompt library file after settings load", async () => {

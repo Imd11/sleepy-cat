@@ -8,37 +8,23 @@ export const IDLE_RHYTHM_PHASES = [
 export const IDLE_MOTION_POOL = [
   { state: "idle", category: "light", weights: { early: 8, settled: 5, longIdle: 3, deepIdle: 2 } },
   { state: "react-left", category: "light", weights: { early: 6, settled: 4, longIdle: 3, deepIdle: 0 } },
-  { state: "mini-peek", category: "mini", weights: { early: 5, settled: 5, longIdle: 4, deepIdle: 0 } },
   { state: "yawning", category: "life", weights: { early: 1, settled: 6, longIdle: 4, deepIdle: 0 } },
-  { state: "dozing", category: "rest", weights: { early: 0, settled: 4, longIdle: 5, deepIdle: 0 } },
   {
     state: "react-poke",
     category: "attention",
     weights: { early: 1, settled: 2, longIdle: 1, deepIdle: 0 },
   },
-  { state: "mini-enter", category: "mini", weights: { early: 1, settled: 3, longIdle: 3, deepIdle: 0 } },
-  { state: "mini-idle", category: "mini", weights: { early: 0, settled: 3, longIdle: 4, deepIdle: 4 } },
-  {
-    state: "mini-crabwalk",
-    category: "mini",
-    weights: { early: 0, settled: 3, longIdle: 3, deepIdle: 0 },
-  },
-  { state: "collapsing", category: "rest", weights: { early: 0, settled: 1, longIdle: 4, deepIdle: 0 } },
-  { state: "sleeping", category: "rest", weights: { early: 0, settled: 1, longIdle: 7, deepIdle: 5 } },
-  { state: "waking", category: "rest", weights: { early: 0, settled: 2, longIdle: 5, deepIdle: 0 } },
-  { state: "mini-happy", category: "mini", weights: { early: 2, settled: 4, longIdle: 5, deepIdle: 0 } },
-  { state: "mini-sleep", category: "rest", weights: { early: 0, settled: 1, longIdle: 7, deepIdle: 5 } },
-  { state: "mini-alert", category: "attention", weights: { early: 0, settled: 1, longIdle: 2, deepIdle: 0 } },
 ];
 
-const BASELINE_STATE = "idle-follow";
+const BASELINE_STATE = "idle";
+const SLEEP_SEQUENCE = ["dozing", "collapsing", "sleeping"];
 const IDLE_PRIORITY = 1;
 const QUIET_START_MS = 7_000;
 const HOVER_PRIORITY = 2;
 const HOVER_COOLDOWN_MS = 10_000;
 const HOVER_IDLE_PAUSE_MS = 6_000;
 const RESTING_STATES = new Set(["sleeping", "dozing", "mini-sleep"]);
-const NEUTRAL_ATTENTION_STATES = new Set(["idle-follow", "idle", "mini-idle", "mini-peek"]);
+const NEUTRAL_ATTENTION_STATES = new Set(["idle-follow", "idle"]);
 const PROTECTED_STATES = new Set([
   "happy",
   "react-drag",
@@ -81,8 +67,8 @@ function pickWeighted(entries, phaseName, random) {
 function attentionStateFor(currentState) {
   if (PROTECTED_STATES.has(currentState)) return null;
   if (RESTING_STATES.has(currentState)) return "waking";
-  if (NEUTRAL_ATTENTION_STATES.has(currentState)) return "mini-happy";
-  return "mini-happy";
+  if (NEUTRAL_ATTENTION_STATES.has(currentState)) return "react-poke";
+  return "react-poke";
 }
 
 export function createCalicoIdleDirector({
@@ -150,6 +136,10 @@ export function createCalicoIdleDirector({
     }
 
     const currentState = getCurrentState?.() ?? BASELINE_STATE;
+    if (RESTING_STATES.has(currentState)) {
+      scheduleNext(IDLE_RHYTHM_PHASES[3].delayRangeMs[0]);
+      return;
+    }
     if (PROTECTED_STATES.has(currentState)) {
       scheduleNext(nextDelay());
       return;
@@ -168,11 +158,13 @@ export function createCalicoIdleDirector({
     }
 
     const durationMs = displayMsFor(state);
+    const sequence = state === "yawning" ? SLEEP_SEQUENCE : [];
     const applied = applyMotion?.({
       state,
       reason: "idle-director",
       priority: IDLE_PRIORITY,
       durationMs,
+      sequence,
     });
     if (applied) {
       lastState = state;
@@ -220,6 +212,7 @@ export function createCalicoIdleDirector({
       reason: "hover-attention",
       priority: HOVER_PRIORITY,
       durationMs,
+      sequence: state === "waking" ? [BASELINE_STATE] : [],
     });
     if (!applied) return false;
 

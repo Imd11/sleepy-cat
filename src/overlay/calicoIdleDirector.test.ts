@@ -31,6 +31,7 @@ type IdleDirectorPayload = {
   priority?: number;
   reason?: string;
   durationMs?: number;
+  sequence?: string[];
 };
 
 type IdleDirectorModule = {
@@ -73,7 +74,7 @@ describe("Calico idle director", () => {
     ]);
   });
 
-  it("uses a weighted idle pool without protected semantic motions", async () => {
+  it("uses only normal-size motions with neutral entrances in the idle pool", async () => {
     const { IDLE_MOTION_POOL } = await loadDirectorModule();
     const states = IDLE_MOTION_POOL.map((entry) => entry.state);
 
@@ -82,19 +83,8 @@ describe("Calico idle director", () => {
       expect.arrayContaining([
         "idle",
         "yawning",
-        "dozing",
-        "collapsing",
-        "sleeping",
-        "waking",
         "react-poke",
         "react-left",
-        "mini-enter",
-        "mini-idle",
-        "mini-peek",
-        "mini-alert",
-        "mini-happy",
-        "mini-crabwalk",
-        "mini-sleep",
       ])
     );
     for (const state of protectedStates) {
@@ -102,23 +92,18 @@ describe("Calico idle director", () => {
     }
   });
 
-  it("does not allow sleep states during early idle", async () => {
+  it("only enters the sleep lifecycle through yawning", async () => {
     const { IDLE_MOTION_POOL } = await loadDirectorModule();
-    const sleeping = IDLE_MOTION_POOL.find((entry) => entry.state === "sleeping");
-    const miniSleep = IDLE_MOTION_POOL.find((entry) => entry.state === "mini-sleep");
 
-    expect(sleeping?.weights.early).toBe(0);
-    expect(miniSleep?.weights.early).toBe(0);
+    expect(IDLE_MOTION_POOL.map((entry) => entry.state)).not.toEqual(
+      expect.arrayContaining(["dozing", "collapsing", "sleeping", "waking"])
+    );
   });
 
-  it("raises rest and mini weights during long idle", async () => {
+  it("raises yawning availability during longer idle", async () => {
     const { IDLE_MOTION_POOL } = await loadDirectorModule();
-    const sleeping = IDLE_MOTION_POOL.find((entry) => entry.state === "sleeping");
-    const miniSleep = IDLE_MOTION_POOL.find((entry) => entry.state === "mini-sleep");
     const yawning = IDLE_MOTION_POOL.find((entry) => entry.state === "yawning");
 
-    expect(sleeping?.weights.longIdle).toBeGreaterThan(sleeping?.weights.settled ?? 0);
-    expect(miniSleep?.weights.longIdle).toBeGreaterThan(miniSleep?.weights.settled ?? 0);
     expect(yawning?.weights.settled).toBeGreaterThan(yawning?.weights.early ?? 0);
   });
 
@@ -128,7 +113,7 @@ describe("Calico idle director", () => {
       .map((entry) => entry.state)
       .sort();
 
-    expect(deepIdleStates).toEqual(["idle", "mini-idle", "mini-sleep", "sleeping"].sort());
+    expect(deepIdleStates).toEqual(["idle"]);
   });
 
   it("uses long quiet delays when the next idle callback runs after deep idle begins", async () => {
@@ -153,7 +138,7 @@ describe("Calico idle director", () => {
         return true;
       },
       resetMotion: vi.fn(),
-      getCurrentState: () => "idle-follow",
+      getCurrentState: () => "idle",
       isUserActive: () => false,
       random: () => 0,
       setTimeout: setTimer,
@@ -176,7 +161,7 @@ describe("Calico idle director", () => {
     expect(scheduledDelays[scheduledDelays.length - 1]).toBe(5_200 + 45_000);
   });
 
-  it("starts from idle-follow and schedules low-priority idle flourishes", async () => {
+  it("starts from neutral idle and schedules low-priority idle flourishes", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
     const { createCalicoIdleDirector } = await loadDirectorModule();
@@ -188,7 +173,7 @@ describe("Calico idle director", () => {
         return true;
       },
       resetMotion: vi.fn(),
-      getCurrentState: () => "idle-follow",
+      getCurrentState: () => "idle",
       isUserActive: () => false,
       random: () => 0,
       setTimeout: window.setTimeout.bind(window),
@@ -221,7 +206,7 @@ describe("Calico idle director", () => {
         return true;
       },
       resetMotion: vi.fn(),
-      getCurrentState: () => "idle-follow",
+      getCurrentState: () => "idle",
       isUserActive: () => false,
       random: () => 0,
       setTimeout: window.setTimeout.bind(window),
@@ -265,7 +250,7 @@ describe("Calico idle director", () => {
     });
   });
 
-  it("uses mini-happy on hover attention from neutral idle states", async () => {
+  it("uses a normal-size poke reaction on hover attention from neutral idle states", async () => {
     const { createCalicoIdleDirector } = await loadDirectorModule();
     const applied: IdleDirectorPayload[] = [];
 
@@ -275,7 +260,7 @@ describe("Calico idle director", () => {
         return true;
       },
       resetMotion: vi.fn(),
-      getCurrentState: () => "idle-follow",
+      getCurrentState: () => "idle",
       isUserActive: () => false,
       random: () => 0,
       now: () => Date.now(),
@@ -284,7 +269,7 @@ describe("Calico idle director", () => {
     director.start();
     expect(director.handleAttention()).toBe(true);
     expect(applied[0]).toMatchObject({
-      state: "mini-happy",
+      state: "react-poke",
       reason: "hover-attention",
     });
   });
@@ -323,7 +308,7 @@ describe("Calico idle director", () => {
         return true;
       },
       resetMotion: vi.fn(),
-      getCurrentState: () => "idle-follow",
+      getCurrentState: () => "idle",
       isUserActive: () => false,
       random: () => 0,
       now: () => now,
@@ -336,5 +321,41 @@ describe("Calico idle director", () => {
     now = 10_001;
     expect(director.handleAttention()).toBe(true);
     expect(applied).toHaveLength(2);
+  });
+
+  it("continues yawning through the authored sleep lifecycle", async () => {
+    const { createCalicoIdleDirector } = await loadDirectorModule();
+    const applied: IdleDirectorPayload[] = [];
+    const scheduledCallbacks: Array<() => void> = [];
+    let now = 0;
+
+    const setTimer = ((callback: TimerHandler) => {
+      scheduledCallbacks.push(callback as () => void);
+      return scheduledCallbacks.length;
+    }) as unknown as typeof window.setTimeout;
+
+    const director = createCalicoIdleDirector({
+      applyMotion: (payload) => {
+        applied.push(payload);
+        return true;
+      },
+      resetMotion: vi.fn(),
+      getCurrentState: () => "idle",
+      isUserActive: () => false,
+      random: () => 0.6,
+      setTimeout: setTimer,
+      clearTimeout: vi.fn(),
+      now: () => now,
+      motionDurations: { yawning: 8_000 },
+    });
+
+    director.start();
+    now = 30_000;
+    scheduledCallbacks[0]();
+
+    expect(applied[0]).toMatchObject({
+      state: "yawning",
+      sequence: ["dozing", "collapsing", "sleeping"],
+    });
   });
 });

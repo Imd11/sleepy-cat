@@ -328,7 +328,7 @@ async function initializeCalicoMotionOnce() {
         onFatalRender: reportFatalRendererError,
       });
     }
-    calicoRenderer.setPresentation(calicoManifest.states[calicoManifest.defaultState]);
+    calicoRenderer.setPresentation(calicoManifest.states["idle-follow"]);
     const baselineReady = await calicoRenderer.showBaseline();
     if (!baselineReady || generation !== lifecycleGeneration) return false;
     if (!calicoMotion) {
@@ -338,7 +338,7 @@ async function initializeCalicoMotionOnce() {
         manifest: calicoManifest,
         sheetManifest: calicoSheetManifest,
       });
-      btn.dataset.motionState = calicoManifest.defaultState;
+      calicoMotion.reset();
       buildIdleDirector();
     }
     const outcome = await reportRendererReady(true);

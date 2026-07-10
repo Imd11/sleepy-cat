@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "name": "Calico",
   "assetSource": "authorized upstream",
-  "defaultState": "idle-follow",
+  "defaultState": "idle",
   "phase1States": [
     "idle-follow",
     "idle",
