@@ -501,6 +501,9 @@ export function App({
       resetPromptHoverPreview();
       promptListRefreshingRef.current = true;
       try {
+        const refreshedSettings = await settingsStoreRef.current.get();
+        if (!active) return;
+        applyActiveSettings(refreshedSettings);
         await reloadPromptData();
       } finally {
         promptListRefreshingRef.current = false;
@@ -536,7 +539,7 @@ export function App({
       active = false;
       disposers.forEach((dispose) => dispose());
     };
-  }, [reloadPromptData, resetPromptHoverPreview, windowLabel]);
+  }, [applyActiveSettings, reloadPromptData, resetPromptHoverPreview, windowLabel]);
 
   const handleSelect = async (prompt: PromptContainer) => {
     if (autosendInFlightRef.current || promptListRefreshingRef.current) return;
@@ -553,7 +556,10 @@ export function App({
         await emitAutosendStatus("failed", t.autosend.genericFailed);
         return;
       }
-      const submitKey = effectiveSubmitKey(prompt, activeSettings.promptInsertion.mode);
+      const submitKey = effectiveSubmitKey(
+        prompt,
+        activeSettingsRef.current.promptInsertion.mode
+      );
       const status = submitKey === "none"
         ? statusForAutosendOutcome(
           await pastePromptAndSubmitToLastTarget(pasteOnlyBody(prompt, bodies), submitKey),

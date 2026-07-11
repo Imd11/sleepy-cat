@@ -466,6 +466,56 @@ describe("app", () => {
     expect(screen.queryByText("Test Prompt")).toBeNull();
   });
 
+  it("refreshes prompt insertion mode when a reused popover is opened", async () => {
+    currentWindowLabel = "prompt-popover";
+    window.history.pushState({}, "", "/?mode=popover");
+    let insertionMode = "paste_and_submit";
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === "paste_prompt_and_submit_to_last_target") {
+        return { copied: true, sent: true, error: null, reason: null };
+      }
+      return undefined;
+    });
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockImplementation(
+      async (path: string) => {
+        if (path.includes("prompts")) {
+          return JSON.stringify({ version: 1, prompts: mockPrompts });
+        }
+        if (path.includes("settings")) {
+          return JSON.stringify({
+            version: 1,
+            language: "zh-CN",
+            blacklistedApps: [],
+            overlayPlacement: { buttonOffset: null, buttonPosition: null },
+            floatingButton: { visible: true },
+            promptInsertion: { mode: insertionMode },
+          });
+        }
+        throw new Error("unexpected path: " + path);
+      }
+    );
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    expect(await screen.findByText("Test Prompt")).toBeTruthy();
+    insertionMode = "paste_only";
+    await act(async () => {
+      await eventHandlers.get("prompt-popover-opened")?.({ payload: "popover" });
+    });
+    fireEvent.click(screen.getByText("Test Prompt"));
+
+    await waitFor(() => {
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith(
+        "paste_prompt_and_submit_to_last_target",
+        { body: "Test body", submit_key: "none" }
+      );
+    });
+  });
+
   it("clears visible prompt hover preview when a reused popover is opened", async () => {
     currentWindowLabel = "prompt-popover";
     window.history.pushState({}, "", "/?mode=popover");
