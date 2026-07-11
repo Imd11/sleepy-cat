@@ -14,6 +14,29 @@ use objc2_foundation::{NSNumber, NSString};
 use objc2_web_kit::WKWebView;
 #[cfg(target_os = "macos")]
 use std::ffi::CString;
+#[cfg(target_os = "macos")]
+use tauri::Manager;
+
+#[cfg(target_os = "macos")]
+pub(crate) fn run_on_main_thread_sync<T, F>(app: &tauri::AppHandle, task: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    if objc2::MainThreadMarker::new().is_some() {
+        return task();
+    }
+
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    app.run_on_main_thread(move || {
+        let _ = sender.send(task());
+    })
+    .map_err(|error| format!("Failed to schedule macOS window task: {error}"))?;
+
+    receiver
+        .recv()
+        .map_err(|_| "macOS window task ended without a result".to_string())?
+}
 
 #[cfg(target_os = "macos")]
 pub fn activate_main_window(window: &tauri::WebviewWindow) -> Result<(), String> {
@@ -40,6 +63,19 @@ pub fn activate_main_window(window: &tauri::WebviewWindow) -> Result<(), String>
 
 #[cfg(target_os = "macos")]
 pub fn configure_non_activating_panel(window: &tauri::WebviewWindow) -> Result<(), String> {
+    let app = window.app_handle().clone();
+    let window = window.clone();
+    run_on_main_thread_sync(&app, move || {
+        configure_non_activating_panel_on_main_thread(&window)
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn configure_non_activating_panel_on_main_thread(
+    window: &tauri::WebviewWindow,
+) -> Result<(), String> {
+    let _mtm = objc2::MainThreadMarker::new()
+        .ok_or_else(|| "configure_non_activating_panel must run on the main thread".to_string())?;
     let ns_window_ptr = window.ns_window().map_err(|e| e.to_string())?;
     if ns_window_ptr.is_null() {
         return Err("ns_window returned null".to_string());
@@ -199,6 +235,20 @@ fn sanitized_class_name(class: &AnyClass) -> String {
 
 #[cfg(target_os = "macos")]
 pub fn configure_transparent_webview_window(window: &tauri::WebviewWindow) -> Result<(), String> {
+    let app = window.app_handle().clone();
+    let window = window.clone();
+    run_on_main_thread_sync(&app, move || {
+        configure_transparent_webview_window_on_main_thread(&window)
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn configure_transparent_webview_window_on_main_thread(
+    window: &tauri::WebviewWindow,
+) -> Result<(), String> {
+    let _mtm = objc2::MainThreadMarker::new().ok_or_else(|| {
+        "configure_transparent_webview_window must run on the main thread".to_string()
+    })?;
     let ns_window_ptr = window.ns_window().map_err(|e| e.to_string())?;
     if ns_window_ptr.is_null() {
         return Err("ns_window returned null".to_string());
@@ -294,5 +344,16 @@ mod tests {
 
         assert!(source.contains("pub fn activate_main_window"));
         assert!(source.contains("pub fn configure_non_activating_panel"));
+    }
+
+    #[test]
+    fn native_window_configuration_is_dispatched_to_the_main_thread() {
+        let source = include_str!("macos_panels.rs");
+
+        assert!(source.contains("pub(crate) fn run_on_main_thread_sync"));
+        assert!(source.contains("configure_non_activating_panel_on_main_thread"));
+        assert!(source.contains("configure_transparent_webview_window_on_main_thread"));
+        assert!(source.matches("run_on_main_thread_sync").count() >= 3);
+        assert!(source.matches("MainThreadMarker::new()").count() >= 3);
     }
 }

@@ -425,14 +425,28 @@ fn retain_event_monitor(monitor: Retained<AnyObject>) {
 }
 
 #[cfg(target_os = "macos")]
-fn install_prompt_popover_outside_click_monitor(app: &tauri::AppHandle) {
+fn install_prompt_popover_outside_click_monitor(app: &tauri::AppHandle) -> Result<(), String> {
     if OUTSIDE_CLICK_MONITOR_INSTALLED
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_err()
     {
-        return;
+        return Ok(());
     }
 
+    let dispatch_app = app.clone();
+    let monitor_app = app.clone();
+    let result = crate::macos_panels::run_on_main_thread_sync(&dispatch_app, move || {
+        install_prompt_popover_outside_click_monitor_on_main_thread(&monitor_app);
+        Ok(())
+    });
+    if result.is_err() {
+        OUTSIDE_CLICK_MONITOR_INSTALLED.store(false, Ordering::SeqCst);
+    }
+    result
+}
+
+#[cfg(target_os = "macos")]
+fn install_prompt_popover_outside_click_monitor_on_main_thread(app: &tauri::AppHandle) {
     let mask =
         NSEventMask::LeftMouseDown | NSEventMask::RightMouseDown | NSEventMask::OtherMouseDown;
 
@@ -459,11 +473,14 @@ fn install_prompt_popover_outside_click_monitor(app: &tauri::AppHandle) {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn install_prompt_popover_outside_click_monitor(_app: &tauri::AppHandle) {}
+fn install_prompt_popover_outside_click_monitor(_app: &tauri::AppHandle) -> Result<(), String> {
+    Ok(())
+}
 
-fn enable_prompt_popover_outside_click_monitor(app: &tauri::AppHandle) {
-    install_prompt_popover_outside_click_monitor(app);
+fn enable_prompt_popover_outside_click_monitor(app: &tauri::AppHandle) -> Result<(), String> {
+    install_prompt_popover_outside_click_monitor(app)?;
     set_outside_click_monitor_active(true);
+    Ok(())
 }
 
 #[derive(serde::Serialize)]
@@ -535,7 +552,7 @@ async fn show_popover_mode(
                 .map_err(|e| e.to_string())?;
             if should_use_transparent_popover_window(Some(mode)) {
                 crate::macos_panels::configure_transparent_webview_window(&window)?;
-                enable_prompt_popover_outside_click_monitor(app);
+                enable_prompt_popover_outside_click_monitor(app)?;
             } else {
                 set_outside_click_monitor_active(false);
             }
@@ -586,7 +603,7 @@ async fn show_popover_mode(
 
         if should_use_transparent_popover_window(Some(mode)) {
             crate::macos_panels::configure_transparent_webview_window(&window)?;
-            enable_prompt_popover_outside_click_monitor(app);
+            enable_prompt_popover_outside_click_monitor(app)?;
         }
         show_non_activating_overlay_window(&window)?;
         emit_popover_opened(app, mode);
@@ -609,7 +626,7 @@ async fn show_popover_mode(
         .map_err(|e| e.to_string())?;
     if should_use_transparent_popover_window(Some(mode)) {
         crate::macos_panels::configure_transparent_webview_window(&window)?;
-        enable_prompt_popover_outside_click_monitor(app);
+        enable_prompt_popover_outside_click_monitor(app)?;
     } else {
         set_outside_click_monitor_active(false);
     }
@@ -1258,7 +1275,9 @@ mod tests {
     fn calico_visual_window_is_click_through_while_input_window_is_centered_on_the_hit_area() {
         let source = include_str!("windows.rs");
 
-        assert!(source.contains("pub const BUTTON_INPUT_WINDOW_LABEL: &str = \"prompt-button-input\";"));
+        assert!(
+            source.contains("pub const BUTTON_INPUT_WINDOW_LABEL: &str = \"prompt-button-input\";")
+        );
         assert!(source.contains("overlay-interaction.html"));
         assert!(source.contains("set_ignore_cursor_events(true)"));
         assert!(source.contains("BUTTON_VISUAL_WIDTH, BUTTON_VISUAL_HEIGHT"));
@@ -1481,7 +1500,7 @@ mod tests {
             "button-controls"
         )));
         assert!(show_source.contains("should_use_transparent_popover_window(Some(mode))"));
-        assert!(show_source.contains("enable_prompt_popover_outside_click_monitor(app);"));
+        assert!(show_source.contains("enable_prompt_popover_outside_click_monitor(app)?;"));
         assert!(show_source.contains("set_outside_click_monitor_active(false);"));
     }
 
@@ -1493,6 +1512,21 @@ mod tests {
         assert!(source.contains("NSEventMask::LeftMouseDown"));
         assert!(source.contains("NSEventMask::RightMouseDown"));
         assert!(source.contains("NSEventMask::OtherMouseDown"));
+    }
+
+    #[test]
+    fn outside_click_monitor_installation_is_dispatched_to_the_main_thread() {
+        let source = include_str!("windows.rs");
+        let start = source
+            .find("fn install_prompt_popover_outside_click_monitor")
+            .expect("outside-click installer should exist");
+        let end = source[start..]
+            .find("fn enable_prompt_popover_outside_click_monitor")
+            .expect("outside-click enabler should follow installer");
+        let installer = &source[start..start + end];
+
+        assert!(installer.contains("run_on_main_thread_sync"));
+        assert!(installer.contains("install_prompt_popover_outside_click_monitor_on_main_thread"));
     }
 
     #[test]
