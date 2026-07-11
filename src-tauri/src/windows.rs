@@ -595,7 +595,7 @@ async fn show_popover_mode(
 
     let url = format!("index.html?mode={}", mode);
     let window = WebviewWindowBuilder::new(app, POPOVER_WINDOW_LABEL, WebviewUrl::App(url.into()))
-        .title("Piqory")
+        .title("Prompt Drawer")
         .inner_size(popover_size.width, popover_size.height)
         .resizable(false)
         .decorations(false)
@@ -652,7 +652,7 @@ fn build_prompt_button_window(
         BUTTON_WINDOW_LABEL,
         WebviewUrl::App(overlay_url.into()),
     )
-    .title("Piqory")
+    .title("Prompt Drawer")
     .inner_size(BUTTON_WINDOW_WIDTH, BUTTON_WINDOW_HEIGHT)
     .resizable(false)
     .decorations(false)
@@ -686,7 +686,7 @@ fn build_prompt_button_input_window(
         BUTTON_INPUT_WINDOW_LABEL,
         WebviewUrl::App("overlay-interaction.html".into()),
     )
-    .title("Piqory Input")
+    .title("Prompt Drawer Input")
     .inner_size(BUTTON_VISUAL_WIDTH, BUTTON_VISUAL_HEIGHT)
     .resizable(false)
     .decorations(false)

@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
   <key>NSAppleEventsUsageDescription</key>
-  <string>Piqory needs to send keyboard events to paste and submit your selected prompt in the active input field.</string>
+  <string>Prompt Drawer needs to send keyboard events to paste and submit your selected prompt in the active input field.</string>
   <key>LSUIElement</key>
   <true/>
 </dict>

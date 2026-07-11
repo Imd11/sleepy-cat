@@ -145,10 +145,10 @@ describe("useInputTargetPolling", () => {
     expect(hidePromptButton).toHaveBeenCalled();
   });
 
-  it("keeps the fallback button visible while Piqory itself is frontmost", async () => {
+  it("keeps the fallback button visible while Prompt Drawer itself is frontmost", async () => {
     getFrontmostApp
       .mockResolvedValueOnce({ name: "Finder", bundle_id: "com.apple.finder" })
-      .mockResolvedValue({ name: "Piqory", bundle_id: "local.promptpicker.dev" });
+      .mockResolvedValue({ name: "Prompt Drawer", bundle_id: "local.promptpicker.dev" });
     getCurrentInputTarget.mockResolvedValueOnce({
       frame: { x: 100, y: 200, width: 300, height: 40 },
       window_frame: { x: 100, y: 200, width: 300, height: 40 },
@@ -198,7 +198,7 @@ describe("useInputTargetPolling", () => {
 
   it("cancels the previous polling loop when saved position changes", async () => {
     getFrontmostApp.mockResolvedValue({
-      name: "Piqory",
+      name: "Prompt Drawer",
       bundle_id: "local.promptpicker.dev",
     });
     getCurrentInputTarget.mockResolvedValue(null);
@@ -297,8 +297,8 @@ describe("useInputTargetPolling", () => {
   it("keeps the last button position during overlay self-interaction", async () => {
     getFrontmostApp
       .mockResolvedValueOnce({ name: "Finder", bundle_id: "com.apple.finder" })
-      .mockResolvedValueOnce({ name: "Piqory", bundle_id: "local.promptpicker.dev" })
-      .mockResolvedValue({ name: "Piqory", bundle_id: "local.promptpicker.dev" });
+      .mockResolvedValueOnce({ name: "Prompt Drawer", bundle_id: "local.promptpicker.dev" })
+      .mockResolvedValue({ name: "Prompt Drawer", bundle_id: "local.promptpicker.dev" });
     getCurrentInputTarget
       .mockResolvedValueOnce({
         frame: { x: 100, y: 200, width: 300, height: 40 },

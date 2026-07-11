@@ -1665,7 +1665,7 @@ describe("app", () => {
     vi.mocked(invoke).mockImplementation(async (command: string) => {
       if (command === "paste_prompt_and_submit_to_last_target") {
         throw new Error(
-          "Accessibility permission required for autosend. Enable Piqory in System Settings > Privacy & Security > Accessibility, then try again."
+          "Accessibility permission required for autosend. Enable Prompt Drawer in System Settings > Privacy & Security > Accessibility, then try again."
         );
       }
       return undefined;
@@ -2199,7 +2199,7 @@ describe("app", () => {
     ).toBeTruthy();
     expect(screen.queryByRole("button", { name: "管理提示词..." })).toBeNull();
     expect(screen.queryByRole("button", { name: "打开辅助功能设置" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "退出 Piqory" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "退出 Prompt Drawer" })).toBeNull();
     expect(screen.queryByText("导入")).toBeNull();
     expect(screen.queryByText("导出")).toBeNull();
   });
@@ -2362,7 +2362,7 @@ describe("app", () => {
     expect(screen.queryByRole("button", { name: "关闭小猫" })).not.toBeNull();
     expect(screen.queryByRole("button", { name: "管理提示词..." })).toBeNull();
     expect(screen.queryByRole("button", { name: "打开辅助功能设置" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "退出 Piqory" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "退出 Prompt Drawer" })).toBeNull();
     expect(screen.queryByText("设置")).toBeNull();
   });
 });

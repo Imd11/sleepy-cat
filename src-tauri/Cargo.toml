@@ -1,7 +1,7 @@
 [package]
 name = "prompt-picker"
-version = "1.0.9"
-description = "Piqory local-first prompt library and launcher"
+version = "1.0.10"
+description = "Prompt Drawer local-first prompt library and launcher"
 authors = [""]
 license = "MIT"
 repository = ""

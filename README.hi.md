@@ -1,8 +1,8 @@
-# Piqory
+# Prompt Drawer
 
 **इसे इस भाषा में पढ़ें:** [English](README.md) | [简体中文](README.zh-CN.md) | **हिन्दी** | [Español](README.es.md) | [العربية](README.ar.md)
 
-Piqory उन लोगों के लिए एक local desktop prompt launcher है जो coding agents और chat-based tools में बार-बार structured prompts इस्तेमाल करते हैं। यह आपके मौजूदा input area के पास एक floating Piqory button रखता है, एक compact prompt picker खोलता है, और चुने हुए prompt को target app में insert करता है।
+Prompt Drawer उन लोगों के लिए एक local desktop prompt launcher है जो coding agents और chat-based tools में बार-बार structured prompts इस्तेमाल करते हैं। यह आपके मौजूदा input area के पास एक floating Prompt Drawer button रखता है, एक compact prompt picker खोलता है, और चुने हुए prompt को target app में insert करता है।
 
 यह app Tauri, React, और Rust से बना है। Prompt data user की अपनी machine पर local रूप से store होता है।
 
@@ -22,14 +22,14 @@ Piqory उन लोगों के लिए एक local desktop prompt launc
 
 Latest release GitHub पर उपलब्ध है:
 
-https://github.com/Imd11/piqory/releases/latest
+https://github.com/Imd11/prompt-drawer/releases/latest
 
 Current packaged builds:
 
 - macOS Apple Silicon DMG
 - Windows x64 installer
 
-macOS पर Piqory को दूसरे apps में text paste और submit करने के लिए Accessibility permission चाहिए।
+macOS पर Prompt Drawer को दूसरे apps में text paste और submit करने के लिए Accessibility permission चाहिए।
 
 ## Example Prompt Libraries
 
@@ -42,17 +42,17 @@ macOS पर Piqory को दूसरे apps में text paste और subm
 
 इनमें से किसी एक को इस्तेमाल करने के लिए:
 
-1. Piqory खोलें।
+1. Prompt Drawer खोलें।
 2. Prompt manager में जाएँ।
 3. Import पर click करें।
 4. `examples/prompts/` से कोई JSON file चुनें।
 5. इसे app की internal copy के रूप में import करें, या selected JSON file को link and sync करें।
 
-Copy के रूप में import करने से current internal prompt library replace हो जाती है, इसलिए अगर आप backup रखना चाहते हैं तो पहले अपने current prompts export कर लें। अगर आप link and sync चुनते हैं, तो Piqory selected file path store करता है और app में आगे किए गए prompt edits वापस उसी JSON file में लिखता है। App आपके Desktop को scan नहीं करता और अपने आप कोई prompt file नहीं चुनता।
+Copy के रूप में import करने से current internal prompt library replace हो जाती है, इसलिए अगर आप backup रखना चाहते हैं तो पहले अपने current prompts export कर लें। अगर आप link and sync चुनते हैं, तो Prompt Drawer selected file path store करता है और app में आगे किए गए prompt edits वापस उसी JSON file में लिखता है। App आपके Desktop को scan नहीं करता और अपने आप कोई prompt file नहीं चुनता।
 
 ## Local Data
 
-Piqory user data को local रूप से store करता है।
+Prompt Drawer user data को local रूप से store करता है।
 
 macOS पर prompts यहाँ store होते हैं:
 
@@ -68,7 +68,7 @@ Settings उसी जगह store होती हैं:
 
 Prompts export करने से अलग JSON backup बनता है। इससे app की default storage location नहीं बदलती।
 
-जब आप JSON file import करते हैं, Piqory default रूप से internal `prompts.json` इस्तेमाल करता है। Link and sync हर imported file के लिए opt-in है, और इसे prompt manager से external JSON file delete किए बिना हटाया जा सकता है।
+जब आप JSON file import करते हैं, Prompt Drawer default रूप से internal `prompts.json` इस्तेमाल करता है। Link and sync हर imported file के लिए opt-in है, और इसे prompt manager से external JSON file delete किए बिना हटाया जा सकता है।
 
 ## Development
 
@@ -108,20 +108,20 @@ Tauri config Developer ID signing के लिए set up है। Public macOS
 
 ```bash
 npm run tauri -- build --bundles dmg
-xcrun notarytool submit "src-tauri/target/release/bundle/dmg/Piqory_<version>_aarch64.dmg" \
+xcrun notarytool submit "src-tauri/target/release/bundle/dmg/Prompt Drawer_<version>_aarch64.dmg" \
   --key /path/to/AuthKey_<KEY_ID>.p8 \
   --key-id <KEY_ID> \
   --issuer <ISSUER_ID> \
   --wait
-xcrun stapler staple "src-tauri/target/release/bundle/dmg/Piqory_<version>_aarch64.dmg"
-xcrun stapler validate "src-tauri/target/release/bundle/dmg/Piqory_<version>_aarch64.dmg"
+xcrun stapler staple "src-tauri/target/release/bundle/dmg/Prompt Drawer_<version>_aarch64.dmg"
+xcrun stapler validate "src-tauri/target/release/bundle/dmg/Prompt Drawer_<version>_aarch64.dmg"
 ```
 
 Gatekeeper acceptance verify करें:
 
 ```bash
 spctl --assess --type open --context context:primary-signature --verbose=4 \
-  "src-tauri/target/release/bundle/dmg/Piqory_<version>_aarch64.dmg"
+  "src-tauri/target/release/bundle/dmg/Prompt Drawer_<version>_aarch64.dmg"
 ```
 
 ## Windows Release Build

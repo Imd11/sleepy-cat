@@ -1,10 +1,10 @@
-# Piqory
+# Prompt Drawer
 
 > Your prompt library, ready to send.
 
 **Read this in:** **English** | [简体中文](README.zh-CN.md) | [हिन्दी](README.hi.md) | [Español](README.es.md) | [العربية](README.ar.md)
 
-Piqory is a local desktop prompt launcher for people who repeatedly use structured prompts in coding agents and chat-based tools. It keeps a floating Piqory button near your current input area, opens a compact prompt picker, and inserts the selected prompt into the target app.
+Prompt Drawer is a local desktop prompt launcher for people who repeatedly use structured prompts in coding agents and chat-based tools. It keeps a floating Prompt Drawer button near your current input area, opens a compact prompt picker, and inserts the selected prompt into the target app.
 
 The app is built with Tauri, React, and Rust. Prompt data is stored locally on the user's machine.
 
@@ -24,14 +24,14 @@ The app is built with Tauri, React, and Rust. Prompt data is stored locally on t
 
 The latest release is available on GitHub:
 
-https://github.com/Imd11/piqory/releases/latest
+https://github.com/Imd11/prompt-drawer/releases/latest
 
 Current packaged builds:
 
 - macOS Apple Silicon DMG
 - Windows x64 installer
 
-On macOS, Piqory requires Accessibility permission to paste into and submit text in other apps.
+On macOS, Prompt Drawer requires Accessibility permission to paste into and submit text in other apps.
 
 ## Example Prompt Libraries
 
@@ -44,17 +44,17 @@ They contain a development workflow prompt set with planning, execution, review,
 
 To use one of them:
 
-1. Open Piqory.
+1. Open Prompt Drawer.
 2. Go to the prompt manager.
 3. Click Import.
 4. Select one of the JSON files from `examples/prompts/`.
 5. Choose whether to import it as the app's internal copy or link and sync the selected JSON file.
 
-Importing as a copy replaces the current internal prompt library, so export your current prompts first if you want a backup. If you choose link and sync, Piqory stores the selected file path and writes future in-app prompt edits back to that JSON file. The app never scans your Desktop or automatically chooses a prompt file.
+Importing as a copy replaces the current internal prompt library, so export your current prompts first if you want a backup. If you choose link and sync, Prompt Drawer stores the selected file path and writes future in-app prompt edits back to that JSON file. The app never scans your Desktop or automatically chooses a prompt file.
 
 ## Local Data
 
-Piqory stores user data locally.
+Prompt Drawer stores user data locally.
 
 On macOS, prompts are stored at:
 
@@ -70,7 +70,7 @@ Settings are stored next to it:
 
 Exporting prompts creates a separate JSON backup. It does not change the app's default storage location.
 
-When you import a JSON file, Piqory uses the internal `prompts.json` by default. Link and sync is opt-in per imported file, and it can be removed from the prompt manager without deleting the external JSON file.
+When you import a JSON file, Prompt Drawer uses the internal `prompts.json` by default. Link and sync is opt-in per imported file, and it can be removed from the prompt manager without deleting the external JSON file.
 
 ## Development
 
@@ -110,20 +110,20 @@ The Tauri config is set up for Developer ID signing. For a public macOS release,
 
 ```bash
 npm run tauri -- build --bundles dmg
-xcrun notarytool submit "src-tauri/target/release/bundle/dmg/Piqory_<version>_aarch64.dmg" \
+xcrun notarytool submit "src-tauri/target/release/bundle/dmg/Prompt Drawer_<version>_aarch64.dmg" \
   --key /path/to/AuthKey_<KEY_ID>.p8 \
   --key-id <KEY_ID> \
   --issuer <ISSUER_ID> \
   --wait
-xcrun stapler staple "src-tauri/target/release/bundle/dmg/Piqory_<version>_aarch64.dmg"
-xcrun stapler validate "src-tauri/target/release/bundle/dmg/Piqory_<version>_aarch64.dmg"
+xcrun stapler staple "src-tauri/target/release/bundle/dmg/Prompt Drawer_<version>_aarch64.dmg"
+xcrun stapler validate "src-tauri/target/release/bundle/dmg/Prompt Drawer_<version>_aarch64.dmg"
 ```
 
 Verify Gatekeeper acceptance:
 
 ```bash
 spctl --assess --type open --context context:primary-signature --verbose=4 \
-  "src-tauri/target/release/bundle/dmg/Piqory_<version>_aarch64.dmg"
+  "src-tauri/target/release/bundle/dmg/Prompt Drawer_<version>_aarch64.dmg"
 ```
 
 ## Windows Release Build

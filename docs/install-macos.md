@@ -1,10 +1,10 @@
-# Installing Piqory (macOS Developer Build)
+# Installing Prompt Drawer (macOS Developer Build)
 
 ## Opening the App
 
 1. Locate the app bundle at:
    ```
-   /Users/yang/Desktop/GitHub-pre/prompt-picker/src-tauri/target/release/bundle/macos/Piqory.app
+   /Users/yang/Desktop/GitHub-pre/prompt-picker/src-tauri/target/release/bundle/macos/Prompt Drawer.app
    ```
 
 2. Option-click the app and select "Open" to launch (bypasses gatekeeper on first run)
@@ -12,14 +12,14 @@
 ## Granting Accessibility Permission
 
 1. Open System Settings > Privacy & Security > Accessibility
-2. Find "Piqory" in the list
+2. Find "Prompt Drawer" in the list
 3. Enable the toggle
 
 ## Finding the Menu Bar Icon
 
 The app appears in the menu bar with a "P" icon. Look in the top-right corner of your screen.
 
-## Using Piqory
+## Using Prompt Drawer
 
 1. **With Codex App**: Open Codex and click into any text input field. A small "P" button should appear. Click it to see your prompts.
 
@@ -33,7 +33,7 @@ The app appears in the menu bar with a "P" icon. Look in the top-right corner of
 
 ## Blacklist Settings
 
-To blacklist an app (hide Piqory overlay):
+To blacklist an app (hide Prompt Drawer overlay):
 1. Right-click the menu bar icon > Settings
 2. Add apps to the blacklist
 

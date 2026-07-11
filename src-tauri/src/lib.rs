@@ -814,7 +814,7 @@ fn quit_prompt_picker(app: tauri::AppHandle) {
 fn set_menu_language(app: tauri::AppHandle, language: String) -> Result<(), String> {
     let menu = build_menu_bar_menu(&app, &language)?;
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
-        return Err("Piqory tray icon is not available.".to_string());
+        return Err("Prompt Drawer tray icon is not available.".to_string());
     };
     tray.set_menu(Some(menu)).map_err(|e| e.to_string())
 }
@@ -1681,7 +1681,7 @@ fn emit_autosend_diagnostic(
 }
 
 fn is_prompt_picker_app(app: &FrontmostApp) -> bool {
-    app.bundle_id == "local.promptpicker.dev" || app.name == "Piqory"
+    app.bundle_id == "local.promptpicker.dev" || app.name == "Prompt Drawer"
 }
 
 fn is_usable_autosend_app(app: &FrontmostApp) -> bool {
@@ -1778,18 +1778,18 @@ fn menu_labels_for_language(language: &str) -> MenuLabels {
         "zh-CN" => MenuLabels {
             open_main: "管理提示词...",
             open_settings: "设置...",
-            show_button: "显示 Piqory",
-            hide_button: "隐藏 Piqory",
+            show_button: "显示 Prompt Drawer",
+            hide_button: "隐藏 Prompt Drawer",
             open_accessibility: "打开辅助功能设置",
-            quit: "退出 Piqory",
+            quit: "退出 Prompt Drawer",
         },
         _ => MenuLabels {
             open_main: "Manage Prompts...",
             open_settings: "Settings...",
-            show_button: "Show Piqory",
-            hide_button: "Hide Piqory",
+            show_button: "Show Prompt Drawer",
+            hide_button: "Hide Prompt Drawer",
             open_accessibility: "Open Accessibility Settings",
-            quit: "Quit Piqory",
+            quit: "Quit Prompt Drawer",
         },
     }
 }
@@ -2038,7 +2038,7 @@ fn setup_menu_bar_app(app_handle: &tauri::AppHandle) -> Result<(), String> {
 
     let tray_builder = TrayIconBuilder::with_id(TRAY_ID)
         .menu(&menu)
-        .tooltip("Piqory")
+        .tooltip("Prompt Drawer")
         .show_menu_on_left_click(true)
         .icon_as_template(true)
         .icon(menubar_template_icon())
@@ -2166,7 +2166,7 @@ pub fn run() {
             setup_menu_bar_app(app.handle())?;
 
             let window = app.get_webview_window("main").unwrap();
-            window.set_title("Piqory").unwrap();
+            window.set_title("Prompt Drawer").unwrap();
             let main_window = window.clone();
             window.on_window_event(move |event| {
                 if let WindowEvent::CloseRequested { api, .. } = event {
@@ -2596,15 +2596,15 @@ mod last_input_target_tests {
     fn resolves_menu_labels_by_language() {
         assert_eq!(menu_labels_for_language("zh-CN").open_main, "管理提示词...");
         assert_eq!(menu_labels_for_language("zh-CN").open_settings, "设置...");
-        assert_eq!(menu_labels_for_language("zh-CN").show_button, "显示 Piqory");
-        assert_eq!(menu_labels_for_language("zh-CN").hide_button, "隐藏 Piqory");
+        assert_eq!(menu_labels_for_language("zh-CN").show_button, "显示 Prompt Drawer");
+        assert_eq!(menu_labels_for_language("zh-CN").hide_button, "隐藏 Prompt Drawer");
         assert_eq!(
             menu_labels_for_language("en-US").open_main,
             "Manage Prompts..."
         );
-        assert_eq!(menu_labels_for_language("en-US").show_button, "Show Piqory");
-        assert_eq!(menu_labels_for_language("en-US").hide_button, "Hide Piqory");
-        assert_eq!(menu_labels_for_language("bad").quit, "Quit Piqory");
+        assert_eq!(menu_labels_for_language("en-US").show_button, "Show Prompt Drawer");
+        assert_eq!(menu_labels_for_language("en-US").hide_button, "Hide Prompt Drawer");
+        assert_eq!(menu_labels_for_language("bad").quit, "Quit Prompt Drawer");
     }
 
     #[test]
@@ -2859,7 +2859,7 @@ mod last_input_target_tests {
             button_position: (10.0, 10.0),
             click_point: (6.0, 5.0),
             app: Some(FrontmostApp {
-                name: "Piqory".to_string(),
+                name: "Prompt Drawer".to_string(),
                 bundle_id: "local.promptpicker.dev".to_string(),
             }),
         };
@@ -2952,7 +2952,7 @@ mod last_input_target_tests {
             classify_target_frontmost(
                 &target,
                 Some(&frontmost_target(
-                    "Piqory",
+                    "Prompt Drawer",
                     "local.promptpicker.dev",
                     Some(1)
                 ))
@@ -3053,7 +3053,7 @@ mod last_input_target_tests {
         let target = prompt_target("WeChat", "com.tencent.xinWeChat", Some(123));
         let events = RefCell::new(Vec::new());
         let mut frontmost = VecDeque::from([
-            frontmost_target("Piqory", "local.promptpicker.dev", Some(1)),
+            frontmost_target("Prompt Drawer", "local.promptpicker.dev", Some(1)),
             frontmost_target("WeChat", "com.tencent.xinWeChat", Some(123)),
             frontmost_target("WeChat", "com.tencent.xinWeChat", Some(123)),
         ]);
@@ -3102,7 +3102,7 @@ mod last_input_target_tests {
         };
         let mut frontmost = vec![
             Some(frontmost_target(
-                "Piqory",
+                "Prompt Drawer",
                 "local.promptpicker.dev",
                 Some(1),
             )),
@@ -3184,12 +3184,12 @@ mod last_input_target_tests {
         };
         let mut frontmost = vec![
             Some(frontmost_target(
-                "Piqory",
+                "Prompt Drawer",
                 "local.promptpicker.dev",
                 Some(1),
             )),
             Some(frontmost_target(
-                "Piqory",
+                "Prompt Drawer",
                 "local.promptpicker.dev",
                 Some(1),
             )),
@@ -3308,7 +3308,7 @@ mod last_input_target_tests {
         let bodies = vec!["one".to_string(), "two".to_string()];
         let mut frontmost = vec![
             Some(frontmost_target(
-                "Piqory",
+                "Prompt Drawer",
                 "local.promptpicker.dev",
                 Some(1),
             )),
@@ -3476,7 +3476,7 @@ mod last_input_target_tests {
     fn prompt_pick_session_uses_first_safe_visible_app_without_recent_target() {
         let target = prompt_pick_session_target(
             Some(frontmost_target(
-                "Piqory",
+                "Prompt Drawer",
                 "local.promptpicker.dev",
                 Some(1),
             )),
@@ -3496,7 +3496,7 @@ mod last_input_target_tests {
     fn prompt_pick_session_skips_unsafe_visible_app_before_safe_visible_fallback() {
         let target = prompt_pick_session_target(
             Some(frontmost_target(
-                "Piqory",
+                "Prompt Drawer",
                 "local.promptpicker.dev",
                 Some(1),
             )),
@@ -3530,7 +3530,7 @@ mod last_input_target_tests {
     fn prompt_pick_session_uses_recent_target_when_prompt_picker_has_no_visible_app() {
         let target = prompt_pick_session_target(
             Some(frontmost_target(
-                "Piqory",
+                "Prompt Drawer",
                 "local.promptpicker.dev",
                 Some(1),
             )),
@@ -3555,7 +3555,7 @@ mod last_input_target_tests {
     fn prompt_pick_session_prefers_recent_target_over_visible_app_when_picker_is_frontmost() {
         let target = prompt_pick_session_target(
             Some(frontmost_target(
-                "Piqory",
+                "Prompt Drawer",
                 "local.promptpicker.dev",
                 Some(1),
             )),
@@ -4124,7 +4124,7 @@ mod last_input_target_tests {
         let state = LastInputTargetState::default();
         record_last_app_if_valid(
             &state,
-            frontmost_target("Piqory", "local.promptpicker.dev", Some(1)),
+            frontmost_target("Prompt Drawer", "local.promptpicker.dev", Some(1)),
         );
 
         assert!(state.get().is_none());

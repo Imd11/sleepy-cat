@@ -113,7 +113,7 @@ export function createPromptLibrarySyncStorage({
       }
 
       if (link.lastKnownSignature && metadata.signature !== link.lastKnownSignature) {
-        const error = new Error("Linked prompt file changed outside Piqory.");
+        const error = new Error("Linked prompt file changed outside Prompt Drawer.");
         onSyncError?.({ kind: "conflict", path, error });
         throw error;
       }

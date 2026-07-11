@@ -48,7 +48,7 @@ describe("overlay button html", () => {
     expect(html).toContain('data-motion-state="idle-follow"');
     expect(html).not.toContain("calico-projectile");
     expect(html).not.toContain("promptProjectile");
-    expect(interactionHtml).toContain('aria-label="Open Piqory"');
+    expect(interactionHtml).toContain('aria-label="Open Prompt Drawer"');
     expect(html).not.toContain("calico-rig");
     expect(html).not.toContain("calico-body");
     expect(html).not.toContain("calico-head");

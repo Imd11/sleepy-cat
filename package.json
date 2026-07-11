@@ -1,7 +1,7 @@
 {
   "name": "prompt-picker",
-  "version": "1.0.9",
-  "description": "Piqory is a local-first prompt library and launcher.",
+  "version": "1.0.10",
+  "description": "Prompt Drawer is a local-first prompt library and launcher.",
   "type": "module",
   "scripts": {
     "dev": "vite",
