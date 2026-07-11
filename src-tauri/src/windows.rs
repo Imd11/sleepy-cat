@@ -637,12 +637,10 @@ async fn show_popover_mode(
 }
 
 fn show_non_activating_overlay_window(window: &tauri::WebviewWindow) -> Result<(), String> {
-    window.set_focusable(false).map_err(|e| e.to_string())?;
     crate::macos_panels::configure_non_activating_panel(window)?;
 
     if !window.is_visible().unwrap_or(false) {
         window.show().map_err(|e| e.to_string())?;
-        window.set_focusable(false).map_err(|e| e.to_string())?;
         crate::macos_panels::configure_non_activating_panel(window)?;
     }
 
@@ -1681,12 +1679,18 @@ mod tests {
     #[test]
     fn overlay_visibility_uses_single_non_activating_show_helper() {
         let source = include_str!("windows.rs");
+        let start = source
+            .find("fn show_non_activating_overlay_window")
+            .expect("overlay show helper should exist");
+        let end = source[start..]
+            .find("fn build_prompt_button_window")
+            .expect("button builder should follow overlay show helper");
+        let helper = &source[start..start + end];
 
-        assert!(source.contains("fn show_non_activating_overlay_window"));
-        assert!(source.contains("window.set_focusable(false)"));
-        assert!(source.contains("configure_non_activating_panel"));
-        assert!(source.contains("window.is_visible().unwrap_or(false)"));
-        assert!(source.contains("Overlay window did not become visible."));
+        assert!(!helper.contains("window.set_focusable(false)"));
+        assert!(helper.contains("configure_non_activating_panel"));
+        assert!(helper.contains("window.is_visible().unwrap_or(false)"));
+        assert!(helper.contains("Overlay window did not become visible."));
     }
 
     #[test]

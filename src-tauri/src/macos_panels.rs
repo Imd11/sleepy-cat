@@ -1,21 +1,40 @@
 #[cfg(target_os = "macos")]
 use objc2::{
-    runtime::{AnyClass, AnyObject, Bool, ClassBuilder, Sel},
-    sel,
+    runtime::{AnyObject, Bool, NSObjectProtocol},
+    ClassType,
 };
 #[cfg(target_os = "macos")]
 use objc2_app_kit::{
-    NSApplication, NSColor, NSScreenSaverWindowLevel, NSWindow, NSWindowCollectionBehavior,
-    NSWindowStyleMask,
+    NSApplication, NSColor, NSPanel, NSScreenSaverWindowLevel, NSWindow,
+    NSWindowCollectionBehavior, NSWindowStyleMask,
 };
 #[cfg(target_os = "macos")]
 use objc2_foundation::{NSNumber, NSString};
 #[cfg(target_os = "macos")]
 use objc2_web_kit::WKWebView;
 #[cfg(target_os = "macos")]
-use std::ffi::CString;
-#[cfg(target_os = "macos")]
 use tauri::Manager;
+
+#[cfg(target_os = "macos")]
+objc2::define_class!(
+    #[unsafe(super(NSPanel))]
+    #[name = "PromptDrawerOverlayPanel"]
+    struct PromptDrawerOverlayPanel;
+
+    unsafe impl NSObjectProtocol for PromptDrawerOverlayPanel {}
+
+    impl PromptDrawerOverlayPanel {
+        #[unsafe(method(canBecomeKeyWindow))]
+        fn can_become_key_window(&self) -> bool {
+            false
+        }
+
+        #[unsafe(method(canBecomeMainWindow))]
+        fn can_become_main_window(&self) -> bool {
+            false
+        }
+    }
+);
 
 #[cfg(target_os = "macos")]
 pub(crate) fn run_on_main_thread_sync<T, F>(app: &tauri::AppHandle, task: F) -> Result<T, String>
@@ -84,7 +103,9 @@ fn configure_non_activating_panel_on_main_thread(
     unsafe {
         let ns_window = &*(ns_window_ptr.cast::<NSWindow>());
         let object: &AnyObject = ns_window.as_ref();
-        let class_name = object.class().name().to_string_lossy().to_string();
+        let original_class_name = object.class().name().to_string_lossy().to_string();
+        let action = ensure_native_overlay_panel(window, &original_class_name)?;
+        let ns_window = &*(ns_window_ptr.cast::<NSWindow>());
         let mask = ns_window.styleMask()
             | NSWindowStyleMask::NonactivatingPanel
             | NSWindowStyleMask::UtilityWindow;
@@ -101,14 +122,25 @@ fn configure_non_activating_panel_on_main_thread(
                 | NSWindowCollectionBehavior::Transient
                 | NSWindowCollectionBehavior::IgnoresCycle,
         );
-        let action = apply_never_key_panel_class(ns_window)?;
+        let panel: &NSPanel = &*(ns_window_ptr.cast::<NSPanel>());
+        panel.setFloatingPanel(true);
+        panel.setBecomesKeyOnlyIfNeeded(true);
         ns_window.orderFrontRegardless();
+
+        let is_native_panel: bool = objc2::msg_send![ns_window, isKindOfClass: NSPanel::class()];
+        let can_become_key: Bool = objc2::msg_send![ns_window, canBecomeKeyWindow];
+        let can_become_main: Bool = objc2::msg_send![ns_window, canBecomeMainWindow];
+        if !is_native_panel || can_become_key.as_bool() || can_become_main.as_bool() {
+            return Err(format!(
+                "Overlay {} is not a non-activating native NSPanel.",
+                window.label()
+            ));
+        }
+
         if focus_diagnostics_enabled() {
-            let can_become_key: Bool = objc2::msg_send![ns_window, canBecomeKeyWindow];
-            let can_become_main: Bool = objc2::msg_send![ns_window, canBecomeMainWindow];
             let report = PanelKeyBehaviorReport {
                 label: window.label().to_string(),
-                class_name,
+                class_name: object.class().name().to_string_lossy().to_string(),
                 action,
                 can_become_key: Some(can_become_key.as_bool()),
                 can_become_main: Some(can_become_main.as_bool()),
@@ -120,25 +152,17 @@ fn configure_non_activating_panel_on_main_thread(
     Ok(())
 }
 
-#[cfg(target_os = "macos")]
-extern "C-unwind" fn never_key_window(_: &AnyObject, _: Sel) -> Bool {
-    Bool::NO
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum PanelClassAction {
-    AlreadyNeverKey,
-    ManagedTauriRuntime,
-    ApplyNeverKeySubclass,
+    AlreadyNativePanel,
+    ConvertToNativePanel,
 }
 
 fn panel_class_action_for_name(class_name: &str) -> PanelClassAction {
-    if class_name.contains("PromptPickerNeverKeyPanel") {
-        PanelClassAction::AlreadyNeverKey
-    } else if class_name.contains("Tao") || class_name.contains("Wry") {
-        PanelClassAction::ManagedTauriRuntime
+    if class_name.contains("PromptDrawerOverlayPanel") {
+        PanelClassAction::AlreadyNativePanel
     } else {
-        PanelClassAction::ApplyNeverKeySubclass
+        PanelClassAction::ConvertToNativePanel
     }
 }
 
@@ -175,62 +199,35 @@ fn focus_diagnostics_enabled() -> bool {
 }
 
 #[cfg(target_os = "macos")]
-fn apply_never_key_panel_class(ns_window: &NSWindow) -> Result<PanelClassAction, String> {
-    let object: &AnyObject = ns_window.as_ref();
-    let current_class = object.class();
-    let current_class_name = current_class.name().to_string_lossy();
-    let action = panel_class_action_for_name(&current_class_name);
-    if action != PanelClassAction::ApplyNeverKeySubclass {
-        return Ok(action);
-    }
+fn ensure_native_overlay_panel(
+    window: &tauri::WebviewWindow,
+    class_name: &str,
+) -> Result<PanelClassAction, String> {
+    let action = panel_class_action_for_name(class_name);
+    if action == PanelClassAction::ConvertToNativePanel {
+        let ns_window_ptr = window.ns_window().map_err(|error| error.to_string())?;
+        if ns_window_ptr.is_null() {
+            return Err("ns_window returned null".to_string());
+        }
+        unsafe {
+            let object = &*(ns_window_ptr.cast::<AnyObject>());
+            let current_class = object.class();
+            let panel_class = PromptDrawerOverlayPanel::class();
+            if panel_class.instance_size() > current_class.instance_size() {
+                return Err(
+                    "Native NSPanel class does not fit the Tauri window allocation.".to_string(),
+                );
+            }
 
-    let never_key_class = never_key_panel_class(current_class)?;
-    unsafe {
-        let previous_class = AnyObject::set_class(object, never_key_class);
-        if previous_class as *const AnyClass != current_class as *const AnyClass {
-            return Err(
-                "Unexpected window class changed while configuring overlay panel.".to_string(),
-            );
+            // The window is still hidden here. Replace only its Objective-C class;
+            // the NSWindow object, WKWebView, delegate, and ownership stay unchanged.
+            let previous_class = AnyObject::set_class(object, panel_class);
+            if previous_class.name().to_string_lossy() != class_name {
+                return Err("Overlay window class changed during NSPanel conversion.".to_string());
+            }
         }
     }
-
     Ok(action)
-}
-
-#[cfg(target_os = "macos")]
-fn never_key_panel_class(superclass: &'static AnyClass) -> Result<&'static AnyClass, String> {
-    let class_name = format!(
-        "PromptPickerNeverKeyPanel_{}",
-        sanitized_class_name(superclass)
-    );
-    let class_name = CString::new(class_name).map_err(|e| e.to_string())?;
-    if let Some(existing) = AnyClass::get(&class_name) {
-        return Ok(existing);
-    }
-
-    let mut builder = ClassBuilder::new(&class_name, superclass)
-        .ok_or_else(|| format!("Could not create {}", class_name.to_string_lossy()))?;
-    unsafe {
-        builder.add_method(
-            sel!(canBecomeKeyWindow),
-            never_key_window as extern "C-unwind" fn(_, _) -> _,
-        );
-        builder.add_method(
-            sel!(canBecomeMainWindow),
-            never_key_window as extern "C-unwind" fn(_, _) -> _,
-        );
-    }
-    Ok(builder.register())
-}
-
-#[cfg(target_os = "macos")]
-fn sanitized_class_name(class: &AnyClass) -> String {
-    class
-        .name()
-        .to_string_lossy()
-        .chars()
-        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
-        .collect()
 }
 
 #[cfg(target_os = "macos")]
@@ -292,22 +289,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn panel_class_action_keeps_existing_never_key_panel() {
+    fn panel_class_action_keeps_existing_native_panel() {
         assert_eq!(
-            panel_class_action_for_name("PromptPickerNeverKeyPanel_TaoWindow"),
-            PanelClassAction::AlreadyNeverKey
+            panel_class_action_for_name("PromptDrawerOverlayPanel"),
+            PanelClassAction::AlreadyNativePanel
         );
     }
 
     #[test]
-    fn panel_class_action_marks_tao_wry_as_managed_runtime() {
+    fn panel_class_action_converts_tao_wry_to_native_panel() {
         assert_eq!(
             panel_class_action_for_name("TaoWindow"),
-            PanelClassAction::ManagedTauriRuntime
+            PanelClassAction::ConvertToNativePanel
         );
         assert_eq!(
             panel_class_action_for_name("WryWindow"),
-            PanelClassAction::ManagedTauriRuntime
+            PanelClassAction::ConvertToNativePanel
         );
     }
 
@@ -316,7 +313,7 @@ mod tests {
         let report = PanelKeyBehaviorReport {
             label: "prompt-popover".to_string(),
             class_name: "TaoWindow".to_string(),
-            action: PanelClassAction::ManagedTauriRuntime,
+            action: PanelClassAction::ConvertToNativePanel,
             can_become_key: Some(true),
             can_become_main: Some(true),
         };
@@ -330,12 +327,12 @@ mod tests {
     }
 
     #[test]
-    fn non_activating_panel_configuration_mentions_never_key_window_guard() {
+    fn non_activating_panel_configuration_uses_native_nspanel() {
         let source = include_str!("macos_panels.rs");
 
-        assert!(source.contains("PromptPickerNeverKeyPanel"));
-        assert!(source.contains("canBecomeKeyWindow"));
-        assert!(source.contains("canBecomeMainWindow"));
+        assert!(source.contains("PromptDrawerOverlayPanel"));
+        assert!(source.contains("NSPanel::class()"));
+        assert!(source.contains("isKindOfClass"));
     }
 
     #[test]
