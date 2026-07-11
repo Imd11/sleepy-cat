@@ -1,12 +1,12 @@
 # Prompt Drawer
 
-> Your prompt library, ready to send.
+> Your prompt library for Codex, ready when you are.
 
 ![Prompt Drawer demo](docs/prompt-drawer-demo.gif)
 
 **Read this in:** **English** | [简体中文](README.zh-CN.md) | [हिन्दी](README.hi.md) | [Español](README.es.md) | [العربية](README.ar.md)
 
-Prompt Drawer is a local desktop prompt launcher for people who repeatedly use structured prompts in coding agents and chat-based tools. It keeps a floating Prompt Drawer button near your current input area, opens a compact prompt picker, and inserts the selected prompt into the target app.
+Prompt Drawer is a local desktop prompt library built for Codex. It keeps a floating button near the active Codex input, opens a compact prompt picker, and inserts the selected prompt where you are working.
 
 The app is built with Tauri, React, and Rust. Prompt data is stored locally on the user's machine.
 

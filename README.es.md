@@ -2,7 +2,7 @@
 
 **Leer en:** [English](README.md) | [简体中文](README.zh-CN.md) | [हिन्दी](README.hi.md) | **Español** | [العربية](README.ar.md)
 
-Prompt Drawer es un lanzador local de prompts de escritorio para personas que usan prompts estructurados una y otra vez en agentes de programación y herramientas de chat. Mantiene un botón flotante de Prompt Drawer cerca del área de entrada actual, abre un selector compacto de prompts e inserta el prompt seleccionado en la app de destino.
+Prompt Drawer es una biblioteca local de prompts de escritorio creada para Codex. Mantiene un botón flotante cerca del campo de entrada activo de Codex, abre un selector compacto e inserta el prompt seleccionado donde estás trabajando.
 
 La aplicación está construida con Tauri, React y Rust. Los datos de prompts se almacenan localmente en el equipo del usuario.
 

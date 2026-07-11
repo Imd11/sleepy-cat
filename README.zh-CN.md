@@ -1,10 +1,10 @@
 # Prompt Drawer
 
-> 你的提示词库，随时待发。
+> 为 Codex 准备的提示词库，随时可用。
 
 **阅读语言：** [English](README.md) | **简体中文** | [हिन्दी](README.hi.md) | [Español](README.es.md) | [العربية](README.ar.md)
 
-Prompt Drawer 是一个本地桌面提示词启动器，适合经常在编程 Agent 和聊天工具中重复使用结构化提示词的人。它会在当前输入区域附近保留一个悬浮的 Prompt Drawer 按钮，打开一个紧凑的提示词面板，并把选中的提示词插入目标应用。
+Prompt Drawer 是一个为 Codex 打造的本地桌面提示词库。它会在 Codex 当前输入框附近显示悬浮按钮，打开紧凑的提示词面板，并将选中的提示词填入正在使用的位置。
 
 这个应用使用 Tauri、React 和 Rust 构建。提示词数据存储在用户自己的电脑本地。
 
