@@ -562,17 +562,26 @@ export function App({
       );
       const status = submitKey === "none"
         ? statusForAutosendOutcome(
-          await pastePromptAndSubmitToLastTarget(pasteOnlyBody(prompt, bodies), submitKey),
+          await pastePromptAndSubmitToLastTarget(
+            pasteOnlyBody(prompt, bodies),
+            submitKey,
+            prompt.sendBehavior
+          ),
           t,
           t.autosend.insertedIntoInput
         )
         : prompt.type === "group"
         ? statusForAutosendSequenceOutcome(
-          await pastePromptSequenceAndSubmitToLastTarget(bodies, prompt.intervalMs, submitKey),
+          await pastePromptSequenceAndSubmitToLastTarget(
+            bodies,
+            prompt.intervalMs,
+            submitKey,
+            prompt.sendBehavior
+          ),
           t
         )
         : statusForAutosendOutcome(
-          await pastePromptAndSubmitToLastTarget(bodies[0], submitKey),
+          await pastePromptAndSubmitToLastTarget(bodies[0], submitKey, prompt.sendBehavior),
           t
         );
       if (status.kind === "sent") {

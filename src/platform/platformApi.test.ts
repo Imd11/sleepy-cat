@@ -6,7 +6,11 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: invokeMock,
 }));
 
-import { acknowledgePromptPopoverMode, setPromptButtonVisibility } from "./platformApi";
+import {
+  acknowledgePromptPopoverMode,
+  pastePromptAndSubmitToLastTarget,
+  setPromptButtonVisibility,
+} from "./platformApi";
 
 describe("platform API", () => {
   beforeEach(() => {
@@ -39,6 +43,18 @@ describe("platform API", () => {
     expect(invokeMock).toHaveBeenCalledWith("acknowledge_prompt_popover_mode", {
       requestId: 7,
       mode: "button-controls",
+    });
+  });
+
+  it("passes prompt send behavior to the native autosend command", async () => {
+    invokeMock.mockResolvedValueOnce({ copied: true, sent: true, error: null, reason: null });
+
+    await pastePromptAndSubmitToLastTarget("body", "enter", "inherit");
+
+    expect(invokeMock).toHaveBeenCalledWith("paste_prompt_and_submit_to_last_target", {
+      body: "body",
+      submit_key: "enter",
+      send_behavior: "inherit",
     });
   });
 });

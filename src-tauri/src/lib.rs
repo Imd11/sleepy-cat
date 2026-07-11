@@ -146,11 +146,14 @@ fn paste_prompt(body: String, app: tauri::AppHandle) -> Result<(), String> {
 async fn paste_prompt_and_submit_to_last_target(
     body: String,
     submit_key: Option<String>,
+    send_behavior: String,
     session_state: tauri::State<'_, PromptPickSessionState>,
     recent_state: tauri::State<'_, LastInputTargetState>,
+    settings_state: tauri::State<'_, SettingsFileState>,
     app: tauri::AppHandle,
 ) -> Result<AutosendOutcome, String> {
-    let submit_key = native_submit_key_from_arg(submit_key)?;
+    native_submit_key_from_arg(submit_key)?;
+    let submit_key = authoritative_submit_key(&send_behavior, settings_state.read_text());
     let session_state = session_state.inner().clone();
     let recent_state = recent_state.inner().clone();
     let app = app.clone();
@@ -206,15 +209,33 @@ async fn paste_prompt_sequence_and_submit_to_last_target(
     bodies: Vec<String>,
     interval_ms: u64,
     submit_key: Option<String>,
+    send_behavior: String,
     session_state: tauri::State<'_, PromptPickSessionState>,
     recent_state: tauri::State<'_, LastInputTargetState>,
+    settings_state: tauri::State<'_, SettingsFileState>,
     app: tauri::AppHandle,
 ) -> Result<AutosendSequenceOutcome, String> {
-    let submit_key = native_submit_key_from_arg(submit_key)?;
+    native_submit_key_from_arg(submit_key)?;
+    let submit_key = authoritative_submit_key(&send_behavior, settings_state.read_text());
     let session_state = session_state.inner().clone();
     let recent_state = recent_state.inner().clone();
     let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
+        if submit_key == platform::macos::NativeSubmitKey::None {
+            let body = bodies.join("\n\n");
+            let outcome = paste_prompt_and_submit_to_last_target_impl(
+                &body,
+                &session_state,
+                &recent_state,
+                &app,
+                submit_key,
+            )?;
+            return Ok(if outcome.sent {
+                AutosendSequenceOutcome::sent_all(bodies.len())
+            } else {
+                AutosendSequenceOutcome::from_failure(outcome, 0, 0)
+            });
+        }
         paste_prompt_sequence_and_submit_to_last_target_impl(
             &bodies,
             interval_ms,
@@ -304,6 +325,31 @@ fn native_submit_key_from_arg(
         "enter" => Ok(platform::macos::NativeSubmitKey::Enter),
         "command_enter" => Ok(platform::macos::NativeSubmitKey::CommandEnter),
         value => Err(format!("Invalid submit key: {}", value)),
+    }
+}
+
+fn authoritative_submit_key(
+    send_behavior: &str,
+    settings_text: Result<Option<String>, String>,
+) -> platform::macos::NativeSubmitKey {
+    match send_behavior {
+        "paste_only" => platform::macos::NativeSubmitKey::None,
+        "paste_enter" => platform::macos::NativeSubmitKey::Enter,
+        "paste_command_enter" => platform::macos::NativeSubmitKey::CommandEnter,
+        "inherit" => settings_text
+            .ok()
+            .flatten()
+            .and_then(|contents| serde_json::from_str::<serde_json::Value>(&contents).ok())
+            .and_then(|settings| {
+                settings
+                    .pointer("/promptInsertion/mode")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+            })
+            .filter(|mode| mode == "paste_and_submit")
+            .map(|_| platform::macos::NativeSubmitKey::Enter)
+            .unwrap_or(platform::macos::NativeSubmitKey::None),
+        _ => platform::macos::NativeSubmitKey::None,
     }
 }
 
@@ -3011,6 +3057,57 @@ mod last_input_target_tests {
         assert_eq!(
             native_submit_key_from_arg(Some("space".to_string())).unwrap_err(),
             "Invalid submit key: space"
+        );
+    }
+
+    #[test]
+    fn inherited_submit_behavior_uses_authoritative_paste_only_setting() {
+        let settings = serde_json::json!({
+            "promptInsertion": { "mode": "paste_only" }
+        });
+
+        assert_eq!(
+            authoritative_submit_key("inherit", Ok(Some(settings.to_string()))),
+            platform::macos::NativeSubmitKey::None
+        );
+    }
+
+    #[test]
+    fn inherited_submit_behavior_fails_closed_when_settings_cannot_be_read() {
+        assert_eq!(
+            authoritative_submit_key("inherit", Err("settings unavailable".to_string())),
+            platform::macos::NativeSubmitKey::None
+        );
+        assert_eq!(
+            authoritative_submit_key("inherit", Ok(Some("not json".to_string()))),
+            platform::macos::NativeSubmitKey::None
+        );
+        assert_eq!(
+            authoritative_submit_key("inherit", Ok(None)),
+            platform::macos::NativeSubmitKey::None
+        );
+    }
+
+    #[test]
+    fn explicit_submit_behavior_overrides_global_setting() {
+        let paste_only_settings = serde_json::json!({
+            "promptInsertion": { "mode": "paste_only" }
+        });
+
+        assert_eq!(
+            authoritative_submit_key("paste_enter", Ok(Some(paste_only_settings.to_string()))),
+            platform::macos::NativeSubmitKey::Enter
+        );
+        assert_eq!(
+            authoritative_submit_key(
+                "paste_command_enter",
+                Ok(Some(paste_only_settings.to_string()))
+            ),
+            platform::macos::NativeSubmitKey::CommandEnter
+        );
+        assert_eq!(
+            authoritative_submit_key("paste_only", Ok(Some(paste_only_settings.to_string()))),
+            platform::macos::NativeSubmitKey::None
         );
     }
 
