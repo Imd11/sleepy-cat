@@ -81,8 +81,8 @@ export async function pastePromptAndSubmitToLastTarget(
 ): Promise<AutosendOutcome> {
   return invoke<AutosendOutcome>("paste_prompt_and_submit_to_last_target", {
     body,
-    submit_key: submitKey,
-    send_behavior: sendBehavior,
+    submitKey,
+    sendBehavior,
   });
 }
 
@@ -94,7 +94,7 @@ export async function pastePromptSequenceAndSubmitToLastTarget(
 ): Promise<AutosendSequenceOutcome> {
   return invoke<AutosendSequenceOutcome>(
     "paste_prompt_sequence_and_submit_to_last_target",
-    { bodies, interval_ms: intervalMs, submit_key: submitKey, send_behavior: sendBehavior }
+    { bodies, intervalMs, submitKey, sendBehavior }
   );
 }
 

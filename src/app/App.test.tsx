@@ -511,7 +511,7 @@ describe("app", () => {
     await waitFor(() => {
       expect(vi.mocked(invoke)).toHaveBeenCalledWith(
         "paste_prompt_and_submit_to_last_target",
-        { body: "Test body", submit_key: "none", send_behavior: "inherit" }
+        { body: "Test body", submitKey: "none", sendBehavior: "inherit" }
       );
     });
   });
@@ -923,7 +923,7 @@ describe("app", () => {
     await waitFor(() => {
       expect(vi.mocked(invoke)).toHaveBeenCalledWith(
         "paste_prompt_and_submit_to_last_target",
-        { body: "Test body", submit_key: "enter", send_behavior: "inherit" }
+        { body: "Test body", submitKey: "enter", sendBehavior: "inherit" }
       );
     });
   });
@@ -964,8 +964,8 @@ describe("app", () => {
         "paste_prompt_and_submit_to_last_target",
         {
           body: "Command body",
-          submit_key: "command_enter",
-          send_behavior: "paste_command_enter",
+          submitKey: "command_enter",
+          sendBehavior: "paste_command_enter",
         }
       );
     });
@@ -1005,7 +1005,7 @@ describe("app", () => {
     await waitFor(() => {
       expect(vi.mocked(invoke)).toHaveBeenCalledWith(
         "paste_prompt_and_submit_to_last_target",
-        { body: "Paste body", submit_key: "none", send_behavior: "paste_only" }
+        { body: "Paste body", submitKey: "none", sendBehavior: "paste_only" }
       );
     });
     expect(emitMock).toHaveBeenCalledWith("prompt-autosend-status", {
@@ -1112,7 +1112,7 @@ describe("app", () => {
     await waitFor(() => {
       expect(vi.mocked(invoke)).toHaveBeenCalledWith(
         "paste_prompt_and_submit_to_last_target",
-        { body: "Test body", submit_key: "none", send_behavior: "inherit" }
+        { body: "Test body", submitKey: "none", sendBehavior: "inherit" }
       );
     });
     expect(vi.mocked(invoke)).not.toHaveBeenCalledWith(
@@ -1236,7 +1236,7 @@ describe("app", () => {
     await waitFor(() => {
       expect(vi.mocked(invoke)).toHaveBeenCalledWith(
         "paste_prompt_and_submit_to_last_target",
-        { body: "Test body", submit_key: "enter", send_behavior: "inherit" }
+        { body: "Test body", submitKey: "enter", sendBehavior: "inherit" }
       );
     });
     expect(callOrder.indexOf("invoke:hide_prompt_popover")).toBeLessThan(
@@ -1297,9 +1297,9 @@ describe("app", () => {
         "paste_prompt_sequence_and_submit_to_last_target",
         {
           bodies: ["First prompt", "Second prompt"],
-          interval_ms: 700,
-          submit_key: "enter",
-          send_behavior: "inherit",
+          intervalMs: 700,
+          submitKey: "enter",
+          sendBehavior: "inherit",
         }
       );
     });
@@ -1359,9 +1359,9 @@ describe("app", () => {
         "paste_prompt_sequence_and_submit_to_last_target",
         {
           bodies: ["First prompt", "Second prompt"],
-          interval_ms: 700,
-          submit_key: "enter",
-          send_behavior: "inherit",
+          intervalMs: 700,
+          submitKey: "enter",
+          sendBehavior: "inherit",
         }
       );
     });
@@ -1569,7 +1569,7 @@ describe("app", () => {
       await waitFor(() => {
         expect(vi.mocked(invoke)).toHaveBeenCalledWith(
           "paste_prompt_and_submit_to_last_target",
-          { body: "Test body", submit_key: "enter", send_behavior: "inherit" }
+          { body: "Test body", submitKey: "enter", sendBehavior: "inherit" }
         );
       });
     } finally {
@@ -1601,7 +1601,7 @@ describe("app", () => {
       expect(vi.mocked(invoke)).toHaveBeenCalledWith("hide_prompt_popover");
       expect(vi.mocked(invoke)).toHaveBeenCalledWith(
         "paste_prompt_and_submit_to_last_target",
-        { body: "Test body", submit_key: "enter", send_behavior: "inherit" }
+        { body: "Test body", submitKey: "enter", sendBehavior: "inherit" }
       );
     });
 
@@ -1671,7 +1671,7 @@ describe("app", () => {
     await waitFor(() => {
       expect(vi.mocked(invoke)).toHaveBeenCalledWith(
         "paste_prompt_and_submit_to_last_target",
-        { body: "Test body", submit_key: "enter", send_behavior: "inherit" }
+        { body: "Test body", submitKey: "enter", sendBehavior: "inherit" }
       );
     });
 

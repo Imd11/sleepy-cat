@@ -9,6 +9,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 import {
   acknowledgePromptPopoverMode,
   pastePromptAndSubmitToLastTarget,
+  pastePromptSequenceAndSubmitToLastTarget,
   setPromptButtonVisibility,
 } from "./platformApi";
 
@@ -53,8 +54,33 @@ describe("platform API", () => {
 
     expect(invokeMock).toHaveBeenCalledWith("paste_prompt_and_submit_to_last_target", {
       body: "body",
-      submit_key: "enter",
-      send_behavior: "inherit",
+      submitKey: "enter",
+      sendBehavior: "inherit",
+    });
+  });
+
+  it("passes sequence arguments using Tauri's camelCase command keys", async () => {
+    invokeMock.mockResolvedValueOnce({
+      copied: true,
+      sent: true,
+      sent_count: 2,
+      failed_index: null,
+      error: null,
+      reason: null,
+    });
+
+    await pastePromptSequenceAndSubmitToLastTarget(
+      ["first", "second"],
+      750,
+      "command_enter",
+      "paste_command_enter"
+    );
+
+    expect(invokeMock).toHaveBeenCalledWith("paste_prompt_sequence_and_submit_to_last_target", {
+      bodies: ["first", "second"],
+      intervalMs: 750,
+      submitKey: "command_enter",
+      sendBehavior: "paste_command_enter",
     });
   });
 });
