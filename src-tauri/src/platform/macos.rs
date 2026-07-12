@@ -2,6 +2,7 @@
 
 mod ax_client;
 mod ax_diagnostics;
+mod input_profiles;
 mod process_group;
 
 use ax_client::{
