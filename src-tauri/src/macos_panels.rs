@@ -358,7 +358,9 @@ mod tests {
     #[test]
     fn target_activation_is_pid_bound_and_dispatched_to_the_main_thread() {
         let source = include_str!("macos_panels.rs");
-        let start = source.find("pub(crate) fn activate_running_application").unwrap();
+        let start = source
+            .find("pub(crate) fn activate_running_application")
+            .unwrap();
         let end = source[start..].find("pub fn activate_main_window").unwrap();
         let activation = &source[start..start + end];
 
