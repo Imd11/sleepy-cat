@@ -5,8 +5,8 @@ use objc2::{
 };
 #[cfg(target_os = "macos")]
 use objc2_app_kit::{
-    NSApplication, NSColor, NSPanel, NSScreenSaverWindowLevel, NSWindow,
-    NSWindowCollectionBehavior, NSWindowStyleMask,
+    NSApplication, NSApplicationActivationOptions, NSColor, NSPanel, NSRunningApplication,
+    NSScreenSaverWindowLevel, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask,
 };
 #[cfg(target_os = "macos")]
 use objc2_foundation::{NSNumber, NSString};
@@ -55,6 +55,21 @@ where
     receiver
         .recv()
         .map_err(|_| "macOS window task ended without a result".to_string())?
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn activate_running_application(
+    app: &tauri::AppHandle,
+    pid: u32,
+) -> Result<(), String> {
+    run_on_main_thread_sync(app, move || {
+        let running = NSRunningApplication::runningApplicationWithProcessIdentifier(pid as i32)
+            .ok_or_else(|| format!("Target process {pid} is no longer running."))?;
+        running
+            .activateWithOptions(NSApplicationActivationOptions::empty())
+            .then_some(())
+            .ok_or_else(|| format!("Target process {pid} could not be activated."))
+    })
 }
 
 #[cfg(target_os = "macos")]

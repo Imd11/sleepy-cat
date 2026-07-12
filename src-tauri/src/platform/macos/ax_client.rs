@@ -6,6 +6,7 @@ use super::{AXUIElementRef, CFTypeRef, CandidateInput};
 const K_CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
 const K_AX_VALUE_CG_POINT_TYPE: i32 = 1;
 const K_AX_VALUE_CG_SIZE_TYPE: i32 = 2;
+const K_AX_VALUE_CF_RANGE_TYPE: i32 = 4;
 const AX_ERROR_SUCCESS: i32 = 0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,6 +70,13 @@ struct AxPoint {
 struct AxSize {
     width: f64,
     height: f64,
+}
+
+#[repr(C)]
+#[derive(Default)]
+struct AxRange {
+    location: isize,
+    length: isize,
 }
 
 #[link(name = "ApplicationServices", kind = "framework")]
@@ -154,6 +162,25 @@ pub(super) fn ax_string_attribute(element: AXUIElementRef, attribute: &str) -> O
 
 pub(super) fn ax_bool_attribute(element: AXUIElementRef, attribute: &str) -> Option<bool> {
     copy_ax_attribute(element, attribute).and_then(|value| cf_bool_value(value.as_ptr()))
+}
+
+pub(super) fn ax_range_attribute(
+    element: AXUIElementRef,
+    attribute: &str,
+) -> Option<(isize, isize)> {
+    let value = copy_ax_attribute(element, attribute)?;
+    if unsafe { AXValueGetType(value.as_ptr()) } != K_AX_VALUE_CF_RANGE_TYPE {
+        return None;
+    }
+    let mut range = AxRange::default();
+    (unsafe {
+        AXValueGetValue(
+            value.as_ptr(),
+            K_AX_VALUE_CF_RANGE_TYPE,
+            (&mut range as *mut AxRange).cast(),
+        )
+    } != 0)
+        .then_some((range.location, range.length))
 }
 
 pub(super) fn ax_attribute_is_settable(element: AXUIElementRef, attribute: &str) -> bool {

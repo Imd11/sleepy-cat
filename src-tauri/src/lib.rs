@@ -210,6 +210,19 @@ impl AutosendSequenceOutcome {
             reason: outcome.reason,
         }
     }
+
+    fn from_paste_only(outcome: AutosendOutcome, processed_count: usize) -> Self {
+        Self {
+            copied: outcome.copied,
+            sent: false,
+            sent_count: 0,
+            processed_count,
+            completion: outcome.completion,
+            failed_index: None,
+            error: outcome.error,
+            reason: outcome.reason,
+        }
+    }
 }
 
 #[tauri::command]
@@ -237,7 +250,9 @@ async fn paste_prompt_sequence_and_submit_to_last_target(
                 &app,
                 submit_key,
             )?;
-            return Ok(if outcome.sent {
+            return Ok(if outcome.completion == Some(platform::AutosendCompletion::PastedOnly) {
+                AutosendSequenceOutcome::from_paste_only(outcome, bodies.len())
+            } else if outcome.sent {
                 AutosendSequenceOutcome::sent_all(bodies.len())
             } else {
                 AutosendSequenceOutcome::from_failure(outcome, 0, 0)
@@ -264,10 +279,19 @@ fn paste_prompt_sequence_and_submit_to_last_target_impl(
     app: &tauri::AppHandle,
     submit_key: platform::macos::NativeSubmitKey,
 ) -> Result<AutosendSequenceOutcome, String> {
-    let captured_window = state
+    let Some(captured_identity) = state
         .captured_identity()
         .or_else(|| recent_state.captured_identity())
-        .and_then(|identity| identity.window.map(|window| window.frame));
+    else {
+        return Ok(AutosendSequenceOutcome::from_failure(
+            stale_target_outcome(),
+            0,
+            0,
+        ));
+    };
+    let target_pid = captured_identity.application.main_pid;
+    let target_launch_identity = captured_identity.application.launch_identity;
+    let captured_window = captured_identity.window.map(|window| window.frame);
     paste_prompt_sequence_and_submit_to_session_target_with_senders(
         bodies,
         interval_ms,
@@ -278,9 +302,12 @@ fn paste_prompt_sequence_and_submit_to_last_target_impl(
             platform::macos::paste_prompt_and_submit_to_app_clipboard_with_copier(
                 body,
                 bundle_id,
+                target_pid,
+                target_launch_identity,
                 click_point.map(|point| (point.x, point.y)),
                 captured_window.as_ref(),
                 submit_key,
+                |pid| activate_target_process(app, pid),
                 |text| copy_text_to_clipboard(app, text),
             )
         },
@@ -296,10 +323,15 @@ fn paste_prompt_and_submit_to_last_target_impl(
     app: &tauri::AppHandle,
     submit_key: platform::macos::NativeSubmitKey,
 ) -> Result<AutosendOutcome, String> {
-    let captured_window = state
+    let Some(captured_identity) = state
         .captured_identity()
         .or_else(|| recent_state.captured_identity())
-        .and_then(|identity| identity.window.map(|window| window.frame));
+    else {
+        return Ok(stale_target_outcome());
+    };
+    let target_pid = captured_identity.application.main_pid;
+    let target_launch_identity = captured_identity.application.launch_identity;
+    let captured_window = captured_identity.window.map(|window| window.frame);
     paste_prompt_and_submit_to_session_target_with_senders(
         body,
         state,
@@ -309,14 +341,27 @@ fn paste_prompt_and_submit_to_last_target_impl(
             platform::macos::paste_prompt_and_submit_to_app_clipboard_with_copier(
                 body,
                 bundle_id,
+                target_pid,
+                target_launch_identity,
                 click_point.map(|point| (point.x, point.y)),
                 captured_window.as_ref(),
                 submit_key,
+                |pid| activate_target_process(app, pid),
                 |text| copy_text_to_clipboard(app, text),
             )
         },
         |text| copy_text_to_clipboard(app, text),
     )
+}
+
+#[cfg(target_os = "macos")]
+fn activate_target_process(app: &tauri::AppHandle, pid: u32) -> Result<(), String> {
+    crate::macos_panels::activate_running_application(app, pid)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn activate_target_process(_app: &tauri::AppHandle, _pid: u32) -> Result<(), String> {
+    Err("Target activation is only implemented on macOS.".to_string())
 }
 
 fn copy_text_to_clipboard(app: &tauri::AppHandle, body: &str) -> Result<(), String> {
@@ -4358,6 +4403,21 @@ mod last_input_target_tests {
             Some(platform::AutosendCompletion::PastedOnly)
         );
         assert_eq!(outcome.failed_index, None);
+    }
+
+    #[test]
+    fn paste_only_sequence_success_is_not_serialized_as_a_failure() {
+        let outcome = AutosendSequenceOutcome::from_paste_only(
+            AutosendOutcome::pasted_only(),
+            3,
+        );
+
+        assert!(outcome.copied);
+        assert!(!outcome.sent);
+        assert_eq!(outcome.processed_count, 3);
+        assert_eq!(outcome.failed_index, None);
+        assert_eq!(outcome.error, None);
+        assert_eq!(outcome.reason, None);
     }
 
     #[test]

@@ -61,21 +61,16 @@ pub(super) fn input_capability_profile(
             InputCapabilityProfile::Accessibility(accessibility_profile(
                 ProcessScope::MainOnly,
                 ManualAccessibilityPolicy::OnlyWhenTreeSparse,
-                observed_version
-                    .filter(|version| version.starts_with("1."))
-                    .map(|_| PasteVerificationPolicy::FocusStableAfterProfiledDelay {
-                        min_ms: 80,
-                        max_ms: 350,
-                    })
+                (observed_version == Some("1.18286.0"))
+                    .then_some(PasteVerificationPolicy::ValueLengthOrHashChange)
                     .unwrap_or(PasteVerificationPolicy::PasteOnlyWithoutSubmitEvidence),
             ))
         }
         "com.tencent.xinWeChat" => InputCapabilityProfile::Accessibility(accessibility_profile(
             ProcessScope::MainAndValidatedBrowserApplications,
             ManualAccessibilityPolicy::Never,
-            observed_version
-                .filter(|version| version.starts_with("4.1."))
-                .map(|_| PasteVerificationPolicy::SelectionRangeChange)
+            (observed_version == Some("4.1.2"))
+                .then_some(PasteVerificationPolicy::SelectionRangeChange)
                 .unwrap_or(PasteVerificationPolicy::PasteOnlyWithoutSubmitEvidence),
         )),
         _ => InputCapabilityProfile::LegacyCapturedTarget,
@@ -173,6 +168,21 @@ mod tests {
         for bundle_id in ["com.anthropic.claudefordesktop", "com.tencent.xinWeChat"] {
             let InputCapabilityProfile::Accessibility(profile) =
                 input_capability_profile(bundle_id, Some("99.0"))
+            else {
+                panic!("expected accessibility profile");
+            };
+            assert!(!profile.permits_submit());
+        }
+    }
+
+    #[test]
+    fn uncalibrated_patch_versions_cannot_inherit_submit_evidence() {
+        for (bundle_id, version) in [
+            ("com.anthropic.claudefordesktop", "1.18286.1"),
+            ("com.tencent.xinWeChat", "4.1.3"),
+        ] {
+            let InputCapabilityProfile::Accessibility(profile) =
+                input_capability_profile(bundle_id, Some(version))
             else {
                 panic!("expected accessibility profile");
             };

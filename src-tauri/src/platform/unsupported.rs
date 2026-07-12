@@ -224,16 +224,20 @@ pub fn recover_target_app_for_autosend(
     Err("Target recovery is only implemented for macOS targets.".to_string())
 }
 
-pub fn paste_prompt_and_submit_to_app_clipboard_with_copier<C>(
+pub fn paste_prompt_and_submit_to_app_clipboard_with_copier<C, A>(
     body: &str,
     _bundle_id: &str,
+    _target_pid: u32,
+    _target_launch_identity: ProcessLaunchIdentity,
     _click_point: Option<(f64, f64)>,
     _captured_window: Option<&CandidateInput>,
     _submit_key: NativeSubmitKey,
+    _activate_target: A,
     copy_sender: C,
 ) -> AutosendOutcome
 where
     C: FnOnce(&str) -> Result<(), String>,
+    A: FnMut(u32) -> Result<(), String>,
 {
     match copy_sender(body) {
         Ok(()) => AutosendOutcome::copied_without_send(

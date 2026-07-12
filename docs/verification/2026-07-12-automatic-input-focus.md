@@ -21,7 +21,16 @@ No prompt text, conversation text, clipboard content, or raw Accessibility value
 
 ## Automated Gates
 
-The final command results are recorded during Task 14 after formatting, Rust, frontend, Windows-target, fixture-repetition, and diff checks finish.
+- GitHub Actions run: `29189426445`
+- macOS `cargo fmt --check`: passed
+- macOS `cargo check`: passed
+- macOS `cargo test --lib`: 257 passed, 0 failed, 2 ignored
+- macOS `npm test`: 27 files passed, 317 tests passed
+- macOS `npm run build`: passed
+- Windows `cargo check`: passed
+- Windows `npm run build`: passed
+- Fixture transaction repetition: covered by the Rust suite above; 100 paste-only and 100 paste-and-submit transactions complete with one paste and at most one submit per transaction.
+- `git diff --check`: passed before the final verification-record update.
 
 ## Real-App Gate
 
