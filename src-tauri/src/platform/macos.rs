@@ -599,7 +599,10 @@ fn native_editable_candidate(element: OwnedCf, depth: usize) -> Option<NativeEdi
     let enabled = ax_bool_attribute(element.as_ptr(), "AXEnabled").unwrap_or(true);
     let focused = ax_bool_attribute(element.as_ptr(), "AXFocused").unwrap_or(false);
     let subrole = ax_string_attribute(element.as_ptr(), "AXSubrole");
-    if matches!(subrole.as_deref(), Some("AXSecureTextField" | "AXSearchField")) {
+    if matches!(
+        subrole.as_deref(),
+        Some("AXSecureTextField" | "AXSearchField")
+    ) {
         return None;
     }
     Some(NativeEditableCandidate {
@@ -1043,11 +1046,7 @@ fn recover_target_after_activation(
                 bundle_id
             )
         })?;
-    verify_captured_window_for_policy(
-        input_focus_policy(bundle_id),
-        target_pid,
-        captured_window,
-    )?;
+    verify_captured_window_for_policy(input_focus_policy(bundle_id), target_pid, captured_window)?;
     match input_focus_policy(bundle_id) {
         InputFocusPolicy::PreserveApplicationFirstResponder => {
             if let Some((x, y)) = click_point {
@@ -1059,9 +1058,11 @@ fn recover_target_after_activation(
         InputFocusPolicy::ResolveEditableElement => {
             let captured_window = captured_window
                 .ok_or_else(|| "The captured target window is no longer available.".to_string())?;
-            focus_editable_input_for_pid(target_pid, bundle_id, captured_window)?.ok_or_else(|| {
-                "No unambiguous editable composer was found in the captured window.".to_string()
-            }).map(Some)
+            focus_editable_input_for_pid(target_pid, bundle_id, captured_window)?
+                .ok_or_else(|| {
+                    "No unambiguous editable composer was found in the captured window.".to_string()
+                })
+                .map(Some)
         }
     }
 }

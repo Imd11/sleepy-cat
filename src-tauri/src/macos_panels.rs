@@ -58,10 +58,7 @@ where
 }
 
 #[cfg(target_os = "macos")]
-pub(crate) fn activate_running_application(
-    app: &tauri::AppHandle,
-    pid: u32,
-) -> Result<(), String> {
+pub(crate) fn activate_running_application(app: &tauri::AppHandle, pid: u32) -> Result<(), String> {
     run_on_main_thread_sync(app, move || {
         let running = NSRunningApplication::runningApplicationWithProcessIdentifier(pid as i32)
             .ok_or_else(|| format!("Target process {pid} is no longer running."))?;

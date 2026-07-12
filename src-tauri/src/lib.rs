@@ -250,13 +250,15 @@ async fn paste_prompt_sequence_and_submit_to_last_target(
                 &app,
                 submit_key,
             )?;
-            return Ok(if outcome.completion == Some(platform::AutosendCompletion::PastedOnly) {
-                AutosendSequenceOutcome::from_paste_only(outcome, bodies.len())
-            } else if outcome.sent {
-                AutosendSequenceOutcome::sent_all(bodies.len())
-            } else {
-                AutosendSequenceOutcome::from_failure(outcome, 0, 0)
-            });
+            return Ok(
+                if outcome.completion == Some(platform::AutosendCompletion::PastedOnly) {
+                    AutosendSequenceOutcome::from_paste_only(outcome, bodies.len())
+                } else if outcome.sent {
+                    AutosendSequenceOutcome::sent_all(bodies.len())
+                } else {
+                    AutosendSequenceOutcome::from_failure(outcome, 0, 0)
+                },
+            );
         }
         paste_prompt_sequence_and_submit_to_last_target_impl(
             &bodies,
@@ -4407,10 +4409,7 @@ mod last_input_target_tests {
 
     #[test]
     fn paste_only_sequence_success_is_not_serialized_as_a_failure() {
-        let outcome = AutosendSequenceOutcome::from_paste_only(
-            AutosendOutcome::pasted_only(),
-            3,
-        );
+        let outcome = AutosendSequenceOutcome::from_paste_only(AutosendOutcome::pasted_only(), 3);
 
         assert!(outcome.copied);
         assert!(!outcome.sent);
