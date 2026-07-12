@@ -12,6 +12,12 @@ pub struct FrontmostAppWithPid {
     pub pid: Option<u32>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct ProcessLaunchIdentity {
+    pub seconds: u64,
+    pub microseconds: u64,
+}
+
 #[derive(Debug, Serialize)]
 pub struct AccessibilityStatus {
     pub trusted: bool,
@@ -119,14 +125,19 @@ pub struct InputTarget {
     pub button_position: (f64, f64),
     pub click_point: (f64, f64),
     pub app: Option<FrontmostApp>,
+    pub pid: u32,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct CandidateInput {
     pub x: f64,
     pub y: f64,
     pub width: f64,
     pub height: f64,
+}
+
+pub fn process_launch_identity(_pid: u32) -> Option<ProcessLaunchIdentity> {
+    None
 }
 
 pub fn accessibility_status() -> AccessibilityStatus {
@@ -147,10 +158,6 @@ pub fn frontmost_app() -> Option<FrontmostApp> {
 
 pub fn frontmost_app_with_pid() -> Option<FrontmostAppWithPid> {
     None
-}
-
-pub fn visible_apps() -> Vec<FrontmostApp> {
-    Vec::new()
 }
 
 pub fn current_input_target() -> Option<InputTarget> {

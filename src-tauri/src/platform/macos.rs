@@ -27,6 +27,12 @@ pub struct FrontmostAppWithPid {
     pub pid: Option<u32>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct ProcessLaunchIdentity {
+    pub seconds: u64,
+    pub microseconds: u64,
+}
+
 #[derive(Debug, Serialize)]
 pub struct AccessibilityStatus {
     pub trusted: bool,
@@ -310,20 +316,6 @@ fn app_info_from_lsappinfo_output(info: &str) -> Option<FrontmostAppInfo> {
     })
 }
 
-pub fn visible_apps() -> Vec<FrontmostApp> {
-    let Ok(output) = Command::new("lsappinfo").arg("visibleProcessList").output() else {
-        return Vec::new();
-    };
-    if !output.status.success() {
-        return Vec::new();
-    }
-
-    parse_visible_process_asns(String::from_utf8_lossy(&output.stdout).as_ref())
-        .into_iter()
-        .filter_map(|asn| app_info_for_asn(&asn).map(|info| info.app))
-        .collect()
-}
-
 // ── Current Input Target ──────────────────────────────────────────────────────
 
 #[derive(Clone, Debug, Serialize)]
@@ -333,14 +325,70 @@ pub struct InputTarget {
     pub button_position: (f64, f64),
     pub click_point: (f64, f64),
     pub app: Option<FrontmostApp>,
+    pub pid: u32,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct CandidateInput {
     pub x: f64,
     pub y: f64,
     pub width: f64,
     pub height: f64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct ProcBsdInfo {
+    flags: u32,
+    status: u32,
+    xstatus: u32,
+    pid: u32,
+    ppid: u32,
+    uid: u32,
+    gid: u32,
+    ruid: u32,
+    rgid: u32,
+    svuid: u32,
+    svgid: u32,
+    rfu_1: u32,
+    comm: [u8; 16],
+    name: [u8; 32],
+    nfiles: u32,
+    pgid: u32,
+    pjobc: u32,
+    e_tdev: u32,
+    e_tpgid: u32,
+    nice: i32,
+    start_tvsec: u64,
+    start_tvusec: u64,
+}
+
+const PROC_PIDTBSDINFO: i32 = 3;
+
+unsafe extern "C" {
+    fn proc_pidinfo(pid: i32, flavor: i32, arg: u64, buffer: *mut c_void, buffersize: i32) -> i32;
+}
+
+pub fn process_launch_identity(pid: u32) -> Option<ProcessLaunchIdentity> {
+    let mut info = std::mem::MaybeUninit::<ProcBsdInfo>::zeroed();
+    let expected = std::mem::size_of::<ProcBsdInfo>() as i32;
+    let written = unsafe {
+        proc_pidinfo(
+            pid.try_into().ok()?,
+            PROC_PIDTBSDINFO,
+            0,
+            info.as_mut_ptr().cast(),
+            expected,
+        )
+    };
+    if written != expected {
+        return None;
+    }
+    let info = unsafe { info.assume_init() };
+    Some(ProcessLaunchIdentity {
+        seconds: info.start_tvsec,
+        microseconds: info.start_tvusec,
+    })
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -822,7 +870,9 @@ end run"#,
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    parse_focused_input_output(stdout.trim(), &app)
+    let mut target = parse_focused_input_output(stdout.trim(), &app)?;
+    target.pid = pid;
+    Some(target)
 }
 
 fn parse_xy(s: &str) -> Option<(f64, f64)> {
@@ -1779,6 +1829,7 @@ pub fn parse_focused_input_output(raw: &str, app: &FrontmostApp) -> Option<Input
         button_position,
         click_point,
         app: Some(app.clone()),
+        pid: 0,
     })
 }
 

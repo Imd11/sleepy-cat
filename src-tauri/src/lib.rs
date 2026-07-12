@@ -123,15 +123,18 @@ async fn begin_prompt_pick_session(
             record_last_input_target_if_valid(&recent_state, &input_target);
         }
 
-        let Some(target) = prompt_pick_session_target(
-            platform::frontmost_app_with_pid(),
-            platform::macos::visible_apps(),
-            recent_state.get(),
-        ) else {
+        let recent_identity = recent_state.captured_identity();
+        let Some(target) =
+            prompt_pick_session_target(platform::frontmost_app_with_pid(), recent_state.get())
+        else {
             session_state.clear_if_current(session_id);
             return None;
         };
-        record_prompt_pick_session_target_if_valid(&session_state, target, session_id)
+        let Some(identity) = captured_identity_for_target(&target, recent_identity.as_ref()) else {
+            session_state.clear_if_current(session_id);
+            return None;
+        };
+        record_prompt_pick_session_target_if_valid(&session_state, target, identity, session_id)
     })
     .await
     .map_err(|error| format!("Prompt pick session task failed: {}", error))
@@ -373,21 +376,38 @@ fn recover_target_for_autosend(target: &PromptPickSessionTarget) -> Result<(), S
 fn prompt_pick_target_or_recent(
     session_state: &PromptPickSessionState,
     recent_state: Option<&LastInputTargetState>,
-) -> Option<PromptPickSessionTarget> {
-    if let Some(target) = session_state.take() {
-        return Some(target);
+) -> Option<CapturedPromptTarget> {
+    if let Some((target, identity)) = session_state.take_captured() {
+        return Some(CapturedPromptTarget { target, identity });
     }
 
-    recent_state
-        .and_then(LastInputTargetState::get)
-        .filter(is_recent_prompt_target)
-        .filter(|target| is_usable_autosend_app(&target.app))
-        .map(|target| PromptPickSessionTarget {
+    let recent_state = recent_state?;
+    let target = recent_state.get()?;
+    if !is_recent_prompt_target(&target) || !is_usable_autosend_app(&target.app) {
+        return None;
+    }
+    Some(CapturedPromptTarget {
+        target: PromptPickSessionTarget {
             app: target.app,
             pid: target.pid,
             observed_at_ms: now_ms(),
             click_point: target.click_point,
-        })
+        },
+        identity: recent_state.captured_identity(),
+    })
+}
+
+struct CapturedPromptTarget {
+    target: PromptPickSessionTarget,
+    identity: Option<CapturedTargetIdentity>,
+}
+
+impl std::ops::Deref for CapturedPromptTarget {
+    type Target = PromptPickSessionTarget;
+
+    fn deref(&self) -> &Self::Target {
+        &self.target
+    }
 }
 
 #[allow(dead_code)]
@@ -418,6 +438,14 @@ where
             "No prompt pick target app was recorded for autosend.",
         ));
     };
+
+    if target
+        .identity
+        .as_ref()
+        .is_some_and(|identity| !captured_target_identity_is_current(identity))
+    {
+        return Ok(stale_target_outcome());
+    }
 
     if is_unsafe_autosend_target(&target.app) {
         return Ok(copy_without_sending(
@@ -495,6 +523,18 @@ where
         );
         return Ok(AutosendSequenceOutcome::from_failure(outcome, 0, 1));
     };
+
+    if target
+        .identity
+        .as_ref()
+        .is_some_and(|identity| !captured_target_identity_is_current(identity))
+    {
+        return Ok(AutosendSequenceOutcome::from_failure(
+            stale_target_outcome(),
+            0,
+            0,
+        ));
+    }
 
     if is_unsafe_autosend_target(&target.app) || !allows_app_only_autosend(&target.app) {
         let outcome = copy_without_sending(
@@ -711,6 +751,14 @@ where
         ));
     };
 
+    if target
+        .identity
+        .as_ref()
+        .is_some_and(|identity| !captured_target_identity_is_current(identity))
+    {
+        return Ok(stale_target_outcome());
+    }
+
     if is_unsafe_autosend_target(&target.app) {
         return Ok(copy_without_sending(
             body,
@@ -776,6 +824,18 @@ where
         );
         return Ok(AutosendSequenceOutcome::from_failure(outcome, 0, 1));
     };
+
+    if target
+        .identity
+        .as_ref()
+        .is_some_and(|identity| !captured_target_identity_is_current(identity))
+    {
+        return Ok(AutosendSequenceOutcome::from_failure(
+            stale_target_outcome(),
+            0,
+            0,
+        ));
+    }
 
     if is_unsafe_autosend_target(&target.app) || !allows_app_only_autosend(&target.app) {
         let outcome = copy_without_sending(
@@ -874,22 +934,69 @@ pub struct TargetClickPoint {
     pub y: f64,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+struct TargetApplicationIdentity {
+    bundle_id: String,
+    main_pid: u32,
+    launch_identity: platform::ProcessLaunchIdentity,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct TargetWindowIdentity {
+    owner_pid: u32,
+    frame: CandidateInput,
+    role: Option<String>,
+    title_hash: Option<String>,
+    cg_window_id: Option<u32>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct CapturedTargetIdentity {
+    application: TargetApplicationIdentity,
+    window: Option<TargetWindowIdentity>,
+}
+
+#[derive(Default)]
+struct LastInputTargetInner {
+    target: Option<LastInputTarget>,
+    identity: Option<CapturedTargetIdentity>,
+}
+
 #[derive(Clone, Default)]
-pub struct LastInputTargetState(std::sync::Arc<std::sync::Mutex<Option<LastInputTarget>>>);
+pub struct LastInputTargetState(std::sync::Arc<std::sync::Mutex<LastInputTargetInner>>);
 
 impl LastInputTargetState {
     pub fn set(&self, target: LastInputTarget) {
-        *self.0.lock().expect("last input target lock poisoned") = Some(target);
+        let mut state = self.0.lock().expect("last input target lock poisoned");
+        state.target = Some(target);
+        state.identity = None;
+    }
+
+    fn set_captured(&self, target: LastInputTarget, identity: CapturedTargetIdentity) {
+        let mut state = self.0.lock().expect("last input target lock poisoned");
+        state.target = Some(target);
+        state.identity = Some(identity);
     }
 
     pub fn clear(&self) {
-        *self.0.lock().expect("last input target lock poisoned") = None;
+        let mut state = self.0.lock().expect("last input target lock poisoned");
+        state.target = None;
+        state.identity = None;
     }
 
     pub fn get(&self) -> Option<LastInputTarget> {
         self.0
             .lock()
             .expect("last input target lock poisoned")
+            .target
+            .clone()
+    }
+
+    fn captured_identity(&self) -> Option<CapturedTargetIdentity> {
+        self.0
+            .lock()
+            .expect("last input target lock poisoned")
+            .identity
             .clone()
     }
 }
@@ -906,6 +1013,7 @@ pub struct PromptPickSessionTarget {
 struct PromptPickSessionInner {
     active_session_id: u64,
     target: Option<PromptPickSessionTarget>,
+    identity: Option<CapturedTargetIdentity>,
 }
 
 #[derive(Clone, Default)]
@@ -916,6 +1024,7 @@ impl PromptPickSessionState {
         let mut state = self.0.lock().expect("prompt pick session lock poisoned");
         state.active_session_id = session_id;
         state.target = None;
+        state.identity = None;
     }
 
     pub fn begin_if_new(&self, session_id: u64) {
@@ -925,13 +1034,13 @@ impl PromptPickSessionState {
         }
         state.active_session_id = session_id;
         state.target = None;
+        state.identity = None;
     }
 
     pub fn set(&self, target: PromptPickSessionTarget) {
-        self.0
-            .lock()
-            .expect("prompt pick session lock poisoned")
-            .target = Some(target);
+        let mut state = self.0.lock().expect("prompt pick session lock poisoned");
+        state.target = Some(target);
+        state.identity = None;
     }
 
     pub fn set_if_current(&self, session_id: u64, target: PromptPickSessionTarget) -> bool {
@@ -940,14 +1049,29 @@ impl PromptPickSessionState {
             return false;
         }
         state.target = Some(target);
+        state.identity = None;
+        true
+    }
+
+    fn set_captured_if_current(
+        &self,
+        session_id: u64,
+        target: PromptPickSessionTarget,
+        identity: CapturedTargetIdentity,
+    ) -> bool {
+        let mut state = self.0.lock().expect("prompt pick session lock poisoned");
+        if state.active_session_id != session_id {
+            return false;
+        }
+        state.target = Some(target);
+        state.identity = Some(identity);
         true
     }
 
     pub fn clear(&self) {
-        self.0
-            .lock()
-            .expect("prompt pick session lock poisoned")
-            .target = None;
+        let mut state = self.0.lock().expect("prompt pick session lock poisoned");
+        state.target = None;
+        state.identity = None;
     }
 
     pub fn clear_if_current(&self, session_id: u64) -> bool {
@@ -956,6 +1080,7 @@ impl PromptPickSessionState {
             return false;
         }
         state.target = None;
+        state.identity = None;
         true
     }
 
@@ -968,11 +1093,15 @@ impl PromptPickSessionState {
     }
 
     pub fn take(&self) -> Option<PromptPickSessionTarget> {
-        self.0
-            .lock()
-            .expect("prompt pick session lock poisoned")
-            .target
-            .take()
+        let mut state = self.0.lock().expect("prompt pick session lock poisoned");
+        state.identity = None;
+        state.target.take()
+    }
+
+    fn take_captured(&self) -> Option<(PromptPickSessionTarget, Option<CapturedTargetIdentity>)> {
+        let mut state = self.0.lock().expect("prompt pick session lock poisoned");
+        let target = state.target.take()?;
+        Some((target, state.identity.take()))
     }
 }
 
@@ -1495,6 +1624,7 @@ impl SettingsFileState {
 fn record_prompt_pick_session_target_if_valid(
     state: &PromptPickSessionState,
     target: PromptPickSessionTarget,
+    identity: CapturedTargetIdentity,
     session_id: u64,
 ) -> Option<FrontmostApp> {
     if !is_usable_autosend_app(&target.app) {
@@ -1503,12 +1633,89 @@ fn record_prompt_pick_session_target_if_valid(
     }
 
     let app = target.app.clone();
-    state.set_if_current(session_id, target).then_some(app)
+    state
+        .set_captured_if_current(session_id, target, identity)
+        .then_some(app)
+}
+
+fn captured_identity_for_target(
+    target: &PromptPickSessionTarget,
+    recent_identity: Option<&CapturedTargetIdentity>,
+) -> Option<CapturedTargetIdentity> {
+    let pid = target.pid?;
+    if let Some(identity) = recent_identity.filter(|identity| {
+        identity.application.bundle_id == target.app.bundle_id
+            && identity.application.main_pid == pid
+            && target_application_identity_is_current(&identity.application)
+    }) {
+        return Some(identity.clone());
+    }
+
+    Some(CapturedTargetIdentity {
+        application: TargetApplicationIdentity {
+            bundle_id: target.app.bundle_id.clone(),
+            main_pid: pid,
+            launch_identity: platform::macos::process_launch_identity(pid)?,
+        },
+        window: None,
+    })
+}
+
+fn target_application_identity_is_current(identity: &TargetApplicationIdentity) -> bool {
+    target_application_identity_matches(
+        identity,
+        platform::macos::process_launch_identity(identity.main_pid),
+    )
+}
+
+fn target_application_identity_matches(
+    identity: &TargetApplicationIdentity,
+    current: Option<platform::ProcessLaunchIdentity>,
+) -> bool {
+    match current {
+        Some(current) => current == identity.launch_identity,
+        None => !cfg!(target_os = "macos"),
+    }
+}
+
+fn window_identity_matches(
+    captured: &TargetWindowIdentity,
+    current: &TargetWindowIdentity,
+) -> bool {
+    const FRAME_TOLERANCE: f64 = 2.0;
+    captured.owner_pid == current.owner_pid
+        && captured.role == current.role
+        && captured.title_hash == current.title_hash
+        && (captured.frame.x - current.frame.x).abs() <= FRAME_TOLERANCE
+        && (captured.frame.y - current.frame.y).abs() <= FRAME_TOLERANCE
+        && (captured.frame.width - current.frame.width).abs() <= FRAME_TOLERANCE
+        && (captured.frame.height - current.frame.height).abs() <= FRAME_TOLERANCE
+}
+
+fn bundle_requires_exact_window(bundle_id: &str) -> bool {
+    matches!(
+        bundle_id,
+        "com.anthropic.claudefordesktop" | "com.tencent.xinWeChat"
+    )
+}
+
+fn captured_target_identity_is_current(identity: &CapturedTargetIdentity) -> bool {
+    target_application_identity_is_current(&identity.application)
+        && (!bundle_requires_exact_window(&identity.application.bundle_id)
+            || identity.window.is_some())
+}
+
+fn stale_target_outcome() -> AutosendOutcome {
+    AutosendOutcome {
+        copied: false,
+        sent: false,
+        error: Some("The captured target app or window is no longer available.".to_string()),
+        reason: Some(platform::macos::AutosendFailureReason::NoSafeTarget),
+    }
 }
 
 fn prompt_pick_session_target(
     frontmost: Option<FrontmostAppWithPid>,
-    visible_apps: Vec<FrontmostApp>,
     recent_target: Option<LastInputTarget>,
 ) -> Option<PromptPickSessionTarget> {
     let frontmost = frontmost?;
@@ -1552,18 +1759,6 @@ fn prompt_pick_session_target(
         });
     }
 
-    if let Some(app) = visible_apps
-        .into_iter()
-        .find(|app| !is_prompt_picker_app(app) && is_usable_autosend_app(app))
-    {
-        return Some(PromptPickSessionTarget {
-            app,
-            pid: None,
-            observed_at_ms: now_ms(),
-            click_point: None,
-        });
-    }
-
     recent_target
         .filter(is_recent_prompt_target)
         .filter(|target| is_usable_autosend_app(&target.app))
@@ -1591,31 +1786,45 @@ fn record_last_input_target_if_valid(state: &LastInputTargetState, target: &plat
         return;
     };
 
-    let recorded_click_point = target_click_point_from_tuple(target.click_point);
-    let recent_click_point = state
-        .get()
-        .filter(|recent| recent.app.bundle_id == app.bundle_id)
-        .filter(is_recent_prompt_target)
-        .and_then(|recent| recent.click_point);
-    let pointer_click_point =
-        platform::current_pointer_location().map(target_click_point_from_tuple);
     let click_point = if has_focused_input_frame(&target.frame) {
-        Some(recorded_click_point)
+        Some(target_click_point_from_tuple(target.click_point))
     } else {
-        choose_recovery_click_point(
-            recent_click_point,
-            pointer_click_point,
-            Some(&target.window_frame),
-            Some(recorded_click_point),
-        )
+        state
+            .get()
+            .filter(|recent| recent.app.bundle_id == app.bundle_id)
+            .filter(|recent| recent.pid == Some(target.pid))
+            .filter(is_recent_prompt_target)
+            .and_then(|recent| recent.click_point)
     };
 
-    state.set(LastInputTarget {
-        app,
-        pid: None,
-        observed_at_ms: now_ms(),
-        click_point,
-    });
+    let Some(launch_identity) = platform::macos::process_launch_identity(target.pid) else {
+        state.clear();
+        return;
+    };
+    let identity = CapturedTargetIdentity {
+        application: TargetApplicationIdentity {
+            bundle_id: app.bundle_id.clone(),
+            main_pid: target.pid,
+            launch_identity,
+        },
+        window: Some(TargetWindowIdentity {
+            owner_pid: target.pid,
+            frame: target.window_frame.clone(),
+            role: Some("AXWindow".to_string()),
+            title_hash: None,
+            cg_window_id: None,
+        }),
+    };
+
+    state.set_captured(
+        LastInputTarget {
+            app,
+            pid: Some(target.pid),
+            observed_at_ms: now_ms(),
+            click_point,
+        },
+        identity,
+    );
 }
 
 fn record_last_app_if_valid(state: &LastInputTargetState, target: FrontmostAppWithPid) {
@@ -1630,12 +1839,31 @@ fn record_last_app_if_valid(state: &LastInputTargetState, target: FrontmostAppWi
         state.clear();
         return;
     }
-    state.set(LastInputTarget {
-        app: target.app,
-        pid: target.pid,
-        observed_at_ms: now_ms(),
-        click_point: None,
-    });
+    let Some(pid) = target.pid else {
+        state.clear();
+        return;
+    };
+    let Some(launch_identity) = platform::macos::process_launch_identity(pid) else {
+        state.clear();
+        return;
+    };
+    let identity = CapturedTargetIdentity {
+        application: TargetApplicationIdentity {
+            bundle_id: target.app.bundle_id.clone(),
+            main_pid: pid,
+            launch_identity,
+        },
+        window: None,
+    };
+    state.set_captured(
+        LastInputTarget {
+            app: target.app,
+            pid: Some(pid),
+            observed_at_ms: now_ms(),
+            click_point: None,
+        },
+        identity,
+    );
 }
 
 fn captured_target_matches_frontmost(
@@ -2453,6 +2681,79 @@ mod last_input_target_tests {
         }
     }
 
+    fn captured_identity(bundle_id: &str, pid: u32) -> CapturedTargetIdentity {
+        CapturedTargetIdentity {
+            application: TargetApplicationIdentity {
+                bundle_id: bundle_id.to_string(),
+                main_pid: pid,
+                launch_identity: platform::macos::process_launch_identity(pid)
+                    .expect("test process should have launch metadata"),
+            },
+            window: None,
+        }
+    }
+
+    #[test]
+    fn target_application_identity_rejects_restarted_process() {
+        let identity = TargetApplicationIdentity {
+            bundle_id: "com.anthropic.claudefordesktop".to_string(),
+            main_pid: 42,
+            launch_identity: platform::ProcessLaunchIdentity {
+                seconds: 100,
+                microseconds: 200,
+            },
+        };
+
+        assert!(target_application_identity_matches(
+            &identity,
+            Some(platform::ProcessLaunchIdentity {
+                seconds: 100,
+                microseconds: 200,
+            })
+        ));
+        assert!(!target_application_identity_matches(
+            &identity,
+            Some(platform::ProcessLaunchIdentity {
+                seconds: 101,
+                microseconds: 0,
+            })
+        ));
+    }
+
+    #[test]
+    fn target_window_identity_uses_owner_and_tolerant_fingerprint() {
+        let captured = TargetWindowIdentity {
+            owner_pid: 42,
+            frame: CandidateInput {
+                x: 10.0,
+                y: 20.0,
+                width: 800.0,
+                height: 600.0,
+            },
+            role: Some("AXWindow".to_string()),
+            title_hash: Some("abc".to_string()),
+            cg_window_id: None,
+        };
+        let mut current = captured.clone();
+        current.frame.x += 1.5;
+        assert!(window_identity_matches(&captured, &current));
+
+        current.frame.x += 1.0;
+        assert!(!window_identity_matches(&captured, &current));
+        current = captured.clone();
+        current.owner_pid = 43;
+        assert!(!window_identity_matches(&captured, &current));
+    }
+
+    #[test]
+    fn claude_and_wechat_require_window_identity_but_codex_does_not() {
+        assert!(bundle_requires_exact_window(
+            "com.anthropic.claudefordesktop"
+        ));
+        assert!(bundle_requires_exact_window("com.tencent.xinWeChat"));
+        assert!(!bundle_requires_exact_window("com.openai.codex"));
+    }
+
     #[test]
     fn stores_and_reads_last_input_target() {
         let state = LastInputTargetState::default();
@@ -2469,6 +2770,7 @@ mod last_input_target_tests {
         state.set(target);
 
         assert_eq!(state.get().unwrap().app.bundle_id, "com.apple.Notes");
+        assert_eq!(state.get().unwrap().pid, None);
     }
 
     #[test]
@@ -2637,14 +2939,26 @@ mod last_input_target_tests {
     fn resolves_menu_labels_by_language() {
         assert_eq!(menu_labels_for_language("zh-CN").open_main, "管理提示词...");
         assert_eq!(menu_labels_for_language("zh-CN").open_settings, "设置...");
-        assert_eq!(menu_labels_for_language("zh-CN").show_button, "显示 Prompt Drawer");
-        assert_eq!(menu_labels_for_language("zh-CN").hide_button, "隐藏 Prompt Drawer");
+        assert_eq!(
+            menu_labels_for_language("zh-CN").show_button,
+            "显示 Prompt Drawer"
+        );
+        assert_eq!(
+            menu_labels_for_language("zh-CN").hide_button,
+            "隐藏 Prompt Drawer"
+        );
         assert_eq!(
             menu_labels_for_language("en-US").open_main,
             "Manage Prompts..."
         );
-        assert_eq!(menu_labels_for_language("en-US").show_button, "Show Prompt Drawer");
-        assert_eq!(menu_labels_for_language("en-US").hide_button, "Hide Prompt Drawer");
+        assert_eq!(
+            menu_labels_for_language("en-US").show_button,
+            "Show Prompt Drawer"
+        );
+        assert_eq!(
+            menu_labels_for_language("en-US").hide_button,
+            "Hide Prompt Drawer"
+        );
         assert_eq!(menu_labels_for_language("bad").quit, "Quit Prompt Drawer");
     }
 
@@ -2670,11 +2984,13 @@ mod last_input_target_tests {
                 name: "Notes".to_string(),
                 bundle_id: "com.apple.Notes".to_string(),
             }),
+            pid: std::process::id(),
         };
 
         record_last_input_target_if_valid(&state, &target);
 
         assert_eq!(state.get().unwrap().app.bundle_id, "com.apple.Notes");
+        assert_eq!(state.get().unwrap().pid, Some(std::process::id()));
         assert_eq!(state.get().unwrap().click_point.unwrap().x, 6.0);
     }
 
@@ -2700,6 +3016,7 @@ mod last_input_target_tests {
                 name: "Codex".to_string(),
                 bundle_id: "com.openai.codex".to_string(),
             }),
+            pid: std::process::id(),
         };
 
         record_last_input_target_if_valid(&state, &target);
@@ -2733,13 +3050,14 @@ mod last_input_target_tests {
                 name: "WeChat".to_string(),
                 bundle_id: "com.tencent.xinWeChat".to_string(),
             }),
+            pid: std::process::id(),
         };
 
         record_last_input_target_if_valid(&state, &target);
 
         let stored = state.get().unwrap();
         assert_eq!(stored.app.bundle_id, "com.tencent.xinWeChat");
-        assert!(stored.click_point.is_some());
+        assert!(stored.click_point.is_none());
     }
 
     #[test]
@@ -2773,6 +3091,7 @@ mod last_input_target_tests {
                 name: "Finder".to_string(),
                 bundle_id: "com.apple.finder".to_string(),
             }),
+            pid: std::process::id(),
         };
 
         record_last_input_target_if_valid(&state, &target);
@@ -2802,6 +3121,7 @@ mod last_input_target_tests {
                 name: "Claude".to_string(),
                 bundle_id: "com.anthropic.claudefordesktop".to_string(),
             }),
+            pid: std::process::id(),
         };
 
         record_last_input_target_if_valid(&state, &target);
@@ -2810,7 +3130,7 @@ mod last_input_target_tests {
             state.get().unwrap().app.bundle_id,
             "com.anthropic.claudefordesktop"
         );
-        assert!(state.get().unwrap().click_point.is_some());
+        assert!(state.get().unwrap().click_point.is_none());
     }
 
     #[test]
@@ -2903,6 +3223,7 @@ mod last_input_target_tests {
                 name: "Prompt Drawer".to_string(),
                 bundle_id: "local.promptpicker.dev".to_string(),
             }),
+            pid: std::process::id(),
         };
 
         record_last_input_target_if_valid(&state, &target);
@@ -2918,7 +3239,6 @@ mod last_input_target_tests {
                 "com.tencent.xinWeChat",
                 Some(123),
             )),
-            vec![],
             None,
         )
         .unwrap();
@@ -3556,50 +3876,34 @@ mod last_input_target_tests {
     }
 
     #[test]
-    fn prompt_pick_session_uses_first_safe_visible_app_without_recent_target() {
+    fn prompt_pick_session_rejects_visible_app_without_recent_exact_target() {
         let target = prompt_pick_session_target(
             Some(frontmost_target(
                 "Prompt Drawer",
                 "local.promptpicker.dev",
                 Some(1),
             )),
-            vec![FrontmostApp {
-                name: "Codex".to_string(),
-                bundle_id: "com.openai.codex".to_string(),
-            }],
             None,
-        )
-        .unwrap();
+        );
 
-        assert_eq!(target.app.bundle_id, "com.openai.codex");
-        assert!(target.click_point.is_none());
+        assert!(target.is_none());
     }
 
     #[test]
-    fn prompt_pick_session_skips_unsafe_visible_app_before_safe_visible_fallback() {
+    fn prompt_pick_session_uses_recent_target_without_considering_visible_apps() {
         let target = prompt_pick_session_target(
             Some(frontmost_target(
                 "Prompt Drawer",
                 "local.promptpicker.dev",
                 Some(1),
             )),
-            vec![
-                FrontmostApp {
-                    name: "Finder".to_string(),
-                    bundle_id: "com.apple.finder".to_string(),
-                },
-                FrontmostApp {
-                    name: "Codex".to_string(),
-                    bundle_id: "com.openai.codex".to_string(),
-                },
-            ],
             Some(LastInputTarget {
                 app: FrontmostApp {
                     name: "Codex".to_string(),
                     bundle_id: "com.openai.codex".to_string(),
                 },
                 pid: None,
-                observed_at_ms: 123,
+                observed_at_ms: now_ms(),
                 click_point: None,
             }),
         )
@@ -3617,7 +3921,6 @@ mod last_input_target_tests {
                 "local.promptpicker.dev",
                 Some(1),
             )),
-            vec![],
             Some(LastInputTarget {
                 app: FrontmostApp {
                     name: "WeChat".to_string(),
@@ -3635,17 +3938,13 @@ mod last_input_target_tests {
     }
 
     #[test]
-    fn prompt_pick_session_prefers_recent_target_over_visible_app_when_picker_is_frontmost() {
+    fn prompt_pick_session_uses_recent_target_when_picker_is_frontmost() {
         let target = prompt_pick_session_target(
             Some(frontmost_target(
                 "Prompt Drawer",
                 "local.promptpicker.dev",
                 Some(1),
             )),
-            vec![FrontmostApp {
-                name: "Codex".to_string(),
-                bundle_id: "com.openai.codex".to_string(),
-            }],
             Some(LastInputTarget {
                 app: FrontmostApp {
                     name: "WeChat".to_string(),
@@ -3675,7 +3974,6 @@ mod last_input_target_tests {
                 "unknown.bundle.id",
                 Some(std::process::id()),
             )),
-            vec![],
             Some(LastInputTarget {
                 app: FrontmostApp {
                     name: "Codex".to_string(),
@@ -3693,26 +3991,17 @@ mod last_input_target_tests {
     }
 
     #[test]
-    fn prompt_pick_session_uses_visible_app_when_picker_pid_frontmost_and_no_recent_target() {
-        // Same PID-match scenario but with no recent target. This still can
-        // recover by using the front-to-back visible app list, matching the
-        // older app-level autosend behavior for AX-hostile apps.
+    fn prompt_pick_session_rejects_visible_app_when_picker_pid_is_frontmost() {
         let target = prompt_pick_session_target(
             Some(frontmost_target(
                 "UnknownApp",
                 "unknown.bundle.id",
                 Some(std::process::id()),
             )),
-            vec![FrontmostApp {
-                name: "Claude".to_string(),
-                bundle_id: "com.anthropic.claudefordesktop".to_string(),
-            }],
             None,
-        )
-        .unwrap();
+        );
 
-        assert_eq!(target.app.bundle_id, "com.anthropic.claudefordesktop");
-        assert!(target.click_point.is_none());
+        assert!(target.is_none());
     }
 
     #[test]
@@ -3781,10 +4070,11 @@ mod last_input_target_tests {
                     name: "WeChat".to_string(),
                     bundle_id: "com.tencent.xinWeChat".to_string(),
                 },
-                pid: None,
+                pid: Some(std::process::id()),
                 observed_at_ms: now_ms(),
                 click_point: None,
             },
+            captured_identity("com.tencent.xinWeChat", std::process::id()),
             1,
         )
         .is_some());
@@ -3801,10 +4091,11 @@ mod last_input_target_tests {
                     name: "WeChat".to_string(),
                     bundle_id: "com.tencent.xinWeChat".to_string(),
                 },
-                pid: None,
+                pid: Some(std::process::id()),
                 observed_at_ms: now_ms(),
                 click_point: None,
             },
+            captured_identity("com.tencent.xinWeChat", std::process::id()),
             1,
         )
         .is_none());
@@ -4193,13 +4484,20 @@ mod last_input_target_tests {
     #[test]
     fn records_frontmost_app_as_last_target_fallback() {
         let state = LastInputTargetState::default();
+        let mut child = std::process::Command::new("sleep")
+            .arg("2")
+            .spawn()
+            .expect("test helper process should start");
+        let pid = child.id();
         record_last_app_if_valid(
             &state,
-            frontmost_target("WeChat", "com.tencent.xinWeChat", Some(123)),
+            frontmost_target("WeChat", "com.tencent.xinWeChat", Some(pid)),
         );
 
         assert_eq!(state.get().unwrap().app.bundle_id, "com.tencent.xinWeChat");
-        assert_eq!(state.get().unwrap().pid, Some(123));
+        assert_eq!(state.get().unwrap().pid, Some(pid));
+        child.kill().expect("test helper process should stop");
+        child.wait().expect("test helper process should be reaped");
     }
 
     #[test]
