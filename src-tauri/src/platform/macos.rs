@@ -742,46 +742,85 @@ fn collect_hit_test_editable_candidates(
 ) -> Vec<NativeEditableCandidate> {
     let mut candidates: Vec<NativeEditableCandidate> = Vec::new();
 
-    for (x, y) in composer_hit_test_points(captured_window) {
-        let mut hit_elements = Vec::new();
-        if let Ok(element) = element_at_position(application, x, y, 0.08) {
-            hit_elements.push(element);
-        }
-        if let Ok(element) = system_wide_element_at_position(x, y, 0.08) {
-            if !hit_elements
-                .iter()
-                .any(|existing| elements_equal(existing.as_ptr(), element.as_ptr()))
-            {
+    for_each_composer_hit_test_point_with_budget(
+        captured_window,
+        Duration::from_millis(750),
+        Instant::now,
+        |(x, y), deadline| {
+            let mut hit_elements = Vec::new();
+            let Some(timeout) = remaining_ax_timeout(deadline, Instant::now()) else {
+                return;
+            };
+            if let Ok(element) = element_at_position(application, x, y, timeout) {
                 hit_elements.push(element);
             }
-        }
-
-        for mut element in hit_elements {
-            for depth in 0..8 {
-                let retained = unsafe { OwnedCf::retained(element.as_ptr()) };
-                if let Some(mut candidate) =
-                    retained.and_then(|item| native_editable_candidate(item, depth))
+            let Some(timeout) = remaining_ax_timeout(deadline, Instant::now()) else {
+                return;
+            };
+            if let Ok(element) = system_wide_element_at_position(x, y, timeout) {
+                if !hit_elements
+                    .iter()
+                    .any(|existing| elements_equal(existing.as_ptr(), element.as_ptr()))
                 {
-                    candidate.resolver.window_matches =
-                        element_belongs_to_window(candidate.element.as_ptr(), window);
-                    if candidate.resolver.window_matches
-                        && hit_test_candidate_has_composer_semantics(&candidate.resolver)
-                        && !candidates.iter().any(|existing| {
-                            elements_equal(existing.element.as_ptr(), candidate.element.as_ptr())
-                        })
-                    {
-                        candidates.push(candidate);
-                    }
-                    break;
+                    hit_elements.push(element);
                 }
-                let Some(parent) = copy_ax_attribute(element.as_ptr(), "AXParent") else {
-                    break;
-                };
-                element = parent;
             }
-        }
-    }
+
+            for mut element in hit_elements {
+                for depth in 0..8 {
+                    let retained = unsafe { OwnedCf::retained(element.as_ptr()) };
+                    if let Some(mut candidate) =
+                        retained.and_then(|item| native_editable_candidate(item, depth))
+                    {
+                        candidate.resolver.window_matches =
+                            element_belongs_to_window(candidate.element.as_ptr(), window);
+                        if candidate.resolver.window_matches
+                            && hit_test_candidate_has_composer_semantics(&candidate.resolver)
+                            && !candidates.iter().any(|existing| {
+                                elements_equal(
+                                    existing.element.as_ptr(),
+                                    candidate.element.as_ptr(),
+                                )
+                            })
+                        {
+                            candidates.push(candidate);
+                        }
+                        break;
+                    }
+                    let Some(parent) = copy_ax_attribute(element.as_ptr(), "AXParent") else {
+                        break;
+                    };
+                    element = parent;
+                }
+            }
+        },
+    );
     candidates
+}
+
+fn remaining_ax_timeout(deadline: Instant, now: Instant) -> Option<f32> {
+    deadline
+        .checked_duration_since(now)
+        .filter(|remaining| !remaining.is_zero())
+        .map(|remaining| remaining.min(Duration::from_millis(80)).as_secs_f32())
+}
+
+fn for_each_composer_hit_test_point_with_budget<N, V>(
+    window: &CandidateInput,
+    budget: Duration,
+    mut now: N,
+    mut visit: V,
+) where
+    N: FnMut() -> Instant,
+    V: FnMut((f64, f64), Instant),
+{
+    let deadline = now() + budget;
+    for point in composer_hit_test_points(window) {
+        if now() >= deadline {
+            break;
+        }
+        visit(point, deadline);
+    }
 }
 
 fn hit_test_candidate_has_composer_semantics(candidate: &ComposerCandidate) -> bool {
@@ -1233,13 +1272,36 @@ fn post_paste_shortcut() -> Result<(), String> {
 }
 
 fn post_calibrated_paste_shortcut() -> Result<(), String> {
-    post_key_event(KEY_CODE_COMMAND, true, CG_EVENT_FLAG_MASK_COMMAND)?;
-    std::thread::sleep(Duration::from_millis(20));
-    post_key_event(KEY_CODE_V, true, CG_EVENT_FLAG_MASK_COMMAND)?;
-    std::thread::sleep(Duration::from_millis(12));
-    post_key_event(KEY_CODE_V, false, CG_EVENT_FLAG_MASK_COMMAND)?;
-    std::thread::sleep(Duration::from_millis(20));
-    post_key_event(KEY_CODE_COMMAND, false, 0)
+    let specs = [
+        (KEY_CODE_COMMAND, true, CG_EVENT_FLAG_MASK_COMMAND),
+        (KEY_CODE_V, true, CG_EVENT_FLAG_MASK_COMMAND),
+        (KEY_CODE_V, false, CG_EVENT_FLAG_MASK_COMMAND),
+        (KEY_CODE_COMMAND, false, 0),
+    ];
+    let mut events = Vec::with_capacity(specs.len());
+    for (key_code, key_down, flags) in specs {
+        let event = unsafe { CGEventCreateKeyboardEvent(std::ptr::null_mut(), key_code, key_down) };
+        if event.is_null() {
+            for existing in events {
+                unsafe { CFRelease(existing) };
+            }
+            return Err("CGEventCreateKeyboardEvent returned null".to_string());
+        }
+        unsafe { CGEventSetFlags(event, flags) };
+        events.push(event.cast_const());
+    }
+
+    let delays = [20_u64, 12, 20];
+    for (index, event) in events.iter().enumerate() {
+        unsafe { CGEventPost(CG_HID_EVENT_TAP, event.cast_mut()) };
+        if let Some(delay) = delays.get(index) {
+            std::thread::sleep(Duration::from_millis(*delay));
+        }
+    }
+    for event in events {
+        unsafe { CFRelease(event) };
+    }
+    Ok(())
 }
 
 #[allow(dead_code)]
@@ -2395,6 +2457,46 @@ mod tests {
                 && *y >= window.y + window.height * 0.70
                 && *y <= window.y + window.height * 0.95
         }));
+    }
+
+    #[test]
+    fn composer_hit_test_grid_stops_after_the_shared_deadline() {
+        let window = CandidateInput {
+            x: 0.0,
+            y: 0.0,
+            width: 800.0,
+            height: 600.0,
+        };
+        let start = Instant::now();
+        let times = RefCell::new(VecDeque::from([
+            start,
+            start + Duration::from_millis(10),
+            start + Duration::from_millis(800),
+        ]));
+        let visited = RefCell::new(Vec::new());
+
+        for_each_composer_hit_test_point_with_budget(
+            &window,
+            Duration::from_millis(750),
+            || times.borrow_mut().pop_front().unwrap(),
+            |point, _| visited.borrow_mut().push(point),
+        );
+
+        assert_eq!(visited.borrow().len(), 1);
+    }
+
+    #[test]
+    fn accessibility_hit_test_timeout_uses_only_the_remaining_budget() {
+        let now = Instant::now();
+        assert_eq!(remaining_ax_timeout(now, now), None);
+        assert_eq!(
+            remaining_ax_timeout(now + Duration::from_millis(20), now),
+            Some(0.02)
+        );
+        assert_eq!(
+            remaining_ax_timeout(now + Duration::from_secs(1), now),
+            Some(0.08)
+        );
     }
 
     #[test]
