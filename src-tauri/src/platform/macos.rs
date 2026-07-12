@@ -2052,7 +2052,6 @@ mod tests {
                 "paste".to_string(),
                 "sleep".to_string(),
                 "verify".to_string(),
-                "verify".to_string(),
                 "submit".to_string(),
             ]
         );
@@ -2136,7 +2135,7 @@ mod tests {
         assert!(!outcome.sent);
         assert_eq!(
             outcome.reason,
-            Some(AutosendFailureReason::TargetFocusFailed)
+            Some(AutosendFailureReason::FocusNotAcquired)
         );
     }
 

@@ -228,6 +228,7 @@ pub fn paste_prompt_and_submit_to_app_clipboard_with_copier<C>(
     body: &str,
     _bundle_id: &str,
     _click_point: Option<(f64, f64)>,
+    _captured_window: Option<&CandidateInput>,
     _submit_key: NativeSubmitKey,
     copy_sender: C,
 ) -> AutosendOutcome
