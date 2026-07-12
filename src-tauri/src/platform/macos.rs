@@ -1,19 +1,19 @@
 #![cfg(target_os = "macos")]
 
+mod autosend_transaction;
 mod ax_client;
 mod ax_diagnostics;
-mod autosend_transaction;
 mod composer_resolver;
 mod focus_controller;
 mod input_profiles;
 mod process_group;
 
+use autosend_transaction::{run_transaction, TransactionFailure};
 use ax_client::{
     ax_attribute_is_settable, ax_bool_attribute, ax_element_frame, ax_element_pid,
     ax_string_attribute, copy_ax_attribute, elements_equal, set_ax_bool_attribute,
     traversal_children, OwnedCfValue as OwnedCf,
 };
-use autosend_transaction::{run_transaction, TransactionFailure};
 use composer_resolver::{resolve_composer, ComposerCandidate};
 use input_profiles::{input_capability_profile, InputCapabilityProfile};
 use process_group::discover_trusted_candidate_pids;
@@ -533,11 +533,7 @@ fn editable_role(role: &str) -> Option<EditableRole> {
     }
 }
 
-fn role_can_receive_prompt(
-    role: EditableRole,
-    _ax_editable: bool,
-    _value_settable: bool,
-) -> bool {
+fn role_can_receive_prompt(role: EditableRole, _ax_editable: bool, _value_settable: bool) -> bool {
     match role {
         EditableRole::SearchField => false,
         EditableRole::WebArea => false,
@@ -681,9 +677,9 @@ fn focus_editable_input_for_pid(pid: u32) -> Result<Option<u32>, String> {
         .ok_or_else(|| "Could not identify the target application process.".to_string())?;
     let trusted_pids = discover_trusted_candidate_pids(pid, &bundle_id);
     for candidate_pid in &trusted_pids {
-        let Some(app) = OwnedCf::created(unsafe {
-            AXUIElementCreateApplication(*candidate_pid as i32)
-        }) else {
+        let Some(app) =
+            OwnedCf::created(unsafe { AXUIElementCreateApplication(*candidate_pid as i32) })
+        else {
             continue;
         };
         unsafe {
@@ -979,9 +975,7 @@ where
 
     match native_focus(app_pid) {
         Ok(Some(element_pid)) => return Ok(Some(element_pid)),
-        Ok(None) => Err(
-            "No editable input element was found in the target window.".to_string()
-        ),
+        Ok(None) => Err("No editable input element was found in the target window.".to_string()),
         Err(error) => Err(error),
     }
 }
@@ -1199,14 +1193,12 @@ where
     let observed_version = frontmost_app_info()
         .filter(|info| info.app.bundle_id == bundle_id)
         .and_then(|info| app_version_for_pid(info.pid));
-    let submit_evidence_permitted = match input_capability_profile(
-        bundle_id,
-        observed_version.as_deref(),
-    ) {
-        InputCapabilityProfile::Accessibility(profile) => profile.permits_submit(),
-        InputCapabilityProfile::CodexFirstResponder
-        | InputCapabilityProfile::LegacyCapturedTarget => true,
-    };
+    let submit_evidence_permitted =
+        match input_capability_profile(bundle_id, observed_version.as_deref()) {
+            InputCapabilityProfile::Accessibility(profile) => profile.permits_submit(),
+            InputCapabilityProfile::CodexFirstResponder
+            | InputCapabilityProfile::LegacyCapturedTarget => true,
+        };
     let mut copy_sender = Some(copy_sender);
     let transaction = run_transaction(
         submit_key,
@@ -2176,7 +2168,10 @@ mod tests {
         assert_eq!(copy_count.get(), 1);
         assert_eq!(paste_count.get(), 1);
         assert!(!outcome.sent);
-        assert_eq!(outcome.reason, Some(AutosendFailureReason::PasteEventFailed));
+        assert_eq!(
+            outcome.reason,
+            Some(AutosendFailureReason::PasteEventFailed)
+        );
     }
 
     #[test]

@@ -131,10 +131,7 @@ fn frames_overlap(left: &CandidateInput, right: &CandidateInput) -> bool {
     width > 0.0 && height > 0.0
 }
 
-pub(super) fn discover_trusted_candidate_pids(
-    main_pid: u32,
-    main_bundle_id: &str,
-) -> Vec<u32> {
+pub(super) fn discover_trusted_candidate_pids(main_pid: u32, main_bundle_id: &str) -> Vec<u32> {
     let mut result = vec![main_pid];
     if main_bundle_id != WECHAT_BUNDLE_ID {
         return result;
@@ -177,7 +174,10 @@ pub(super) fn discover_trusted_candidate_pids(
 fn process_is_descendant(pid: u32, ancestor: u32, processes: &[(u32, u32)]) -> bool {
     let mut current = pid;
     for _ in 0..32 {
-        let Some((_, parent)) = processes.iter().find(|(candidate, _)| *candidate == current) else {
+        let Some((_, parent)) = processes
+            .iter()
+            .find(|(candidate, _)| *candidate == current)
+        else {
             return false;
         };
         if *parent == ancestor {
@@ -193,7 +193,8 @@ fn process_is_descendant(pid: u32, ancestor: u32, processes: &[(u32, u32)]) -> b
 
 fn executable_path(pid: u32) -> Option<PathBuf> {
     let mut buffer = vec![0_u8; 4096];
-    let length = unsafe { proc_pidpath(pid as i32, buffer.as_mut_ptr().cast(), buffer.len() as u32) };
+    let length =
+        unsafe { proc_pidpath(pid as i32, buffer.as_mut_ptr().cast(), buffer.len() as u32) };
     if length <= 0 {
         return None;
     }

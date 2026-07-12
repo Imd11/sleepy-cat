@@ -181,10 +181,14 @@ mod tests {
         );
         assert_eq!(result.failure, None);
         let events = events.borrow();
-        assert!(events.iter().position(|event| *event == "focus").unwrap()
-            < events.iter().position(|event| *event == "copy").unwrap());
-        assert!(events.iter().position(|event| *event == "copy").unwrap()
-            < events.iter().position(|event| *event == "paste").unwrap());
+        assert!(
+            events.iter().position(|event| *event == "focus").unwrap()
+                < events.iter().position(|event| *event == "copy").unwrap()
+        );
+        assert!(
+            events.iter().position(|event| *event == "copy").unwrap()
+                < events.iter().position(|event| *event == "paste").unwrap()
+        );
     }
 
     #[test]
@@ -324,7 +328,11 @@ mod tests {
                 assert_eq!(paste.get(), 1);
                 assert_eq!(
                     submit.get(),
-                    if submit_key == NativeSubmitKey::None { 0 } else { 1 }
+                    if submit_key == NativeSubmitKey::None {
+                        0
+                    } else {
+                        1
+                    }
                 );
             }
         }

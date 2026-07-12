@@ -3442,9 +3442,12 @@ mod last_input_target_tests {
     #[test]
     fn global_submit_behavior_reads_all_supported_settings() {
         let settings_for = |mode| {
-            Ok(Some(serde_json::json!({
-                "promptInsertion": { "mode": mode }
-            }).to_string()))
+            Ok(Some(
+                serde_json::json!({
+                    "promptInsertion": { "mode": mode }
+                })
+                .to_string(),
+            ))
         };
 
         assert_eq!(
