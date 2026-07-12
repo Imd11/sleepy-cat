@@ -1,7 +1,8 @@
 #![cfg(target_os = "macos")]
 
 use serde::Serialize;
-use std::ffi::c_void;
+use std::collections::VecDeque;
+use std::ffi::{c_void, CStr, CString};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
@@ -52,6 +53,20 @@ pub enum NativeSubmitKey {
     None,
     Enter,
     CommandEnter,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum InputFocusPolicy {
+    PreserveApplicationFirstResponder,
+    ResolveEditableElement,
+}
+
+fn input_focus_policy(bundle_id: &str) -> InputFocusPolicy {
+    if bundle_id == "com.openai.codex" {
+        InputFocusPolicy::PreserveApplicationFirstResponder
+    } else {
+        InputFocusPolicy::ResolveEditableElement
+    }
 }
 
 impl AutosendOutcome {
@@ -115,7 +130,7 @@ impl AutosendOutcome {
 
     pub fn target_focus_failed(error: String) -> Self {
         Self {
-            copied: true,
+            copied: false,
             sent: false,
             error: Some(error),
             reason: Some(AutosendFailureReason::TargetFocusFailed),
@@ -311,6 +326,421 @@ pub struct CandidateInput {
     pub height: f64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EditableRole {
+    TextArea,
+    TextField,
+    SearchField,
+    ComboBox,
+    WebArea,
+}
+
+#[derive(Clone, Debug)]
+struct EditableCandidate {
+    role: EditableRole,
+    frame: CandidateInput,
+    enabled: bool,
+    focused: bool,
+    depth: usize,
+}
+
+fn editable_candidate_score(candidate: &EditableCandidate, window: &CandidateInput) -> i32 {
+    if !candidate.enabled || candidate.frame.width <= 1.0 || candidate.frame.height <= 1.0 {
+        return i32::MIN;
+    }
+
+    let mut score = match candidate.role {
+        EditableRole::TextArea => 100,
+        EditableRole::TextField => 60,
+        EditableRole::ComboBox => 45,
+        EditableRole::WebArea => 20,
+        EditableRole::SearchField => -60,
+    };
+    if candidate.focused {
+        score += 200;
+    }
+    if candidate.frame.y + (candidate.frame.height / 2.0) >= window.y + (window.height * 0.45) {
+        score += 35;
+    }
+    if candidate.frame.width >= window.width * 0.35 {
+        score += 25;
+    }
+    if candidate.frame.height >= 40.0 {
+        score += 20;
+    }
+    score - i32::try_from(candidate.depth.min(20)).unwrap_or(20)
+}
+
+fn select_editable_candidate(
+    candidates: &[EditableCandidate],
+    window: &CandidateInput,
+) -> Option<usize> {
+    const MIN_SCORE: i32 = 80;
+    const MIN_SCORE_MARGIN: i32 = 15;
+
+    let mut ranked: Vec<(usize, i32)> = candidates
+        .iter()
+        .enumerate()
+        .map(|(index, candidate)| (index, editable_candidate_score(candidate, window)))
+        .filter(|(_, score)| *score >= MIN_SCORE)
+        .collect();
+    ranked.sort_unstable_by(|left, right| right.1.cmp(&left.1));
+
+    let (best_index, best_score) = *ranked.first()?;
+    if ranked
+        .get(1)
+        .is_some_and(|(_, next_score)| best_score - *next_score < MIN_SCORE_MARGIN)
+    {
+        return None;
+    }
+    Some(best_index)
+}
+
+struct OwnedCf(CFTypeRef);
+
+impl OwnedCf {
+    fn created(value: CFTypeRef) -> Option<Self> {
+        (!value.is_null()).then_some(Self(value))
+    }
+
+    unsafe fn retained(value: CFTypeRef) -> Option<Self> {
+        if value.is_null() {
+            return None;
+        }
+        Some(Self(CFRetain(value)))
+    }
+
+    fn as_ptr(&self) -> CFTypeRef {
+        self.0
+    }
+}
+
+impl Drop for OwnedCf {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            unsafe { CFRelease(self.0) };
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Default)]
+struct AxPoint {
+    x: f64,
+    y: f64,
+}
+
+#[repr(C)]
+#[derive(Default)]
+struct AxSize {
+    width: f64,
+    height: f64,
+}
+
+struct NativeEditableCandidate {
+    model: EditableCandidate,
+    element: OwnedCf,
+}
+
+fn cf_string(value: &str) -> Option<OwnedCf> {
+    let value = CString::new(value).ok()?;
+    OwnedCf::created(unsafe {
+        CFStringCreateWithCString(std::ptr::null(), value.as_ptr(), K_CF_STRING_ENCODING_UTF8)
+    })
+}
+
+fn copy_ax_attribute(element: AXUIElementRef, attribute: &str) -> Option<OwnedCf> {
+    let attribute = cf_string(attribute)?;
+    let mut value = std::ptr::null();
+    let error = unsafe { AXUIElementCopyAttributeValue(element, attribute.as_ptr(), &mut value) };
+    (error == AX_ERROR_SUCCESS)
+        .then(|| OwnedCf::created(value))
+        .flatten()
+}
+
+fn cf_string_value(value: CFTypeRef) -> Option<String> {
+    if value.is_null() || unsafe { CFGetTypeID(value) } != unsafe { CFStringGetTypeID() } {
+        return None;
+    }
+    let mut buffer = [0_i8; 256];
+    if unsafe {
+        CFStringGetCString(
+            value,
+            buffer.as_mut_ptr(),
+            buffer.len() as isize,
+            K_CF_STRING_ENCODING_UTF8,
+        )
+    } == 0
+    {
+        return None;
+    }
+    Some(
+        unsafe { CStr::from_ptr(buffer.as_ptr()) }
+            .to_string_lossy()
+            .into_owned(),
+    )
+}
+
+fn cf_bool_value(value: CFTypeRef) -> Option<bool> {
+    if value.is_null() || unsafe { CFGetTypeID(value) } != unsafe { CFBooleanGetTypeID() } {
+        return None;
+    }
+    Some(unsafe { CFBooleanGetValue(value) } != 0)
+}
+
+fn ax_string_attribute(element: AXUIElementRef, attribute: &str) -> Option<String> {
+    copy_ax_attribute(element, attribute).and_then(|value| cf_string_value(value.as_ptr()))
+}
+
+fn ax_bool_attribute(element: AXUIElementRef, attribute: &str) -> Option<bool> {
+    copy_ax_attribute(element, attribute).and_then(|value| cf_bool_value(value.as_ptr()))
+}
+
+fn ax_attribute_is_settable(element: AXUIElementRef, attribute: &str) -> bool {
+    let Some(attribute) = cf_string(attribute) else {
+        return false;
+    };
+    let mut settable = 0_u8;
+    unsafe {
+        AXUIElementIsAttributeSettable(element, attribute.as_ptr(), &mut settable)
+            == AX_ERROR_SUCCESS
+            && settable != 0
+    }
+}
+
+fn set_ax_bool_attribute(element: AXUIElementRef, attribute: &str, value: bool) -> bool {
+    let Some(attribute) = cf_string(attribute) else {
+        return false;
+    };
+    if !value {
+        return false;
+    }
+    unsafe {
+        AXUIElementSetAttributeValue(element, attribute.as_ptr(), kCFBooleanTrue)
+            == AX_ERROR_SUCCESS
+    }
+}
+
+fn ax_children(element: AXUIElementRef) -> Vec<OwnedCf> {
+    let Some(children) = copy_ax_attribute(element, "AXChildren") else {
+        return Vec::new();
+    };
+    if unsafe { CFGetTypeID(children.as_ptr()) } != unsafe { CFArrayGetTypeID() } {
+        return Vec::new();
+    }
+
+    let count = unsafe { CFArrayGetCount(children.as_ptr()) }.clamp(0, 1_000);
+    (0..count)
+        .filter_map(|index| unsafe {
+            OwnedCf::retained(CFArrayGetValueAtIndex(children.as_ptr(), index))
+        })
+        .collect()
+}
+
+fn ax_point_attribute(element: AXUIElementRef, attribute: &str) -> Option<AxPoint> {
+    let value = copy_ax_attribute(element, attribute)?;
+    if unsafe { AXValueGetType(value.as_ptr()) } != K_AX_VALUE_CG_POINT_TYPE {
+        return None;
+    }
+    let mut point = AxPoint::default();
+    (unsafe {
+        AXValueGetValue(
+            value.as_ptr(),
+            K_AX_VALUE_CG_POINT_TYPE,
+            (&mut point as *mut AxPoint).cast(),
+        )
+    } != 0)
+        .then_some(point)
+}
+
+fn ax_size_attribute(element: AXUIElementRef, attribute: &str) -> Option<AxSize> {
+    let value = copy_ax_attribute(element, attribute)?;
+    if unsafe { AXValueGetType(value.as_ptr()) } != K_AX_VALUE_CG_SIZE_TYPE {
+        return None;
+    }
+    let mut size = AxSize::default();
+    (unsafe {
+        AXValueGetValue(
+            value.as_ptr(),
+            K_AX_VALUE_CG_SIZE_TYPE,
+            (&mut size as *mut AxSize).cast(),
+        )
+    } != 0)
+        .then_some(size)
+}
+
+fn ax_element_frame(element: AXUIElementRef) -> Option<CandidateInput> {
+    let position = ax_point_attribute(element, "AXPosition")?;
+    let size = ax_size_attribute(element, "AXSize")?;
+    Some(CandidateInput {
+        x: position.x,
+        y: position.y,
+        width: size.width,
+        height: size.height,
+    })
+}
+
+fn editable_role(role: &str) -> Option<EditableRole> {
+    match role {
+        "AXTextArea" => Some(EditableRole::TextArea),
+        "AXTextField" => Some(EditableRole::TextField),
+        "AXSearchField" => Some(EditableRole::SearchField),
+        "AXComboBox" => Some(EditableRole::ComboBox),
+        "AXWebArea" => Some(EditableRole::WebArea),
+        _ => None,
+    }
+}
+
+fn role_can_receive_prompt(role: EditableRole, ax_editable: bool, value_settable: bool) -> bool {
+    match role {
+        EditableRole::SearchField => false,
+        EditableRole::WebArea => ax_editable || value_settable,
+        EditableRole::TextArea | EditableRole::TextField | EditableRole::ComboBox => true,
+    }
+}
+
+fn native_editable_candidate(element: OwnedCf, depth: usize) -> Option<NativeEditableCandidate> {
+    let role = editable_role(&ax_string_attribute(element.as_ptr(), "AXRole")?)?;
+    if !role_can_receive_prompt(
+        role,
+        ax_bool_attribute(element.as_ptr(), "AXEditable").unwrap_or(false),
+        ax_attribute_is_settable(element.as_ptr(), "AXValue"),
+    ) {
+        return None;
+    }
+    let frame = ax_element_frame(element.as_ptr())?;
+    Some(NativeEditableCandidate {
+        model: EditableCandidate {
+            role,
+            frame,
+            enabled: ax_bool_attribute(element.as_ptr(), "AXEnabled").unwrap_or(true),
+            focused: ax_bool_attribute(element.as_ptr(), "AXFocused").unwrap_or(false),
+            depth,
+        },
+        element,
+    })
+}
+
+fn ax_element_pid(element: AXUIElementRef) -> Option<u32> {
+    let mut pid = 0_i32;
+    (unsafe { AXUIElementGetPid(element, &mut pid) } == AX_ERROR_SUCCESS && pid > 0)
+        .then_some(pid as u32)
+}
+
+fn focused_editable_pid(app: AXUIElementRef) -> Option<u32> {
+    let focused = copy_ax_attribute(app, "AXFocusedUIElement")?;
+    let role = editable_role(&ax_string_attribute(focused.as_ptr(), "AXRole")?)?;
+    if !role_can_receive_prompt(
+        role,
+        ax_bool_attribute(focused.as_ptr(), "AXEditable").unwrap_or(false),
+        ax_attribute_is_settable(focused.as_ptr(), "AXValue"),
+    ) {
+        return None;
+    }
+    if !ax_bool_attribute(focused.as_ptr(), "AXEnabled").unwrap_or(true) {
+        return None;
+    }
+    ax_element_pid(focused.as_ptr())
+}
+
+fn focused_window(app: AXUIElementRef) -> Option<OwnedCf> {
+    copy_ax_attribute(app, "AXFocusedWindow").or_else(|| copy_ax_attribute(app, "AXMainWindow"))
+}
+
+fn collect_editable_candidates(window: AXUIElementRef) -> Vec<NativeEditableCandidate> {
+    const MAX_ELEMENTS: usize = 600;
+    const MAX_DEPTH: usize = 14;
+    const MAX_SCAN_TIME: Duration = Duration::from_millis(220);
+
+    let started = Instant::now();
+    let mut queue: VecDeque<(OwnedCf, usize)> = ax_children(window)
+        .into_iter()
+        .map(|child| (child, 1))
+        .collect();
+    let mut candidates = Vec::new();
+    let mut visited = 0;
+
+    while let Some((element, depth)) = queue.pop_front() {
+        if visited >= MAX_ELEMENTS || started.elapsed() >= MAX_SCAN_TIME {
+            break;
+        }
+        visited += 1;
+
+        if depth < MAX_DEPTH {
+            queue.extend(
+                ax_children(element.as_ptr())
+                    .into_iter()
+                    .map(|child| (child, depth + 1)),
+            );
+        }
+        if let Some(candidate) = native_editable_candidate(element, depth) {
+            candidates.push(candidate);
+        }
+    }
+    candidates
+}
+
+fn focus_editable_input_once(app: AXUIElementRef) -> Result<Option<u32>, String> {
+    if let Some(pid) = focused_editable_pid(app) {
+        return Ok(Some(pid));
+    }
+
+    let window = focused_window(app)
+        .ok_or_else(|| "The target app does not expose a focused window.".to_string())?;
+    let window_frame = ax_element_frame(window.as_ptr())
+        .ok_or_else(|| "The target window does not expose its frame.".to_string())?;
+    let candidates = collect_editable_candidates(window.as_ptr());
+    let models: Vec<EditableCandidate> = candidates
+        .iter()
+        .map(|candidate| candidate.model.clone())
+        .collect();
+    let Some(index) = select_editable_candidate(&models, &window_frame) else {
+        return Ok(None);
+    };
+    let candidate = &candidates[index];
+
+    if ax_attribute_is_settable(candidate.element.as_ptr(), "AXFocused")
+        && set_ax_bool_attribute(candidate.element.as_ptr(), "AXFocused", true)
+    {
+        std::thread::sleep(Duration::from_millis(50));
+        if let Some(pid) = focused_editable_pid(app) {
+            return Ok(Some(pid));
+        }
+    }
+
+    let (x, y) = input_click_point_for_frame(&candidate.model.frame);
+    click_target_point(x, y).map_err(|error| format_autosend_error("click-ax-input", &error))?;
+    std::thread::sleep(Duration::from_millis(80));
+    Ok(focused_editable_pid(app))
+}
+
+fn focus_editable_input_for_pid(pid: u32) -> Result<Option<u32>, String> {
+    let app = OwnedCf::created(unsafe { AXUIElementCreateApplication(pid as i32) })
+        .ok_or_else(|| "Could not create the target accessibility element.".to_string())?;
+    unsafe {
+        AXUIElementSetMessagingTimeout(app.as_ptr(), 0.25);
+    }
+
+    match focus_editable_input_once(app.as_ptr()) {
+        Ok(Some(element_pid)) => return Ok(Some(element_pid)),
+        Ok(None) => {}
+        Err(error) => eprintln!("Initial AX input resolution failed: {}", error),
+    }
+
+    set_ax_bool_attribute(app.as_ptr(), "AXManualAccessibility", true);
+    std::thread::sleep(Duration::from_millis(100));
+    focus_editable_input_once(app.as_ptr())
+}
+
+fn verify_focused_editable_for_pid(pid: u32) -> Result<Option<u32>, String> {
+    let app = OwnedCf::created(unsafe { AXUIElementCreateApplication(pid as i32) })
+        .ok_or_else(|| "Could not create the target accessibility element.".to_string())?;
+    unsafe {
+        AXUIElementSetMessagingTimeout(app.as_ptr(), 0.2);
+    }
+    Ok(focused_editable_pid(app.as_ptr()))
+}
+
 pub fn current_input_target() -> Option<InputTarget> {
     let app_info = frontmost_app_info()?;
 
@@ -400,6 +830,13 @@ type CGEventRef = *mut c_void;
 type CGEventFlags = u64;
 #[allow(dead_code)]
 type CGKeyCode = u16;
+type AXUIElementRef = *const c_void;
+type CFTypeRef = *const c_void;
+
+const K_CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
+const K_AX_VALUE_CG_POINT_TYPE: i32 = 1;
+const K_AX_VALUE_CG_SIZE_TYPE: i32 = 2;
+const AX_ERROR_SUCCESS: i32 = 0;
 
 #[allow(dead_code)]
 const CG_EVENT_FLAG_MASK_COMMAND: CGEventFlags = 1 << 20;
@@ -422,6 +859,54 @@ extern "C" {
     fn CGEventSetFlags(event: CGEventRef, flags: CGEventFlags);
     fn CGEventPost(tap: u32, event: CGEventRef);
     fn CFRelease(cf: *const c_void);
+}
+
+#[link(name = "ApplicationServices", kind = "framework")]
+extern "C" {
+    fn AXUIElementCreateApplication(pid: i32) -> AXUIElementRef;
+    fn AXUIElementCopyAttributeValue(
+        element: AXUIElementRef,
+        attribute: *const c_void,
+        value: *mut CFTypeRef,
+    ) -> i32;
+    fn AXUIElementSetAttributeValue(
+        element: AXUIElementRef,
+        attribute: *const c_void,
+        value: CFTypeRef,
+    ) -> i32;
+    fn AXUIElementIsAttributeSettable(
+        element: AXUIElementRef,
+        attribute: *const c_void,
+        settable: *mut u8,
+    ) -> i32;
+    fn AXUIElementGetPid(element: AXUIElementRef, pid: *mut i32) -> i32;
+    fn AXUIElementSetMessagingTimeout(element: AXUIElementRef, timeout: f32) -> i32;
+    fn AXValueGetType(value: CFTypeRef) -> i32;
+    fn AXValueGetValue(value: CFTypeRef, value_type: i32, output: *mut c_void) -> u8;
+}
+
+#[link(name = "CoreFoundation", kind = "framework")]
+extern "C" {
+    static kCFBooleanTrue: *const c_void;
+    fn CFRetain(cf: *const c_void) -> *const c_void;
+    fn CFGetTypeID(cf: *const c_void) -> usize;
+    fn CFStringGetTypeID() -> usize;
+    fn CFBooleanGetTypeID() -> usize;
+    fn CFArrayGetTypeID() -> usize;
+    fn CFStringCreateWithCString(
+        allocator: *const c_void,
+        c_string: *const i8,
+        encoding: u32,
+    ) -> *const c_void;
+    fn CFStringGetCString(
+        string: *const c_void,
+        buffer: *mut i8,
+        buffer_size: isize,
+        encoding: u32,
+    ) -> u8;
+    fn CFBooleanGetValue(boolean: *const c_void) -> u8;
+    fn CFArrayGetCount(array: *const c_void) -> isize;
+    fn CFArrayGetValueAtIndex(array: *const c_void, index: isize) -> *const c_void;
 }
 
 #[allow(dead_code)]
@@ -502,14 +987,68 @@ pub fn recover_target_app_for_autosend(
 
     std::thread::sleep(Duration::from_millis(160));
 
-    if let Some((x, y)) = click_point {
-        if let Err(error) = click_target_point(x, y) {
-            return Err(format_autosend_error("click-input-target", &error));
-        }
-        std::thread::sleep(Duration::from_millis(120));
-    }
+    let app_info = frontmost_app_info()
+        .filter(|info| info.app.bundle_id == bundle_id)
+        .ok_or_else(|| {
+            format!(
+                "Target app is not frontmost after activation: {}",
+                bundle_id
+            )
+        })?;
+    prepare_focus_for_policy_with_ops(
+        input_focus_policy(bundle_id),
+        app_info.pid,
+        click_point,
+        focus_editable_input_for_pid,
+        |x, y| {
+            click_target_point(x, y)
+                .map_err(|error| format_autosend_error("click-input-target", &error))?;
+            std::thread::sleep(Duration::from_millis(120));
+            Ok(())
+        },
+        verify_focused_editable_for_pid,
+    )?;
 
     Ok(())
+}
+
+fn prepare_focus_for_policy_with_ops<N, C, V>(
+    policy: InputFocusPolicy,
+    app_pid: u32,
+    click_point: Option<(f64, f64)>,
+    native_focus: N,
+    click_target: C,
+    verify_focus: V,
+) -> Result<Option<u32>, String>
+where
+    N: FnOnce(u32) -> Result<Option<u32>, String>,
+    C: FnOnce(f64, f64) -> Result<(), String>,
+    V: FnOnce(u32) -> Result<Option<u32>, String>,
+{
+    if policy == InputFocusPolicy::PreserveApplicationFirstResponder {
+        if let Some((x, y)) = click_point {
+            click_target(x, y)?;
+        }
+        return Ok(None);
+    }
+
+    let native_error = match native_focus(app_pid) {
+        Ok(Some(element_pid)) => return Ok(Some(element_pid)),
+        Ok(None) => None,
+        Err(error) => Some(error),
+    };
+
+    let Some((x, y)) = click_point else {
+        return Err(native_error.unwrap_or_else(|| {
+            "No editable input element was found in the target window.".to_string()
+        }));
+    };
+    click_target(x, y)?;
+    verify_focus(app_pid)?.map(Some).ok_or_else(|| {
+        native_error.unwrap_or_else(|| {
+            "The target input did not receive keyboard focus after clicking it.".to_string()
+        })
+    })
 }
 
 #[allow(dead_code)]
@@ -716,11 +1255,11 @@ where
     if !is_trusted() {
         return AutosendOutcome::missing_accessibility_permission();
     }
-    if let Err(error) = copy_sender(body) {
-        return AutosendOutcome::copy_failed(error);
-    }
     if let Err(error) = recover_target(bundle_id, click_point) {
         return AutosendOutcome::target_focus_failed(error);
+    }
+    if let Err(error) = copy_sender(body) {
+        return AutosendOutcome::copy_failed(error);
     }
     if let Err(error) = paste_sender() {
         return AutosendOutcome::paste_event_failed(format_autosend_error("native-paste", &error));
@@ -1445,8 +1984,8 @@ mod tests {
             events,
             vec![
                 "permission".to_string(),
-                "copy:hello".to_string(),
                 "recover:com.openai.codex".to_string(),
+                "copy:hello".to_string(),
                 "paste".to_string(),
                 "sleep".to_string(),
                 "submit".to_string(),
@@ -1475,8 +2014,8 @@ mod tests {
             events,
             vec![
                 "permission".to_string(),
-                "copy:hello".to_string(),
                 "recover:com.openai.codex".to_string(),
+                "copy:hello".to_string(),
                 "paste".to_string(),
                 "sleep".to_string(),
             ]
@@ -1504,6 +2043,29 @@ mod tests {
         assert_eq!(
             outcome.reason,
             Some(AutosendFailureReason::MissingAccessibilityPermission)
+        );
+    }
+
+    #[test]
+    fn activating_clipboard_sender_does_not_replace_clipboard_when_focus_fails() {
+        let outcome = paste_prompt_and_submit_to_app_clipboard_with_ops(
+            "hello",
+            "com.anthropic.claudefordesktop",
+            None,
+            NativeSubmitKey::Enter,
+            |_| panic!("copy must not run before target focus is verified"),
+            || true,
+            |_, _| Err("no editable input".to_string()),
+            || panic!("paste must not run when focus recovery fails"),
+            |_| panic!("submit must not run when focus recovery fails"),
+            |_| panic!("sleep must not run when focus recovery fails"),
+        );
+
+        assert!(!outcome.copied);
+        assert!(!outcome.sent);
+        assert_eq!(
+            outcome.reason,
+            Some(AutosendFailureReason::TargetFocusFailed)
         );
     }
 
@@ -1596,6 +2158,171 @@ mod tests {
     #[test]
     fn native_submit_key_supports_command_enter() {
         assert_eq!(NativeSubmitKey::CommandEnter, NativeSubmitKey::CommandEnter);
+    }
+
+    #[test]
+    fn codex_keeps_activation_only_focus_policy() {
+        assert_eq!(
+            input_focus_policy("com.openai.codex"),
+            InputFocusPolicy::PreserveApplicationFirstResponder
+        );
+    }
+
+    #[test]
+    fn other_apps_use_verified_editable_focus_policy() {
+        assert_eq!(
+            input_focus_policy("com.anthropic.claudefordesktop"),
+            InputFocusPolicy::ResolveEditableElement
+        );
+        assert_eq!(
+            input_focus_policy("com.tencent.xinWeChat"),
+            InputFocusPolicy::ResolveEditableElement
+        );
+    }
+
+    #[test]
+    fn codex_focus_preparation_does_not_invoke_native_ax_resolution() {
+        let mut clicked = None;
+        let result = prepare_focus_for_policy_with_ops(
+            InputFocusPolicy::PreserveApplicationFirstResponder,
+            42,
+            Some((640.0, 720.0)),
+            |_| panic!("Codex must keep the existing activation-only path"),
+            |x, y| {
+                clicked = Some((x, y));
+                Ok(())
+            },
+            |_| panic!("Codex must not require AX focus verification"),
+        );
+
+        assert!(result.is_ok());
+        assert_eq!(clicked, Some((640.0, 720.0)));
+    }
+
+    #[test]
+    fn verified_native_focus_skips_coordinate_click_for_other_apps() {
+        let result = prepare_focus_for_policy_with_ops(
+            InputFocusPolicy::ResolveEditableElement,
+            84,
+            Some((640.0, 720.0)),
+            |pid| {
+                assert_eq!(pid, 84);
+                Ok(Some(86))
+            },
+            |_, _| panic!("verified native focus must avoid coordinate fallback"),
+            |_| panic!("native focus result is already verified"),
+        );
+
+        assert_eq!(result, Ok(Some(86)));
+    }
+
+    #[test]
+    fn coordinate_fallback_for_other_apps_requires_focus_verification() {
+        let result = prepare_focus_for_policy_with_ops(
+            InputFocusPolicy::ResolveEditableElement,
+            84,
+            Some((640.0, 720.0)),
+            |_| Ok(None),
+            |_, _| Ok(()),
+            |pid| {
+                assert_eq!(pid, 84);
+                Ok(None)
+            },
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn editable_candidate_scoring_prefers_large_lower_text_area_over_search() {
+        let window = CandidateInput {
+            x: 0.0,
+            y: 0.0,
+            width: 1200.0,
+            height: 900.0,
+        };
+        let composer = EditableCandidate {
+            role: EditableRole::TextArea,
+            frame: CandidateInput {
+                x: 220.0,
+                y: 650.0,
+                width: 760.0,
+                height: 150.0,
+            },
+            enabled: true,
+            focused: false,
+            depth: 5,
+        };
+        let search = EditableCandidate {
+            role: EditableRole::SearchField,
+            frame: CandidateInput {
+                x: 20.0,
+                y: 40.0,
+                width: 280.0,
+                height: 32.0,
+            },
+            enabled: true,
+            focused: false,
+            depth: 3,
+        };
+
+        assert!(
+            editable_candidate_score(&composer, &window)
+                > editable_candidate_score(&search, &window)
+        );
+    }
+
+    #[test]
+    fn editable_candidate_selection_rejects_ambiguous_fields() {
+        let window = CandidateInput {
+            x: 0.0,
+            y: 0.0,
+            width: 1000.0,
+            height: 800.0,
+        };
+        let candidates = vec![
+            EditableCandidate {
+                role: EditableRole::TextArea,
+                frame: CandidateInput {
+                    x: 100.0,
+                    y: 580.0,
+                    width: 700.0,
+                    height: 100.0,
+                },
+                enabled: true,
+                focused: false,
+                depth: 4,
+            },
+            EditableCandidate {
+                role: EditableRole::TextArea,
+                frame: CandidateInput {
+                    x: 100.0,
+                    y: 590.0,
+                    width: 700.0,
+                    height: 100.0,
+                },
+                enabled: true,
+                focused: false,
+                depth: 4,
+            },
+        ];
+
+        assert_eq!(select_editable_candidate(&candidates, &window), None);
+    }
+
+    #[test]
+    fn search_and_non_editable_web_areas_cannot_receive_prompts() {
+        assert!(!role_can_receive_prompt(
+            EditableRole::SearchField,
+            true,
+            true
+        ));
+        assert!(!role_can_receive_prompt(
+            EditableRole::WebArea,
+            false,
+            false
+        ));
+        assert!(role_can_receive_prompt(EditableRole::WebArea, true, false));
     }
 
     #[test]
