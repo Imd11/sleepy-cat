@@ -146,6 +146,16 @@ pub(super) fn cf_string_value(value: CFTypeRef) -> Option<String> {
     )
 }
 
+fn cf_url_or_string_value(value: CFTypeRef) -> Option<String> {
+    if value.is_null() {
+        return None;
+    }
+    if unsafe { CFGetTypeID(value) } == unsafe { CFURLGetTypeID() } {
+        return cf_string_value(unsafe { CFURLGetString(value) });
+    }
+    cf_string_value(value)
+}
+
 fn cf_bool_value(value: CFTypeRef) -> Option<bool> {
     if value.is_null() || unsafe { CFGetTypeID(value) } != unsafe { CFBooleanGetTypeID() } {
         return None;
@@ -164,6 +174,10 @@ pub(super) fn copy_ax_attribute(element: AXUIElementRef, attribute: &str) -> Opt
 
 pub(super) fn ax_string_attribute(element: AXUIElementRef, attribute: &str) -> Option<String> {
     copy_ax_attribute(element, attribute).and_then(|value| cf_string_value(value.as_ptr()))
+}
+
+pub(super) fn ax_url_attribute(element: AXUIElementRef, attribute: &str) -> Option<String> {
+    copy_ax_attribute(element, attribute).and_then(|value| cf_url_or_string_value(value.as_ptr()))
 }
 
 pub(super) fn ax_bool_attribute(element: AXUIElementRef, attribute: &str) -> Option<bool> {
@@ -365,6 +379,8 @@ unsafe extern "C" {
     fn CFEqual(left: CFTypeRef, right: CFTypeRef) -> u8;
     fn CFGetTypeID(cf: CFTypeRef) -> usize;
     fn CFStringGetTypeID() -> usize;
+    fn CFURLGetTypeID() -> usize;
+    fn CFURLGetString(url: CFTypeRef) -> CFTypeRef;
     fn CFBooleanGetTypeID() -> usize;
     fn CFArrayGetTypeID() -> usize;
     fn CFStringCreateWithCString(
@@ -608,5 +624,15 @@ mod tests {
         for attribute in ["AXChildren", "AXVisibleChildren", "AXContents"] {
             assert!(source.contains(attribute));
         }
+    }
+
+    #[test]
+    fn url_attributes_accept_accessibility_string_values() {
+        let value = cf_string("https://chatgpt.com/c/123").unwrap();
+
+        assert_eq!(
+            cf_url_or_string_value(value.as_ptr()).as_deref(),
+            Some("https://chatgpt.com/c/123")
+        );
     }
 }

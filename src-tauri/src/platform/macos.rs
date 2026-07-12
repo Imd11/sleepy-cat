@@ -12,15 +12,15 @@ use autosend_transaction::{run_transaction, TransactionFailure};
 use ax_client::{
     ax_attribute_is_settable, ax_bool_attribute, ax_element_frame, ax_element_pid,
     ax_element_position, ax_element_size, ax_range_attribute, ax_string_attribute,
-    copy_ax_attribute, element_at_position, elements_equal, set_ax_bool_attribute,
-    set_messaging_timeout, system_wide_element_at_position, traversal_children,
-    OwnedCfValue as OwnedCf,
+    ax_url_attribute, copy_ax_attribute, element_at_position, elements_equal,
+    set_ax_bool_attribute, set_messaging_timeout, system_wide_element_at_position,
+    traversal_children, OwnedCfValue as OwnedCf,
 };
 use composer_resolver::{resolve_composer, ComposerCandidate};
 use focus_controller::ComposerFingerprint;
 use input_profiles::{
-    input_capability_profile, FocusAcquisitionPolicy, InputCapabilityProfile,
-    PasteVerificationPolicy,
+    input_capability_profile, input_capability_profile_for_page, is_supported_browser,
+    FocusAcquisitionPolicy, InputCapabilityProfile, PasteVerificationPolicy,
 };
 use process_group::{discover_trusted_candidate_processes, TrustedProcess};
 use serde::Serialize;
@@ -660,6 +660,58 @@ fn focused_editable_pid(app: AXUIElementRef) -> Option<u32> {
 
 fn focused_window(app: AXUIElementRef) -> Option<OwnedCf> {
     copy_ax_attribute(app, "AXFocusedWindow").or_else(|| copy_ax_attribute(app, "AXMainWindow"))
+}
+
+fn browser_page_url_in_window(window: AXUIElementRef) -> Option<String> {
+    const MAX_ELEMENTS: usize = 500;
+    const MAX_DEPTH: usize = 14;
+    const MAX_SCAN_TIME: Duration = Duration::from_millis(220);
+
+    let started = Instant::now();
+    let mut queue: VecDeque<(OwnedCf, usize)> = traversal_children(window)
+        .into_iter()
+        .map(|child| (child, 1))
+        .collect();
+    let mut visited = 0;
+
+    while let Some((element, depth)) = queue.pop_front() {
+        if visited >= MAX_ELEMENTS || started.elapsed() >= MAX_SCAN_TIME {
+            break;
+        }
+        visited += 1;
+        if ax_string_attribute(element.as_ptr(), "AXRole").as_deref() == Some("AXWebArea") {
+            if let Some(url) = ax_url_attribute(element.as_ptr(), "AXURL")
+                .filter(|url| url.starts_with("https://") || url.starts_with("http://"))
+            {
+                return Some(url);
+            }
+        }
+        if depth < MAX_DEPTH {
+            queue.extend(
+                traversal_children(element.as_ptr())
+                    .into_iter()
+                    .map(|child| (child, depth + 1)),
+            );
+        }
+    }
+    None
+}
+
+pub fn active_browser_page_url(pid: u32, bundle_id: &str) -> Option<String> {
+    if !is_supported_browser(bundle_id) {
+        return None;
+    }
+    let app = OwnedCf::created(unsafe { AXUIElementCreateApplication(pid as i32) })?;
+    unsafe {
+        AXUIElementSetMessagingTimeout(app.as_ptr(), 0.08);
+    }
+    let window = focused_window(app.as_ptr())?;
+    browser_page_url_in_window(window.as_ptr()).or_else(|| {
+        set_ax_bool_attribute(app.as_ptr(), "AXManualAccessibility", true);
+        std::thread::sleep(Duration::from_millis(60));
+        let window = focused_window(app.as_ptr())?;
+        browser_page_url_in_window(window.as_ptr())
+    })
 }
 
 fn collect_editable_candidates(window: AXUIElementRef) -> (Vec<NativeEditableCandidate>, usize) {
@@ -1739,6 +1791,7 @@ pub fn paste_prompt_and_submit_to_app_clipboard_with_copier<C, A>(
     target_launch_identity: ProcessLaunchIdentity,
     click_point: Option<(f64, f64)>,
     captured_window: Option<&TargetWindowIdentity>,
+    page_url: Option<&str>,
     submit_key: NativeSubmitKey,
     mut activate_target: A,
     copy_sender: C,
@@ -1750,7 +1803,8 @@ where
     let focused_composer = std::cell::RefCell::new(None::<FocusedComposer>);
     let before_paste = std::cell::RefCell::new(None::<PasteEvidenceSnapshot>);
     let observed_version = app_version_for_pid(target_pid);
-    let profile = input_capability_profile(bundle_id, observed_version.as_deref());
+    let profile =
+        input_capability_profile_for_page(bundle_id, observed_version.as_deref(), page_url);
     paste_prompt_and_submit_to_app_clipboard_with_ops(
         body,
         bundle_id,

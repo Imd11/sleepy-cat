@@ -67,16 +67,7 @@ pub(super) fn input_capability_profile(
 ) -> InputCapabilityProfile {
     match bundle_id {
         "com.openai.codex" => InputCapabilityProfile::CodexFirstResponder,
-        "com.anthropic.claudefordesktop" => {
-            InputCapabilityProfile::Accessibility(accessibility_profile(
-                ProcessScope::MainOnly,
-                ManualAccessibilityPolicy::OnlyWhenTreeSparse,
-                FocusAcquisitionPolicy::ExactAccessibility,
-                (observed_version == Some("1.18286.0"))
-                    .then_some(PasteVerificationPolicy::ValueLengthOrHashChange)
-                    .unwrap_or(PasteVerificationPolicy::PasteOnlyWithoutSubmitEvidence),
-            ))
-        }
+        "com.anthropic.claudefordesktop" => calibrated_profile(80),
         "com.tencent.xinWeChat" => InputCapabilityProfile::Accessibility(accessibility_profile(
             ProcessScope::MainAndValidatedBrowserApplications,
             ManualAccessibilityPolicy::Never,
@@ -88,8 +79,73 @@ pub(super) fn input_capability_profile(
                 .unwrap_or(FocusAcquisitionPolicy::ExactAccessibility),
             PasteVerificationPolicy::PasteOnlyWithoutSubmitEvidence,
         )),
+        bundle_id if is_supported_browser(bundle_id) => calibrated_profile(80),
         _ => InputCapabilityProfile::LegacyCapturedTarget,
     }
+}
+
+pub(super) fn input_capability_profile_for_page(
+    bundle_id: &str,
+    observed_version: Option<&str>,
+    page_url: Option<&str>,
+) -> InputCapabilityProfile {
+    if is_supported_browser(bundle_id) {
+        return calibrated_profile(
+            page_url
+                .and_then(calibrated_bottom_offset_for_url)
+                .unwrap_or(80),
+        );
+    }
+    input_capability_profile(bundle_id, observed_version)
+}
+
+fn calibrated_bottom_offset_for_url(url: &str) -> Option<u16> {
+    let (_, remainder) = url.trim().split_once("://")?;
+    let authority = remainder.split(['/', '?', '#']).next()?;
+    let host = authority
+        .rsplit('@')
+        .next()?
+        .split(':')
+        .next()?
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
+
+    [
+        ("chatgpt.com", 64),
+        ("gemini.google.com", 88),
+        ("manus.im", 72),
+    ]
+    .into_iter()
+    .find_map(|(domain, offset)| {
+        (host == domain || host.ends_with(&format!(".{domain}"))).then_some(offset)
+    })
+}
+
+pub(super) fn is_supported_browser(bundle_id: &str) -> bool {
+    matches!(
+        bundle_id,
+        "com.apple.Safari"
+            | "com.google.Chrome"
+            | "com.microsoft.edgemac"
+            | "com.brave.Browser"
+            | "company.thebrowser.Browser"
+            | "org.mozilla.firefox"
+    )
+}
+
+fn calibrated_profile(bottom_offset: u16) -> InputCapabilityProfile {
+    InputCapabilityProfile::Accessibility(accessibility_profile(
+        ProcessScope::MainOnly,
+        ManualAccessibilityPolicy::Never,
+        FocusAcquisitionPolicy::CalibratedWindowPoint {
+            horizontal_percent: 50,
+            bottom_offset,
+        },
+        PasteVerificationPolicy::FocusStableAfterProfiledDelay {
+            min_ms: 180,
+            max_ms: 420,
+        },
+    ))
 }
 
 fn accessibility_profile(
@@ -136,6 +192,100 @@ mod tests {
             input_capability_profile("com.apple.Notes", None),
             InputCapabilityProfile::LegacyCapturedTarget
         );
+        for bundle_id in [
+            "com.todesktop.230313mzl4w4u92",
+            "com.apple.Terminal",
+            "com.googlecode.iterm2",
+            "dev.warp.Warp-Stable",
+        ] {
+            assert_eq!(
+                input_capability_profile(bundle_id, None),
+                InputCapabilityProfile::LegacyCapturedTarget
+            );
+        }
+    }
+
+    #[test]
+    fn claude_uses_its_calibrated_composer_point_without_changing_codex() {
+        let InputCapabilityProfile::Accessibility(claude) =
+            input_capability_profile("com.anthropic.claudefordesktop", None)
+        else {
+            panic!("Claude should use a calibrated accessibility profile");
+        };
+
+        assert_eq!(
+            claude.focus_acquisition,
+            FocusAcquisitionPolicy::CalibratedWindowPoint {
+                horizontal_percent: 50,
+                bottom_offset: 80,
+            }
+        );
+        assert!(claude.permits_submit());
+        assert_eq!(
+            input_capability_profile("com.openai.codex", None),
+            InputCapabilityProfile::CodexFirstResponder
+        );
+    }
+
+    #[test]
+    fn supported_browsers_use_a_calibrated_composer_point() {
+        for bundle_id in [
+            "com.apple.Safari",
+            "com.google.Chrome",
+            "com.microsoft.edgemac",
+            "com.brave.Browser",
+            "company.thebrowser.Browser",
+            "org.mozilla.firefox",
+        ] {
+            let InputCapabilityProfile::Accessibility(browser) =
+                input_capability_profile(bundle_id, None)
+            else {
+                panic!("{bundle_id} should use a calibrated browser profile");
+            };
+            assert_eq!(
+                browser.focus_acquisition,
+                FocusAcquisitionPolicy::CalibratedWindowPoint {
+                    horizontal_percent: 50,
+                    bottom_offset: 80,
+                }
+            );
+            assert!(browser.permits_submit());
+        }
+    }
+
+    #[test]
+    fn browser_ai_sites_use_their_screenshot_calibrated_offsets() {
+        for (url, expected_offset) in [
+            ("https://chatgpt.com/c/123", 64),
+            ("https://gemini.google.com/app/123", 88),
+            ("https://manus.im/app/123", 72),
+        ] {
+            let InputCapabilityProfile::Accessibility(profile) =
+                input_capability_profile_for_page("com.google.Chrome", None, Some(url))
+            else {
+                panic!("{url} should use a calibrated browser profile");
+            };
+            assert_eq!(
+                profile.focus_acquisition,
+                FocusAcquisitionPolicy::CalibratedWindowPoint {
+                    horizontal_percent: 50,
+                    bottom_offset: expected_offset,
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn browser_site_matching_accepts_subdomains_and_rejects_lookalikes() {
+        assert_eq!(
+            calibrated_bottom_offset_for_url("https://www.chatgpt.com/"),
+            Some(64)
+        );
+        assert_eq!(
+            calibrated_bottom_offset_for_url("https://chatgpt.com.evil.example/"),
+            None
+        );
+        assert_eq!(calibrated_bottom_offset_for_url("not a URL"), None);
     }
 
     #[test]
@@ -149,7 +299,7 @@ mod tests {
         assert_eq!(claude.window_identity, WindowIdentityRequirement::Required);
         assert_eq!(
             claude.manual_accessibility,
-            ManualAccessibilityPolicy::OnlyWhenTreeSparse
+            ManualAccessibilityPolicy::Never
         );
 
         let InputCapabilityProfile::Accessibility(wechat) =
@@ -172,7 +322,7 @@ mod tests {
     }
 
     #[test]
-    fn accessibility_profiles_allow_only_the_versioned_wechat_point_strategy() {
+    fn accessibility_profiles_keep_calibrated_points_out_of_the_ax_web_area() {
         for (bundle_id, version) in [
             ("com.anthropic.claudefordesktop", "1.18286.0"),
             ("com.tencent.xinWeChat", "4.1.2"),
@@ -184,11 +334,7 @@ mod tests {
             };
             assert!(profile.forbidden_subroles.contains(&"AXSearchField"));
             assert!(!profile.allowed_roles.contains(&"AXWebArea"));
-            if bundle_id == "com.tencent.xinWeChat" {
-                assert!(profile.permits_calibrated_window_point);
-            } else {
-                assert!(!profile.permits_calibrated_window_point);
-            }
+            assert!(profile.permits_calibrated_window_point);
             assert!(!profile.permits_web_area_composer);
             if bundle_id == "com.tencent.xinWeChat" {
                 assert!(!profile.permits_submit());
@@ -199,30 +345,23 @@ mod tests {
     }
 
     #[test]
-    fn unknown_target_versions_cannot_enter_submit_phase() {
-        for bundle_id in ["com.anthropic.claudefordesktop", "com.tencent.xinWeChat"] {
-            let InputCapabilityProfile::Accessibility(profile) =
-                input_capability_profile(bundle_id, Some("99.0"))
-            else {
-                panic!("expected accessibility profile");
-            };
-            assert!(!profile.permits_submit());
-            assert!(!profile.permits_calibrated_window_point);
-        }
+    fn unknown_wechat_versions_cannot_enter_submit_phase() {
+        let InputCapabilityProfile::Accessibility(profile) =
+            input_capability_profile("com.tencent.xinWeChat", Some("99.0"))
+        else {
+            panic!("expected accessibility profile");
+        };
+        assert!(!profile.permits_submit());
+        assert!(!profile.permits_calibrated_window_point);
     }
 
     #[test]
-    fn uncalibrated_patch_versions_cannot_inherit_submit_evidence() {
-        for (bundle_id, version) in [
-            ("com.anthropic.claudefordesktop", "1.18286.1"),
-            ("com.tencent.xinWeChat", "4.1.3"),
-        ] {
-            let InputCapabilityProfile::Accessibility(profile) =
-                input_capability_profile(bundle_id, Some(version))
-            else {
-                panic!("expected accessibility profile");
-            };
-            assert!(!profile.permits_submit());
-        }
+    fn uncalibrated_wechat_patch_versions_cannot_inherit_submit_evidence() {
+        let InputCapabilityProfile::Accessibility(profile) =
+            input_capability_profile("com.tencent.xinWeChat", Some("4.1.3"))
+        else {
+            panic!("expected accessibility profile");
+        };
+        assert!(!profile.permits_submit());
     }
 }

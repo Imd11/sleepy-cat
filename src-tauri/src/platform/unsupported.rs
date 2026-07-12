@@ -207,6 +207,10 @@ pub fn current_target_window_identity(_pid: u32) -> Option<TargetWindowIdentity>
     None
 }
 
+pub fn active_browser_page_url(_pid: u32, _bundle_id: &str) -> Option<String> {
+    None
+}
+
 pub fn current_pointer_location() -> Option<(f64, f64)> {
     None
 }
@@ -244,6 +248,7 @@ pub fn paste_prompt_and_submit_to_app_clipboard_with_copier<C, A>(
     _target_launch_identity: ProcessLaunchIdentity,
     _click_point: Option<(f64, f64)>,
     _captured_window: Option<&TargetWindowIdentity>,
+    _page_url: Option<&str>,
     _submit_key: NativeSubmitKey,
     _activate_target: A,
     copy_sender: C,

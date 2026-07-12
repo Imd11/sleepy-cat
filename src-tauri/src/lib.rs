@@ -132,7 +132,24 @@ async fn begin_prompt_pick_session(
         let Some(identity) = captured_identity_for_target(&target, recent_identity.as_ref()) else {
             return None;
         };
-        record_prompt_pick_session_target_if_valid(&session_state, target, identity, session_id)
+        let target_pid = target.pid;
+        let target_bundle_id = target.app.bundle_id.clone();
+        let captured_app = record_prompt_pick_session_target_if_valid(
+            &session_state,
+            target,
+            identity,
+            session_id,
+        );
+        if captured_app.is_some() {
+            if let Some(pid) = target_pid {
+                if let Some(page_url) =
+                    platform::macos::active_browser_page_url(pid, &target_bundle_id)
+                {
+                    session_state.set_page_url_if_current(session_id, &target_bundle_id, page_url);
+                }
+            }
+        }
+        captured_app
     })
     .await
     .map_err(|error| format!("Prompt pick session task failed: {}", error))?;
@@ -294,6 +311,7 @@ fn paste_prompt_sequence_and_submit_to_last_target_impl(
     let target_pid = captured_identity.application.main_pid;
     let target_launch_identity = captured_identity.application.launch_identity;
     let captured_window = captured_identity.window;
+    let captured_page_url = captured_identity.page_url;
     paste_prompt_sequence_and_submit_to_session_target_with_senders(
         bodies,
         interval_ms,
@@ -308,6 +326,7 @@ fn paste_prompt_sequence_and_submit_to_last_target_impl(
                 target_launch_identity,
                 click_point.map(|point| (point.x, point.y)),
                 captured_window.as_ref(),
+                captured_page_url.as_deref(),
                 submit_key,
                 |pid| activate_target_process(app, pid),
                 |text| copy_text_to_clipboard(app, text),
@@ -334,6 +353,7 @@ fn paste_prompt_and_submit_to_last_target_impl(
     let target_pid = captured_identity.application.main_pid;
     let target_launch_identity = captured_identity.application.launch_identity;
     let captured_window = captured_identity.window;
+    let captured_page_url = captured_identity.page_url;
     paste_prompt_and_submit_to_session_target_with_senders(
         body,
         state,
@@ -347,6 +367,7 @@ fn paste_prompt_and_submit_to_last_target_impl(
                 target_launch_identity,
                 click_point.map(|point| (point.x, point.y)),
                 captured_window.as_ref(),
+                captured_page_url.as_deref(),
                 submit_key,
                 |pid| activate_target_process(app, pid),
                 |text| copy_text_to_clipboard(app, text),
@@ -1011,6 +1032,7 @@ type TargetWindowIdentity = platform::TargetWindowIdentity;
 struct CapturedTargetIdentity {
     application: TargetApplicationIdentity,
     window: Option<TargetWindowIdentity>,
+    page_url: Option<String>,
 }
 
 #[derive(Default)]
@@ -1171,6 +1193,26 @@ impl PromptPickSessionState {
             target.click_point = candidate.click_point;
         }
         target.observed_at_ms = candidate.observed_at_ms;
+        true
+    }
+
+    pub fn set_page_url_if_current(
+        &self,
+        session_id: u64,
+        bundle_id: &str,
+        page_url: String,
+    ) -> bool {
+        let mut state = self.0.lock().expect("prompt pick session lock poisoned");
+        if state.active_session_id != session_id {
+            return false;
+        }
+        let Some(identity) = state.identity.as_mut() else {
+            return false;
+        };
+        if identity.application.bundle_id != bundle_id {
+            return false;
+        }
+        identity.page_url = Some(page_url);
         true
     }
 
@@ -1779,14 +1821,29 @@ fn captured_identity_for_target(
         return Some(identity.clone());
     }
 
-    Some(CapturedTargetIdentity {
+    Some(fresh_captured_target_identity(
+        &target.app.bundle_id,
+        pid,
+        platform::macos::process_launch_identity(pid)?,
+        platform::macos::current_target_window_identity(pid),
+    ))
+}
+
+fn fresh_captured_target_identity(
+    bundle_id: &str,
+    pid: u32,
+    launch_identity: platform::ProcessLaunchIdentity,
+    window: Option<TargetWindowIdentity>,
+) -> CapturedTargetIdentity {
+    CapturedTargetIdentity {
         application: TargetApplicationIdentity {
-            bundle_id: target.app.bundle_id.clone(),
+            bundle_id: bundle_id.to_string(),
             main_pid: pid,
-            launch_identity: platform::macos::process_launch_identity(pid)?,
+            launch_identity,
         },
-        window: None,
-    })
+        window,
+        page_url: None,
+    }
 }
 
 fn target_application_identity_is_current(identity: &TargetApplicationIdentity) -> bool {
@@ -1873,10 +1930,19 @@ pub(crate) fn freeze_prompt_pick_session_target(
         observed_at_ms: now_ms(),
         click_point,
     };
+    let captured_identity = session_target.pid.and_then(|pid| {
+        Some(fresh_captured_target_identity(
+            &session_target.app.bundle_id,
+            pid,
+            platform::macos::process_launch_identity(pid)?,
+            platform::macos::current_target_window_identity(pid),
+        ))
+    });
+    let stored = captured_identity
+        .map(|identity| state.set_captured_if_current(session_id, session_target.clone(), identity))
+        .unwrap_or_else(|| state.set_if_current_and_empty(session_id, session_target));
 
-    state
-        .set_if_current_and_empty(session_id, session_target)
-        .then_some(app)
+    stored.then_some(app)
 }
 
 fn prompt_pick_session_target(
@@ -1951,13 +2017,11 @@ fn record_last_input_target_if_valid(state: &LastInputTargetState, target: &plat
         state.clear();
         return;
     }
-    let identity = CapturedTargetIdentity {
-        application: TargetApplicationIdentity {
-            bundle_id: app.bundle_id.clone(),
-            main_pid: target.pid,
-            launch_identity,
-        },
-        window: window.or_else(|| {
+    let identity = fresh_captured_target_identity(
+        &app.bundle_id,
+        target.pid,
+        launch_identity,
+        window.or_else(|| {
             Some(TargetWindowIdentity {
                 owner_pid: target.pid,
                 frame: target.window_frame.clone(),
@@ -1966,7 +2030,7 @@ fn record_last_input_target_if_valid(state: &LastInputTargetState, target: &plat
                 cg_window_id: None,
             })
         }),
-    };
+    );
 
     state.set_captured(
         LastInputTarget {
@@ -1999,14 +2063,12 @@ fn record_last_app_if_valid(state: &LastInputTargetState, target: FrontmostAppWi
         state.clear();
         return;
     };
-    let identity = CapturedTargetIdentity {
-        application: TargetApplicationIdentity {
-            bundle_id: target.app.bundle_id.clone(),
-            main_pid: pid,
-            launch_identity,
-        },
-        window: None,
-    };
+    let identity = fresh_captured_target_identity(
+        &target.app.bundle_id,
+        pid,
+        launch_identity,
+        platform::macos::current_target_window_identity(pid),
+    );
     state.set_captured(
         LastInputTarget {
             app: target.app,
@@ -2845,7 +2907,61 @@ mod last_input_target_tests {
                     .expect("test process should have launch metadata"),
             },
             window: None,
+            page_url: None,
         }
+    }
+
+    #[test]
+    fn fresh_target_identity_keeps_the_browser_window_for_calibrated_focus() {
+        let window = TargetWindowIdentity {
+            owner_pid: 42,
+            frame: CandidateInput {
+                x: 10.0,
+                y: 20.0,
+                width: 1200.0,
+                height: 800.0,
+            },
+            role: Some("AXWindow".to_string()),
+            title_hash: None,
+            cg_window_id: None,
+        };
+        let identity = fresh_captured_target_identity(
+            "com.google.Chrome",
+            42,
+            platform::ProcessLaunchIdentity {
+                seconds: 1,
+                microseconds: 2,
+            },
+            Some(window.clone()),
+        );
+
+        assert_eq!(identity.window, Some(window));
+    }
+
+    #[test]
+    fn background_page_detection_enriches_only_the_current_browser_session() {
+        let state = PromptPickSessionState::default();
+        state.begin(7);
+        state.set_captured_if_current(
+            7,
+            prompt_target("Chrome", "com.google.Chrome", Some(42)),
+            captured_identity("com.google.Chrome", std::process::id()),
+        );
+
+        assert!(state.set_page_url_if_current(
+            7,
+            "com.google.Chrome",
+            "https://chatgpt.com/c/123".to_string(),
+        ));
+        assert_eq!(
+            state.captured_identity().unwrap().page_url.as_deref(),
+            Some("https://chatgpt.com/c/123")
+        );
+        assert!(!state.set_page_url_if_current(
+            6,
+            "com.google.Chrome",
+            "https://gemini.google.com/app/123".to_string(),
+        ));
     }
 
     #[test]
@@ -3117,6 +3233,8 @@ mod last_input_target_tests {
 
         assert!(command_source.contains("session_state.begin_if_new(session_id);"));
         assert!(command_source.contains("record_prompt_pick_session_target_if_valid"));
+        assert!(command_source.contains("platform::macos::active_browser_page_url"));
+        assert!(command_source.contains("set_page_url_if_current"));
         assert!(!command_source.contains("session_state.clear_if_current(session_id);"));
     }
 
@@ -3133,6 +3251,7 @@ mod last_input_target_tests {
 
         assert!(single_source.contains("paste_prompt_and_submit_to_session_target_with_senders"));
         assert!(single_source.contains("paste_prompt_and_submit_to_app_clipboard_with_copier"));
+        assert!(single_source.contains("captured_page_url.as_deref()"));
         assert!(single_source.contains("state,\n        None,"));
         assert!(!single_source.contains("focus_preserving_prompt_to_last_target_impl("));
 
@@ -3501,6 +3620,32 @@ mod last_input_target_tests {
 
         assert_eq!(target.app.bundle_id, "com.tencent.xinWeChat");
         assert_eq!(target.pid, Some(123));
+    }
+
+    #[test]
+    fn prompt_pick_session_synchronously_captures_a_live_target_identity() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("2")
+            .spawn()
+            .expect("test helper process should start");
+        let pid = child.id();
+        let state = PromptPickSessionState::default();
+        state.begin(2);
+
+        freeze_prompt_pick_session_target(
+            &state,
+            Some(frontmost_target("Chrome", "com.google.Chrome", Some(pid))),
+            None,
+            2,
+        );
+
+        let identity = state
+            .captured_identity()
+            .expect("live target identity should be captured before the popover opens");
+        assert_eq!(identity.application.main_pid, pid);
+        assert_eq!(identity.application.bundle_id, "com.google.Chrome");
+        let _ = child.kill();
+        let _ = child.wait();
     }
 
     #[test]
