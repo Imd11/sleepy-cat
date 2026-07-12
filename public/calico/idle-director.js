@@ -23,7 +23,7 @@ const QUIET_START_MS = 7_000;
 const HOVER_PRIORITY = 2;
 const HOVER_COOLDOWN_MS = 10_000;
 const HOVER_IDLE_PAUSE_MS = 6_000;
-const RESTING_STATES = new Set(["sleeping", "dozing", "mini-sleep"]);
+const RESTING_STATES = new Set(["yawning", "dozing", "collapsing", "sleeping", "mini-sleep"]);
 const NEUTRAL_ATTENTION_STATES = new Set(["idle-follow", "idle"]);
 const PROTECTED_STATES = new Set([
   "happy",
@@ -37,6 +37,7 @@ const PROTECTED_STATES = new Set([
   "working-building",
   "working-carrying",
   "working-sweeping",
+  "waking",
 ]);
 
 function clampElapsed(value) {
@@ -222,6 +223,28 @@ export function createCalicoIdleDirector({
     return true;
   }
 
+  function handleClickAttention() {
+    if (!running) return false;
+
+    const currentState = getCurrentState?.() ?? BASELINE_STATE;
+    const state = attentionStateFor(currentState);
+    if (!state) return false;
+
+    const durationMs = displayMsFor(state);
+    const applied = applyMotion?.({
+      state,
+      reason: "click-attention",
+      priority: HOVER_PRIORITY,
+      durationMs,
+      sequence: state === "waking" ? [BASELINE_STATE] : [],
+    });
+    if (!applied) return false;
+
+    resetIdleClock();
+    pause(HOVER_IDLE_PAUSE_MS);
+    return true;
+  }
+
   return {
     start,
     stop,
@@ -229,5 +252,6 @@ export function createCalicoIdleDirector({
     resetIdleClock,
     resetToBaseline,
     handleAttention,
+    handleClickAttention,
   };
 }

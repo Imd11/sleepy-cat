@@ -116,9 +116,9 @@ async fn begin_prompt_pick_session(
 ) -> Result<Option<FrontmostApp>, String> {
     let session_state = session_state.inner().clone();
     let recent_state = recent_state.inner().clone();
-    session_state.begin(session_id);
+    session_state.begin_if_new(session_id);
 
-    tauri::async_runtime::spawn_blocking(move || {
+    let captured_app = tauri::async_runtime::spawn_blocking(move || {
         if let Some(input_target) = platform::macos::current_input_target() {
             record_last_input_target_if_valid(&recent_state, &input_target);
         }
@@ -127,17 +127,17 @@ async fn begin_prompt_pick_session(
         let Some(target) =
             prompt_pick_session_target(platform::frontmost_app_with_pid(), recent_state.get())
         else {
-            session_state.clear_if_current(session_id);
             return None;
         };
         let Some(identity) = captured_identity_for_target(&target, recent_identity.as_ref()) else {
-            session_state.clear_if_current(session_id);
             return None;
         };
         record_prompt_pick_session_target_if_valid(&session_state, target, identity, session_id)
     })
     .await
-    .map_err(|error| format!("Prompt pick session task failed: {}", error))
+    .map_err(|error| format!("Prompt pick session task failed: {}", error))?;
+
+    Ok(captured_app)
 }
 
 #[tauri::command]
@@ -298,7 +298,7 @@ fn paste_prompt_sequence_and_submit_to_last_target_impl(
         bodies,
         interval_ms,
         state,
-        Some(recent_state),
+        None,
         submit_key,
         |body, bundle_id, click_point, submit_key| {
             platform::macos::paste_prompt_and_submit_to_app_clipboard_with_copier(
@@ -337,7 +337,7 @@ fn paste_prompt_and_submit_to_last_target_impl(
     paste_prompt_and_submit_to_session_target_with_senders(
         body,
         state,
-        Some(recent_state),
+        None,
         submit_key,
         |body, bundle_id, click_point, submit_key| {
             platform::macos::paste_prompt_and_submit_to_app_clipboard_with_copier(
@@ -1120,8 +1120,57 @@ impl PromptPickSessionState {
         if state.active_session_id != session_id {
             return false;
         }
+        if let Some(frozen) = state.target.as_ref() {
+            if frozen.app.bundle_id != target.app.bundle_id
+                || matches!((frozen.pid, target.pid), (Some(left), Some(right)) if left != right)
+            {
+                return false;
+            }
+        }
         state.target = Some(target);
         state.identity = Some(identity);
+        true
+    }
+
+    pub fn set_if_current_and_empty(
+        &self,
+        session_id: u64,
+        target: PromptPickSessionTarget,
+    ) -> bool {
+        let mut state = self.0.lock().expect("prompt pick session lock poisoned");
+        if state.active_session_id != session_id || state.target.is_some() {
+            return false;
+        }
+        state.target = Some(target);
+        true
+    }
+
+    pub fn enrich_if_current_matching(
+        &self,
+        session_id: u64,
+        candidate: PromptPickSessionTarget,
+    ) -> bool {
+        let mut state = self.0.lock().expect("prompt pick session lock poisoned");
+        if state.active_session_id != session_id {
+            return false;
+        }
+        let Some(target) = state.target.as_mut() else {
+            return false;
+        };
+        if target.app.bundle_id != candidate.app.bundle_id {
+            return false;
+        }
+        if matches!((target.pid, candidate.pid), (Some(left), Some(right)) if left != right) {
+            return false;
+        }
+
+        if target.pid.is_none() {
+            target.pid = candidate.pid;
+        }
+        if candidate.click_point.is_some() {
+            target.click_point = candidate.click_point;
+        }
+        target.observed_at_ms = candidate.observed_at_ms;
         true
     }
 
@@ -1693,13 +1742,27 @@ fn record_prompt_pick_session_target_if_valid(
     session_id: u64,
 ) -> Option<FrontmostApp> {
     if !is_usable_autosend_app(&target.app) {
-        state.clear_if_current(session_id);
         return None;
     }
 
     let app = target.app.clone();
     state
         .set_captured_if_current(session_id, target, identity)
+        .then_some(app)
+}
+
+#[cfg(test)]
+fn enrich_prompt_pick_session_target_if_matching(
+    state: &PromptPickSessionState,
+    target: PromptPickSessionTarget,
+    session_id: u64,
+) -> Option<FrontmostApp> {
+    if !is_usable_autosend_app(&target.app) {
+        return None;
+    }
+    let app = target.app.clone();
+    state
+        .enrich_if_current_matching(session_id, target)
         .then_some(app)
 }
 
@@ -1788,18 +1851,39 @@ fn stale_target_outcome() -> AutosendOutcome {
     }
 }
 
+pub(crate) fn freeze_prompt_pick_session_target(
+    state: &PromptPickSessionState,
+    frontmost: Option<FrontmostAppWithPid>,
+    recent_target: Option<LastInputTarget>,
+    session_id: u64,
+) -> Option<FrontmostApp> {
+    let frontmost = frontmost?;
+    if frontmost.pid == Some(std::process::id()) || !is_usable_autosend_app(&frontmost.app) {
+        return None;
+    }
+
+    let click_point = recent_target
+        .filter(is_recent_prompt_target)
+        .filter(|target| target.app.bundle_id == frontmost.app.bundle_id)
+        .and_then(|target| target.click_point);
+    let app = frontmost.app.clone();
+    let session_target = PromptPickSessionTarget {
+        app: frontmost.app,
+        pid: frontmost.pid,
+        observed_at_ms: now_ms(),
+        click_point,
+    };
+
+    state
+        .set_if_current_and_empty(session_id, session_target)
+        .then_some(app)
+}
+
 fn prompt_pick_session_target(
     frontmost: Option<FrontmostAppWithPid>,
     recent_target: Option<LastInputTarget>,
 ) -> Option<PromptPickSessionTarget> {
     let frontmost = frontmost?;
-
-    // Identify PP itself — by authoritative PID comparison first, then by the
-    // pre-existing bundle-id / name heuristics as a secondary defense. When the
-    // frontmost app is PP (e.g. our own popover became "front" per lsappinfo),
-    // we must NOT use it as the autosend target. Instead we fall through to the
-    // recent_target fallback below — returning early would drop that fallback
-    // and surface "Copied. Paste manually." in the UI.
     let is_prompt_picker =
         frontmost.pid == Some(std::process::id()) || is_prompt_picker_app(&frontmost.app);
 
@@ -1818,19 +1902,6 @@ fn prompt_pick_session_target(
 
     if !is_prompt_picker {
         return None;
-    }
-
-    if let Some(target) = recent_target
-        .as_ref()
-        .filter(|target| is_recent_prompt_target(target))
-        .filter(|target| is_usable_autosend_app(&target.app))
-    {
-        return Some(PromptPickSessionTarget {
-            app: target.app.clone(),
-            pid: target.pid,
-            observed_at_ms: now_ms(),
-            click_point: target.click_point,
-        });
     }
 
     recent_target
@@ -2514,6 +2585,9 @@ pub fn run() {
             app.manage(crate::windows::PopoverModeRequestState::default());
 
             setup_menu_bar_app(app.handle())?;
+            if let Err(error) = crate::windows::prewarm_prompt_popover(app.handle()) {
+                eprintln!("Prompt popover prewarm failed: {error}");
+            }
 
             let window = app.get_webview_window("main").unwrap();
             window.set_title("Prompt Drawer").unwrap();
@@ -2916,6 +2990,106 @@ mod last_input_target_tests {
     }
 
     #[test]
+    fn prompt_pick_session_freezes_the_current_frontmost_app() {
+        let session = PromptPickSessionState::default();
+        let recent = LastInputTarget {
+            app: FrontmostApp {
+                name: "Old App".to_string(),
+                bundle_id: "com.example.old".to_string(),
+            },
+            pid: Some(42),
+            observed_at_ms: now_ms(),
+            click_point: Some(TargetClickPoint { x: 640.0, y: 720.0 }),
+        };
+
+        session.begin(11);
+        let frozen = freeze_prompt_pick_session_target(
+            &session,
+            Some(FrontmostAppWithPid {
+                app: FrontmostApp {
+                    name: "Current App".to_string(),
+                    bundle_id: "com.example.current".to_string(),
+                },
+                pid: Some(84),
+            }),
+            Some(recent),
+            11,
+        );
+
+        assert_eq!(frozen.unwrap().bundle_id, "com.example.current");
+        let target = session
+            .get()
+            .expect("frontmost app should be frozen for the active session");
+        assert_eq!(target.pid, Some(84));
+        assert_eq!(target.click_point, None);
+    }
+
+    #[test]
+    fn prompt_pick_session_reuses_recent_click_point_only_for_the_same_app() {
+        let session = PromptPickSessionState::default();
+        session.begin(12);
+        let recent = LastInputTarget {
+            app: FrontmostApp {
+                name: "Codex".to_string(),
+                bundle_id: "com.openai.codex".to_string(),
+            },
+            pid: Some(42),
+            observed_at_ms: now_ms(),
+            click_point: Some(TargetClickPoint { x: 640.0, y: 720.0 }),
+        };
+
+        freeze_prompt_pick_session_target(
+            &session,
+            Some(FrontmostAppWithPid {
+                app: FrontmostApp {
+                    name: "Codex".to_string(),
+                    bundle_id: "com.openai.codex".to_string(),
+                },
+                pid: Some(42),
+            }),
+            Some(recent),
+            12,
+        );
+
+        assert_eq!(
+            session.get().unwrap().click_point,
+            Some(TargetClickPoint { x: 640.0, y: 720.0 })
+        );
+    }
+
+    #[test]
+    fn background_capture_cannot_replace_the_frozen_app() {
+        let session = PromptPickSessionState::default();
+        session.begin(13);
+        session.set(PromptPickSessionTarget {
+            app: FrontmostApp {
+                name: "Current App".to_string(),
+                bundle_id: "com.example.current".to_string(),
+            },
+            pid: Some(84),
+            observed_at_ms: now_ms(),
+            click_point: None,
+        });
+
+        assert!(enrich_prompt_pick_session_target_if_matching(
+            &session,
+            PromptPickSessionTarget {
+                app: FrontmostApp {
+                    name: "Other App".to_string(),
+                    bundle_id: "com.example.other".to_string(),
+                },
+                pid: Some(126),
+                observed_at_ms: now_ms(),
+                click_point: Some(TargetClickPoint { x: 10.0, y: 20.0 }),
+            },
+            13,
+        )
+        .is_none());
+        assert_eq!(session.get().unwrap().app.bundle_id, "com.example.current");
+        assert_eq!(session.get().unwrap().click_point, None);
+    }
+
+    #[test]
     fn autosend_and_prompt_capture_commands_use_spawn_blocking() {
         let source = include_str!("lib.rs");
 
@@ -2941,8 +3115,9 @@ mod last_input_target_tests {
             .expect("next command should follow begin_prompt_pick_session");
         let command_source = &source[start..start + end];
 
-        assert!(command_source.contains("session_state.begin(session_id);"));
+        assert!(command_source.contains("session_state.begin_if_new(session_id);"));
         assert!(command_source.contains("record_prompt_pick_session_target_if_valid"));
+        assert!(!command_source.contains("session_state.clear_if_current(session_id);"));
     }
 
     #[test]
@@ -2958,6 +3133,7 @@ mod last_input_target_tests {
 
         assert!(single_source.contains("paste_prompt_and_submit_to_session_target_with_senders"));
         assert!(single_source.contains("paste_prompt_and_submit_to_app_clipboard_with_copier"));
+        assert!(single_source.contains("state,\n        None,"));
         assert!(!single_source.contains("focus_preserving_prompt_to_last_target_impl("));
 
         let sequence_start = source
@@ -2971,6 +3147,7 @@ mod last_input_target_tests {
         assert!(sequence_source
             .contains("paste_prompt_sequence_and_submit_to_session_target_with_senders"));
         assert!(sequence_source.contains("paste_prompt_and_submit_to_app_clipboard_with_copier"));
+        assert!(sequence_source.contains("state,\n        None,"));
         assert!(!sequence_source.contains("focus_preserving_prompt_sequence_to_last_target_impl("));
     }
 
@@ -3308,15 +3485,19 @@ mod last_input_target_tests {
 
     #[test]
     fn prompt_pick_session_uses_frontmost_business_app() {
-        let target = prompt_pick_session_target(
+        let state = PromptPickSessionState::default();
+        state.begin(1);
+        freeze_prompt_pick_session_target(
+            &state,
             Some(frontmost_target(
                 "WeChat",
                 "com.tencent.xinWeChat",
                 Some(123),
             )),
             None,
-        )
-        .unwrap();
+            1,
+        );
+        let target = state.get().unwrap();
 
         assert_eq!(target.app.bundle_id, "com.tencent.xinWeChat");
         assert_eq!(target.pid, Some(123));
@@ -4141,6 +4322,15 @@ mod last_input_target_tests {
     fn stale_prompt_pick_session_capture_is_ignored_after_new_session_begins() {
         let session_state = PromptPickSessionState::default();
         session_state.begin(1);
+        session_state.set(PromptPickSessionTarget {
+            app: FrontmostApp {
+                name: "WeChat".to_string(),
+                bundle_id: "com.tencent.xinWeChat".to_string(),
+            },
+            pid: None,
+            observed_at_ms: now_ms(),
+            click_point: None,
+        });
         assert!(record_prompt_pick_session_target_if_valid(
             &session_state,
             PromptPickSessionTarget {

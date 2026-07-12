@@ -50,7 +50,7 @@ let lastMove = null;
 let animationFrame = 0;
 let contextMenuOpened = false;
 let pointerSequence = 0;
-let promptPickSessionId = 0;
+let promptPickSessionId = Math.floor(performance.timeOrigin) * 1000;
 let dragStartedEmitted = false;
 let dragPopoverHidden = false;
 let lastAccessibilitySettingsOpenAt = 0;
@@ -255,7 +255,8 @@ btn.addEventListener('pointerup', async (event) => {
       await notifyVisual('reset');
     } else {
       const sessionId = ++promptPickSessionId;
-      await invoke('begin_prompt_pick_session', { sessionId });
+      const sessionPromise = invoke('begin_prompt_pick_session', { sessionId });
+      void sessionPromise.catch(() => null);
       const toggleResult = await invoke('toggle_prompt_popover_from_button', { sessionId });
       if (!toggleResult?.opened) {
         await notifyVisual('reset');

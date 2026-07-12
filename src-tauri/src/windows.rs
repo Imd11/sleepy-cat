@@ -610,20 +610,7 @@ async fn show_popover_mode(
         return Ok(());
     }
 
-    let url = format!("index.html?mode={}", mode);
-    let window = WebviewWindowBuilder::new(app, POPOVER_WINDOW_LABEL, WebviewUrl::App(url.into()))
-        .title("Prompt Drawer")
-        .inner_size(popover_size.width, popover_size.height)
-        .resizable(false)
-        .decorations(false)
-        .always_on_top(true)
-        .accept_first_mouse(true)
-        .skip_taskbar(true)
-        .focusable(false)
-        .visible(false)
-        .position(window_x, window_y)
-        .build()
-        .map_err(|e| e.to_string())?;
+    let window = build_prompt_popover_window(app, window_x, window_y, mode)?;
     if should_use_transparent_popover_window(Some(mode)) {
         crate::macos_panels::configure_transparent_webview_window(&window)?;
         enable_prompt_popover_outside_click_monitor(app)?;
@@ -633,6 +620,43 @@ async fn show_popover_mode(
     show_non_activating_overlay_window(&window)?;
     set_popover_mode(Some(mode));
     emit_popover_opened(app, mode);
+    Ok(())
+}
+
+fn build_prompt_popover_window(
+    app: &tauri::AppHandle,
+    x: f64,
+    y: f64,
+    mode: &str,
+) -> Result<tauri::WebviewWindow, String> {
+    let popover_size = popover_window_size_for_mode(mode);
+    let url = format!("index.html?mode={}", mode);
+    WebviewWindowBuilder::new(app, POPOVER_WINDOW_LABEL, WebviewUrl::App(url.into()))
+        .title("Prompt Drawer")
+        .inner_size(popover_size.width, popover_size.height)
+        .resizable(false)
+        .decorations(false)
+        .always_on_top(true)
+        .accept_first_mouse(true)
+        .skip_taskbar(true)
+        .focusable(false)
+        .visible(false)
+        .position(x, y)
+        .build()
+        .map_err(|e| e.to_string())
+}
+
+pub(crate) fn prewarm_prompt_popover(app: &tauri::AppHandle) -> Result<(), String> {
+    if app.get_webview_window(POPOVER_WINDOW_LABEL).is_some() {
+        return Ok(());
+    }
+
+    let window = build_prompt_popover_window(app, 0.0, 0.0, "popover")?;
+    crate::macos_panels::configure_non_activating_panel(&window)?;
+    if should_use_transparent_popover_window(Some("popover")) {
+        crate::macos_panels::configure_transparent_webview_window(&window)?;
+    }
+    set_popover_mode(Some("popover"));
     Ok(())
 }
 
@@ -871,9 +895,16 @@ pub fn hide_prompt_popover(app: tauri::AppHandle) -> Result<(), String> {
 pub async fn show_prompt_popover_from_button(
     session_id: u64,
     session_state: tauri::State<'_, crate::PromptPickSessionState>,
+    recent_state: tauri::State<'_, crate::LastInputTargetState>,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
     session_state.begin_if_new(session_id);
+    crate::freeze_prompt_pick_session_target(
+        session_state.inner(),
+        crate::platform::macos::frontmost_app_with_pid(),
+        recent_state.get(),
+        session_id,
+    );
     let position = button_relative_popover_position(
         &app,
         BUTTON_VISUAL_WIDTH,
@@ -887,6 +918,7 @@ pub async fn show_prompt_popover_from_button(
 pub async fn toggle_prompt_popover_from_button(
     session_id: u64,
     session_state: tauri::State<'_, crate::PromptPickSessionState>,
+    recent_state: tauri::State<'_, crate::LastInputTargetState>,
     app: tauri::AppHandle,
 ) -> Result<PromptPopoverToggleOutcome, String> {
     let request_state = app.state::<PopoverModeRequestState>();
@@ -911,6 +943,12 @@ pub async fn toggle_prompt_popover_from_button(
     }
 
     session_state.begin_if_new(session_id);
+    crate::freeze_prompt_pick_session_target(
+        session_state.inner(),
+        crate::platform::macos::frontmost_app_with_pid(),
+        recent_state.get(),
+        session_id,
+    );
     let position = button_relative_popover_position(
         &app,
         BUTTON_VISUAL_WIDTH,
@@ -1587,6 +1625,17 @@ mod tests {
     }
 
     #[test]
+    fn prompt_popover_is_prewarmed_hidden_for_immediate_first_open() {
+        let windows_source = include_str!("windows.rs");
+        let lib_source = include_str!("lib.rs");
+
+        assert!(windows_source.contains("pub(crate) fn prewarm_prompt_popover"));
+        assert!(windows_source.contains("build_prompt_popover_window(app, 0.0, 0.0, \"popover\")"));
+        assert!(windows_source.contains(".visible(false)"));
+        assert!(lib_source.contains("crate::windows::prewarm_prompt_popover(app.handle())"));
+    }
+
+    #[test]
     fn hide_prompt_popover_emits_dismissal_after_hiding_visible_window() {
         let source = include_str!("windows.rs");
         let start = source
@@ -1631,16 +1680,15 @@ mod tests {
     fn popover_builder_creates_hidden_non_focusable_window_before_panel_configuration() {
         let source = include_str!("windows.rs");
         let start = source
-            .find("let window = WebviewWindowBuilder::new(app, POPOVER_WINDOW_LABEL")
-            .expect("popover builder should exist");
+            .find("fn build_prompt_popover_window")
+            .expect("popover builder helper should exist");
         let end = source[start..]
-            .find("set_popover_mode(Some(mode));")
-            .expect("popover builder block should set mode");
+            .find("pub(crate) fn prewarm_prompt_popover")
+            .expect("popover prewarm helper should follow the builder");
         let block = &source[start..start + end];
 
         assert!(block.contains(".visible(false)"));
         assert!(block.contains(".focusable(false)"));
-        assert!(block.contains("show_non_activating_overlay_window(&window)?"));
     }
 
     #[test]

@@ -503,6 +503,7 @@ function handleCalicoInteraction(payload = {}) {
       visual.classList.remove('is-hovering');
       break;
     case 'press':
+      calicoIdleDirector?.handleClickAttention();
       interactionActive = true;
       visual.classList.add('is-pressing');
       pauseIdleForPointerInteraction(5_000);

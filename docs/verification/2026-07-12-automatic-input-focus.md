@@ -25,8 +25,8 @@ No prompt text, conversation text, clipboard content, or raw Accessibility value
 - Previous GitHub Actions run: `29194628631`
 - macOS `cargo fmt --check`: passed
 - macOS `cargo check`: passed
-- macOS `cargo test --lib`: 272 passed, 0 failed, 2 ignored
-- macOS `npm test`: 27 files passed, 317 tests passed
+- macOS `cargo test --lib`: 276 passed, 0 failed, 2 ignored
+- macOS `npm test`: 27 files passed, 320 tests passed
 - macOS `npm run build`: passed
 - Windows `cargo check`: passed
 - Windows `npm run build`: passed
