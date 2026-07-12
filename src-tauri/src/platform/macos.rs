@@ -822,9 +822,11 @@ fn focused_window_frame_for_pid(pid: u32) -> Option<CandidateInput> {
 }
 
 fn focused_composer_matching(expected: &FocusedComposer) -> Option<NativeEditableCandidate> {
-    if expected.trusted_processes.iter().any(|process| {
-        process_launch_identity(process.pid) != Some(process.launch_identity)
-    }) {
+    if expected
+        .trusted_processes
+        .iter()
+        .any(|process| process_launch_identity(process.pid) != Some(process.launch_identity))
+    {
         return None;
     }
     let trusted_pids = expected
@@ -1114,10 +1116,10 @@ fn recover_target_after_activation(
                 target_launch_identity,
                 captured_window,
             )?
-                .ok_or_else(|| {
-                    "No unambiguous editable composer was found in the captured window.".to_string()
-                })
-                .map(Some)
+            .ok_or_else(|| {
+                "No unambiguous editable composer was found in the captured window.".to_string()
+            })
+            .map(Some)
         }
     }
 }
@@ -1336,7 +1338,9 @@ where
         || process_launch_identity(target_pid) == Some(target_launch_identity),
         |bundle_id, click_point, captured_window| {
             if process_launch_identity(target_pid) != Some(target_launch_identity) {
-                return Err("The captured target process was replaced before activation.".to_string());
+                return Err(
+                    "The captured target process was replaced before activation.".to_string(),
+                );
             }
             activate_target(target_pid)?;
             let composer = recover_target_after_activation(

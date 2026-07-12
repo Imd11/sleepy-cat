@@ -172,18 +172,16 @@ where
     let snapshots = processes
         .iter()
         .copied()
-        .filter(|(pid, _)| {
-            *pid == main_pid || process_is_descendant(*pid, main_pid, &processes)
-        })
+        .filter(|(pid, _)| *pid == main_pid || process_is_descendant(*pid, main_pid, &processes))
         .filter_map(|(pid, parent_pid)| {
             let executable_path = executable_path(pid)?;
             let launch_identity = process_launch_identity(pid)?;
             let bundle_id = if pid == main_pid {
                 main_bundle_id.to_string()
-            } else if executable_path
-                .ancestors()
-                .any(|path| path.file_name().is_some_and(|name| name == "WeChatAppEx.app"))
-            {
+            } else if executable_path.ancestors().any(|path| {
+                path.file_name()
+                    .is_some_and(|name| name == "WeChatAppEx.app")
+            }) {
                 WECHAT_APP_EX_BUNDLE_ID.to_string()
             } else {
                 String::new()
