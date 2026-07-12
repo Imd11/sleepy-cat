@@ -11,12 +11,16 @@ mod process_group;
 use autosend_transaction::{run_transaction, TransactionFailure};
 use ax_client::{
     ax_attribute_is_settable, ax_bool_attribute, ax_element_frame, ax_element_pid,
-    ax_range_attribute, ax_string_attribute, copy_ax_attribute, elements_equal,
-    set_ax_bool_attribute, traversal_children, OwnedCfValue as OwnedCf,
+    ax_range_attribute, ax_string_attribute, copy_ax_attribute, element_at_position,
+    elements_equal, set_ax_bool_attribute, system_wide_element_at_position, traversal_children,
+    OwnedCfValue as OwnedCf,
 };
 use composer_resolver::{resolve_composer, ComposerCandidate};
 use focus_controller::ComposerFingerprint;
-use input_profiles::{input_capability_profile, InputCapabilityProfile};
+use input_profiles::{
+    input_capability_profile, FocusAcquisitionPolicy, InputCapabilityProfile,
+    PasteVerificationPolicy,
+};
 use process_group::{discover_trusted_candidate_processes, TrustedProcess};
 use serde::Serialize;
 use std::collections::{hash_map::DefaultHasher, VecDeque};
@@ -690,6 +694,121 @@ fn collect_editable_candidates(window: AXUIElementRef) -> (Vec<NativeEditableCan
     (candidates, visited)
 }
 
+fn composer_hit_test_points(window: &CandidateInput) -> Vec<(f64, f64)> {
+    const X_RATIOS: [f64; 5] = [0.25, 0.40, 0.50, 0.60, 0.75];
+    const Y_RATIOS: [f64; 5] = [0.70, 0.80, 0.88, 0.92, 0.95];
+
+    Y_RATIOS
+        .into_iter()
+        .flat_map(|y_ratio| {
+            X_RATIOS.into_iter().map(move |x_ratio| {
+                (
+                    window.x + window.width * x_ratio,
+                    window.y + window.height * y_ratio,
+                )
+            })
+        })
+        .collect()
+}
+
+fn element_belongs_to_window(element: AXUIElementRef, window: AXUIElementRef) -> bool {
+    for attribute in ["AXWindow", "AXTopLevelUIElement"] {
+        if copy_ax_attribute(element, attribute)
+            .is_some_and(|owner| elements_equal(owner.as_ptr(), window))
+        {
+            return true;
+        }
+    }
+
+    let Some(mut current) = (unsafe { OwnedCf::retained(element) }) else {
+        return false;
+    };
+    for _ in 0..16 {
+        if elements_equal(current.as_ptr(), window) {
+            return true;
+        }
+        let Some(parent) = copy_ax_attribute(current.as_ptr(), "AXParent") else {
+            return false;
+        };
+        current = parent;
+    }
+    false
+}
+
+fn collect_hit_test_editable_candidates(
+    application: AXUIElementRef,
+    window: AXUIElementRef,
+    captured_window: &CandidateInput,
+) -> Vec<NativeEditableCandidate> {
+    let mut candidates: Vec<NativeEditableCandidate> = Vec::new();
+
+    for (x, y) in composer_hit_test_points(captured_window) {
+        let mut hit_elements = Vec::new();
+        if let Ok(element) = element_at_position(application, x, y, 0.08) {
+            hit_elements.push(element);
+        }
+        if let Ok(element) = system_wide_element_at_position(x, y, 0.08) {
+            if !hit_elements
+                .iter()
+                .any(|existing| elements_equal(existing.as_ptr(), element.as_ptr()))
+            {
+                hit_elements.push(element);
+            }
+        }
+
+        for mut element in hit_elements {
+            for depth in 0..8 {
+                let retained = unsafe { OwnedCf::retained(element.as_ptr()) };
+                if let Some(mut candidate) =
+                    retained.and_then(|item| native_editable_candidate(item, depth))
+                {
+                    candidate.resolver.window_matches =
+                        element_belongs_to_window(candidate.element.as_ptr(), window);
+                    if candidate.resolver.window_matches
+                        && hit_test_candidate_has_composer_semantics(&candidate.resolver)
+                        && !candidates.iter().any(|existing| {
+                            elements_equal(existing.element.as_ptr(), candidate.element.as_ptr())
+                        })
+                    {
+                        candidates.push(candidate);
+                    }
+                    break;
+                }
+                let Some(parent) = copy_ax_attribute(element.as_ptr(), "AXParent") else {
+                    break;
+                };
+                element = parent;
+            }
+        }
+    }
+    candidates
+}
+
+fn hit_test_candidate_has_composer_semantics(candidate: &ComposerCandidate) -> bool {
+    [
+        candidate.identifier.as_deref(),
+        candidate.title.as_deref(),
+        candidate.description.as_deref(),
+        candidate.placeholder.as_deref(),
+        candidate.help.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .map(str::to_lowercase)
+    .any(|value| {
+        [
+            "prompt",
+            "message",
+            "ask a question",
+            "type / for commands",
+            "发送消息",
+            "输入消息",
+        ]
+        .iter()
+        .any(|semantic| value.contains(semantic))
+    })
+}
+
 fn focus_editable_input_once(
     app: AXUIElementRef,
     trusted_pids: &[u32],
@@ -718,7 +837,10 @@ fn focus_editable_input_once(
         }
     }
 
-    let (candidates, visited) = collect_editable_candidates(window.as_ptr());
+    let (mut candidates, visited) = collect_editable_candidates(window.as_ptr());
+    if candidates.is_empty() {
+        candidates = collect_hit_test_editable_candidates(app, window.as_ptr(), captured_window);
+    }
     if candidates.is_empty() && visited <= 2 {
         return Ok(NativeFocusAttempt::SparseTree);
     }
@@ -1009,6 +1131,13 @@ type CGKeyCode = u16;
 type AXUIElementRef = *const c_void;
 type CFTypeRef = *const c_void;
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct CGPoint {
+    x: f64,
+    y: f64,
+}
+
 #[allow(dead_code)]
 const CG_EVENT_FLAG_MASK_COMMAND: CGEventFlags = 1 << 20;
 #[allow(dead_code)]
@@ -1026,6 +1155,12 @@ extern "C" {
         source: CGEventSourceRef,
         virtual_key: CGKeyCode,
         key_down: bool,
+    ) -> CGEventRef;
+    fn CGEventCreateMouseEvent(
+        source: CGEventSourceRef,
+        mouse_type: u32,
+        mouse_cursor_position: CGPoint,
+        mouse_button: u32,
     ) -> CGEventRef;
     fn CGEventSetFlags(event: CGEventRef, flags: CGEventFlags);
     fn CGEventPost(tap: u32, event: CGEventRef);
@@ -1058,10 +1193,52 @@ fn post_key_tap(key_code: CGKeyCode, flags: CGEventFlags) -> Result<(), String> 
     post_key_event(key_code, false, flags)
 }
 
+fn post_mouse_event(mouse_type: u32, x: f64, y: f64) -> Result<(), String> {
+    let event =
+        unsafe { CGEventCreateMouseEvent(std::ptr::null_mut(), mouse_type, CGPoint { x, y }, 0) };
+    if event.is_null() {
+        return Err("CGEventCreateMouseEvent returned null".to_string());
+    }
+    unsafe {
+        CGEventPost(CG_HID_EVENT_TAP, event);
+        CFRelease(event.cast_const());
+    }
+    Ok(())
+}
+
+fn post_mouse_click(x: f64, y: f64) -> Result<(), String> {
+    let down = unsafe { CGEventCreateMouseEvent(std::ptr::null_mut(), 1, CGPoint { x, y }, 0) };
+    if down.is_null() {
+        return Err("CGEventCreateMouseEvent returned null for mouse down".to_string());
+    }
+    let up = unsafe { CGEventCreateMouseEvent(std::ptr::null_mut(), 2, CGPoint { x, y }, 0) };
+    if up.is_null() {
+        unsafe { CFRelease(down.cast_const()) };
+        return Err("CGEventCreateMouseEvent returned null for mouse up".to_string());
+    }
+    unsafe {
+        CGEventPost(CG_HID_EVENT_TAP, down);
+        CGEventPost(CG_HID_EVENT_TAP, up);
+        CFRelease(down.cast_const());
+        CFRelease(up.cast_const());
+    }
+    Ok(())
+}
+
 #[allow(dead_code)]
 fn post_paste_shortcut() -> Result<(), String> {
     post_key_event(KEY_CODE_COMMAND, true, CG_EVENT_FLAG_MASK_COMMAND)?;
     post_key_tap(KEY_CODE_V, CG_EVENT_FLAG_MASK_COMMAND)?;
+    post_key_event(KEY_CODE_COMMAND, false, 0)
+}
+
+fn post_calibrated_paste_shortcut() -> Result<(), String> {
+    post_key_event(KEY_CODE_COMMAND, true, CG_EVENT_FLAG_MASK_COMMAND)?;
+    std::thread::sleep(Duration::from_millis(20));
+    post_key_event(KEY_CODE_V, true, CG_EVENT_FLAG_MASK_COMMAND)?;
+    std::thread::sleep(Duration::from_millis(12));
+    post_key_event(KEY_CODE_V, false, CG_EVENT_FLAG_MASK_COMMAND)?;
+    std::thread::sleep(Duration::from_millis(20));
     post_key_event(KEY_CODE_COMMAND, false, 0)
 }
 
@@ -1108,6 +1285,7 @@ fn recover_target_after_activation(
     target_pid: u32,
     target_launch_identity: ProcessLaunchIdentity,
     captured_window: Option<&TargetWindowIdentity>,
+    profile: InputCapabilityProfile,
 ) -> Result<Option<FocusedComposer>, String> {
     if !wait_for_frontmost_target(
         bundle_id,
@@ -1132,6 +1310,29 @@ fn recover_target_after_activation(
             )
         })?;
     verify_captured_window_for_policy(input_focus_policy(bundle_id), target_pid, captured_window)?;
+    if let (InputCapabilityProfile::Accessibility(accessibility), Some(captured_window)) =
+        (profile, captured_window)
+    {
+        if let FocusAcquisitionPolicy::CalibratedWindowPoint {
+            horizontal_percent,
+            bottom_offset,
+        } = accessibility.focus_acquisition
+        {
+            let point = calibrated_window_focus_point(
+                &captured_window.frame,
+                horizontal_percent,
+                bottom_offset,
+            );
+            focus_calibrated_window_point_with_ops(
+                point,
+                current_pointer_location,
+                post_mouse_click,
+                |x, y| post_mouse_event(5, x, y),
+                std::thread::sleep,
+            )?;
+            return Ok(None);
+        }
+    }
     match input_focus_policy(bundle_id) {
         InputFocusPolicy::PreserveApplicationFirstResponder => Ok(None),
         InputFocusPolicy::ResolveEditableElement => {
@@ -1149,6 +1350,41 @@ fn recover_target_after_activation(
             .map(Some)
         }
     }
+}
+
+fn calibrated_window_focus_point(
+    window: &CandidateInput,
+    horizontal_percent: u8,
+    bottom_offset: u16,
+) -> (f64, f64) {
+    let x = window.x + window.width * (f64::from(horizontal_percent.min(100)) / 100.0);
+    let y = window.y + window.height - f64::from(bottom_offset);
+    (
+        x.clamp(window.x, window.x + window.width),
+        y.clamp(window.y, window.y + window.height),
+    )
+}
+
+fn focus_calibrated_window_point_with_ops<P, C, M, W>(
+    point: (f64, f64),
+    current_pointer: P,
+    click: C,
+    move_pointer: M,
+    mut sleep: W,
+) -> Result<(), String>
+where
+    P: FnOnce() -> Option<(f64, f64)>,
+    C: FnOnce(f64, f64) -> Result<(), String>,
+    M: FnOnce(f64, f64) -> Result<(), String>,
+    W: FnMut(Duration),
+{
+    let original_pointer = current_pointer()
+        .ok_or_else(|| "could not capture the pointer before calibrated focus".to_string())?;
+    click(point.0, point.1)?;
+    sleep(Duration::from_millis(45));
+    move_pointer(original_pointer.0, original_pointer.1)?;
+    sleep(Duration::from_millis(75));
+    Ok(())
 }
 
 fn prepare_focus_for_policy_with_ops<N, C, V>(
@@ -1375,6 +1611,7 @@ where
                 target_pid,
                 target_launch_identity,
                 captured_window,
+                profile,
             )?;
             *focused_composer.borrow_mut() = composer;
             Ok(())
@@ -1386,6 +1623,7 @@ where
                 target_pid,
                 target_launch_identity,
                 captured_window,
+                profile,
                 composer.as_ref(),
             );
             if verified {
@@ -1398,10 +1636,35 @@ where
             }
             verified
         },
-        post_paste_shortcut,
+        || match profile {
+            InputCapabilityProfile::Accessibility(accessibility)
+                if matches!(
+                    accessibility.focus_acquisition,
+                    FocusAcquisitionPolicy::CalibratedWindowPoint { .. }
+                ) =>
+            {
+                post_calibrated_paste_shortcut()
+            }
+            _ => post_paste_shortcut(),
+        },
         || match profile {
             InputCapabilityProfile::CodexFirstResponder
             | InputCapabilityProfile::LegacyCapturedTarget => true,
+            InputCapabilityProfile::Accessibility(accessibility)
+                if matches!(
+                    accessibility.paste_verification,
+                    PasteVerificationPolicy::FocusStableAfterProfiledDelay { .. }
+                ) =>
+            {
+                verify_target_focus_for_autosend(
+                    bundle_id,
+                    target_pid,
+                    target_launch_identity,
+                    captured_window,
+                    profile,
+                    None,
+                )
+            }
             InputCapabilityProfile::Accessibility(accessibility) => {
                 let composer = focused_composer.borrow();
                 let Some(composer) = composer.as_ref() else {
@@ -1538,6 +1801,7 @@ fn verify_target_focus_for_autosend(
     target_pid: u32,
     target_launch_identity: ProcessLaunchIdentity,
     captured_window: Option<&TargetWindowIdentity>,
+    profile: InputCapabilityProfile,
     expected_composer: Option<&FocusedComposer>,
 ) -> bool {
     if !frontmost_target_matches(bundle_id, target_pid, target_launch_identity) {
@@ -1550,6 +1814,15 @@ fn verify_target_focus_for_autosend(
     match policy {
         InputFocusPolicy::PreserveApplicationFirstResponder => true,
         InputFocusPolicy::ResolveEditableElement => {
+            if matches!(
+                profile,
+                InputCapabilityProfile::Accessibility(input_profiles::AccessibilityProfile {
+                    focus_acquisition: FocusAcquisitionPolicy::CalibratedWindowPoint { .. },
+                    ..
+                })
+            ) {
+                return true;
+            }
             let Some(expected_composer) = expected_composer else {
                 return false;
             };
@@ -2104,6 +2377,155 @@ fn input_click_point_for_frame(frame: &CandidateInput) -> (f64, f64) {
 mod tests {
     use super::*;
     use std::cell::RefCell;
+
+    #[test]
+    fn composer_hit_test_points_are_bounded_to_the_lower_window_region() {
+        let window = CandidateInput {
+            x: -900.0,
+            y: 120.0,
+            width: 800.0,
+            height: 600.0,
+        };
+        let points = composer_hit_test_points(&window);
+
+        assert_eq!(points.len(), 25);
+        assert!(points.iter().all(|(x, y)| {
+            *x >= window.x
+                && *x <= window.x + window.width
+                && *y >= window.y + window.height * 0.70
+                && *y <= window.y + window.height * 0.95
+        }));
+    }
+
+    #[test]
+    fn hit_test_fallback_requires_explicit_composer_semantics() {
+        let mut candidate = ComposerCandidate {
+            owner_pid: 42,
+            role: "AXTextArea".to_string(),
+            subrole: None,
+            identifier: None,
+            title: None,
+            description: None,
+            placeholder: None,
+            help: None,
+            frame: CandidateInput {
+                x: 100.0,
+                y: 600.0,
+                width: 700.0,
+                height: 80.0,
+            },
+            enabled: true,
+            visible: true,
+            focused: false,
+            window_matches: true,
+            editable: true,
+            secure: false,
+            depth: 1,
+        };
+
+        assert!(!hit_test_candidate_has_composer_semantics(&candidate));
+        candidate.description = Some("Prompt".to_string());
+        assert!(hit_test_candidate_has_composer_semantics(&candidate));
+        candidate.description = Some("Search conversations".to_string());
+        assert!(!hit_test_candidate_has_composer_semantics(&candidate));
+    }
+
+    #[test]
+    fn calibrated_window_focus_point_uses_the_captured_window_on_any_display() {
+        let window = CandidateInput {
+            x: -1200.0,
+            y: 80.0,
+            width: 1000.0,
+            height: 700.0,
+        };
+
+        assert_eq!(
+            calibrated_window_focus_point(&window, 50, 65),
+            (-700.0, 715.0)
+        );
+    }
+
+    #[test]
+    fn calibrated_window_focus_point_clamps_invalid_profile_values() {
+        let window = CandidateInput {
+            x: 10.0,
+            y: 20.0,
+            width: 100.0,
+            height: 50.0,
+        };
+
+        assert_eq!(
+            calibrated_window_focus_point(&window, 200, 500),
+            (110.0, 20.0)
+        );
+    }
+
+    #[test]
+    fn calibrated_window_focus_clicks_once_and_restores_the_pointer() {
+        let events = RefCell::new(Vec::new());
+        focus_calibrated_window_point_with_ops(
+            (500.0, 700.0),
+            || Some((120.0, 240.0)),
+            |x, y| {
+                events.borrow_mut().push(format!("click:{x},{y}"));
+                Ok(())
+            },
+            |x, y| {
+                events.borrow_mut().push(format!("move:{x},{y}"));
+                Ok(())
+            },
+            |duration| {
+                events
+                    .borrow_mut()
+                    .push(format!("sleep:{}", duration.as_millis()));
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            events.into_inner(),
+            ["click:500,700", "sleep:45", "move:120,240", "sleep:75"]
+        );
+    }
+
+    #[test]
+    fn calibrated_window_focus_stops_when_the_click_fails() {
+        let moved = RefCell::new(false);
+        let result = focus_calibrated_window_point_with_ops(
+            (500.0, 700.0),
+            || Some((120.0, 240.0)),
+            |_, _| Err("click failed".to_string()),
+            |_, _| {
+                *moved.borrow_mut() = true;
+                Ok(())
+            },
+            |_| {},
+        );
+
+        assert_eq!(result, Err("click failed".to_string()));
+        assert!(!*moved.borrow());
+    }
+
+    #[test]
+    fn calibrated_window_focus_stops_before_clicking_without_a_pointer_origin() {
+        let clicked = RefCell::new(false);
+        let result = focus_calibrated_window_point_with_ops(
+            (500.0, 700.0),
+            || None,
+            |_, _| {
+                *clicked.borrow_mut() = true;
+                Ok(())
+            },
+            |_, _| Ok(()),
+            |_| {},
+        );
+
+        assert_eq!(
+            result,
+            Err("could not capture the pointer before calibrated focus".to_string())
+        );
+        assert!(!*clicked.borrow());
+    }
 
     fn run_activating_sender_with_ops(
         submit_key: NativeSubmitKey,
@@ -2838,7 +3260,7 @@ mod tests {
     }
 
     #[test]
-    fn target_recovery_function_waits_for_exact_process_without_clicking() {
+    fn target_recovery_limits_mouse_focus_to_the_versioned_calibrated_profile() {
         let source = include_str!("macos.rs");
         let start = source
             .find("fn recover_target_after_activation")
@@ -2851,6 +3273,8 @@ mod tests {
         assert!(!recovery_source.contains("activate_app_by_bundle_id"));
         assert!(recovery_source.contains("wait_for_frontmost_target"));
         assert!(!recovery_source.contains("click_target_point"));
+        assert!(recovery_source.contains("FocusAcquisitionPolicy::CalibratedWindowPoint"));
+        assert!(recovery_source.contains("focus_calibrated_window_point_with_ops"));
         assert!(recovery_source.contains("Duration::from_millis(1_500)"));
     }
 

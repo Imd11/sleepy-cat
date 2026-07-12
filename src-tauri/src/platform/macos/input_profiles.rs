@@ -21,8 +21,18 @@ pub(super) struct AccessibilityProfile {
     pub semantic_exclusions: &'static [&'static str],
     pub submit_key: SubmitKeyPolicy,
     pub paste_verification: PasteVerificationPolicy,
-    pub permits_coordinate_guess: bool,
+    pub focus_acquisition: FocusAcquisitionPolicy,
+    pub permits_calibrated_window_point: bool,
     pub permits_web_area_composer: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum FocusAcquisitionPolicy {
+    ExactAccessibility,
+    CalibratedWindowPoint {
+        horizontal_percent: u8,
+        bottom_offset: u16,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,6 +71,7 @@ pub(super) fn input_capability_profile(
             InputCapabilityProfile::Accessibility(accessibility_profile(
                 ProcessScope::MainOnly,
                 ManualAccessibilityPolicy::OnlyWhenTreeSparse,
+                FocusAcquisitionPolicy::ExactAccessibility,
                 (observed_version == Some("1.18286.0"))
                     .then_some(PasteVerificationPolicy::ValueLengthOrHashChange)
                     .unwrap_or(PasteVerificationPolicy::PasteOnlyWithoutSubmitEvidence),
@@ -70,8 +81,12 @@ pub(super) fn input_capability_profile(
             ProcessScope::MainAndValidatedBrowserApplications,
             ManualAccessibilityPolicy::Never,
             (observed_version == Some("4.1.2"))
-                .then_some(PasteVerificationPolicy::SelectionRangeChange)
-                .unwrap_or(PasteVerificationPolicy::PasteOnlyWithoutSubmitEvidence),
+                .then_some(FocusAcquisitionPolicy::CalibratedWindowPoint {
+                    horizontal_percent: 50,
+                    bottom_offset: 65,
+                })
+                .unwrap_or(FocusAcquisitionPolicy::ExactAccessibility),
+            PasteVerificationPolicy::PasteOnlyWithoutSubmitEvidence,
         )),
         _ => InputCapabilityProfile::LegacyCapturedTarget,
     }
@@ -80,6 +95,7 @@ pub(super) fn input_capability_profile(
 fn accessibility_profile(
     process_scope: ProcessScope,
     manual_accessibility: ManualAccessibilityPolicy,
+    focus_acquisition: FocusAcquisitionPolicy,
     paste_verification: PasteVerificationPolicy,
 ) -> AccessibilityProfile {
     AccessibilityProfile {
@@ -91,7 +107,11 @@ fn accessibility_profile(
         semantic_exclusions: SEMANTIC_EXCLUSIONS,
         submit_key: SubmitKeyPolicy::Enter,
         paste_verification,
-        permits_coordinate_guess: false,
+        focus_acquisition,
+        permits_calibrated_window_point: matches!(
+            focus_acquisition,
+            FocusAcquisitionPolicy::CalibratedWindowPoint { .. }
+        ),
         permits_web_area_composer: false,
     }
 }
@@ -142,10 +162,17 @@ mod tests {
             ProcessScope::MainAndValidatedBrowserApplications
         );
         assert_eq!(wechat.window_identity, WindowIdentityRequirement::Required);
+        assert_eq!(
+            wechat.focus_acquisition,
+            FocusAcquisitionPolicy::CalibratedWindowPoint {
+                horizontal_percent: 50,
+                bottom_offset: 65,
+            }
+        );
     }
 
     #[test]
-    fn accessibility_profiles_never_guess_or_select_web_areas_and_forbid_search() {
+    fn accessibility_profiles_allow_only_the_versioned_wechat_point_strategy() {
         for (bundle_id, version) in [
             ("com.anthropic.claudefordesktop", "1.18286.0"),
             ("com.tencent.xinWeChat", "4.1.2"),
@@ -157,9 +184,17 @@ mod tests {
             };
             assert!(profile.forbidden_subroles.contains(&"AXSearchField"));
             assert!(!profile.allowed_roles.contains(&"AXWebArea"));
-            assert!(!profile.permits_coordinate_guess);
+            if bundle_id == "com.tencent.xinWeChat" {
+                assert!(profile.permits_calibrated_window_point);
+            } else {
+                assert!(!profile.permits_calibrated_window_point);
+            }
             assert!(!profile.permits_web_area_composer);
-            assert!(profile.permits_submit());
+            if bundle_id == "com.tencent.xinWeChat" {
+                assert!(!profile.permits_submit());
+            } else {
+                assert!(profile.permits_submit());
+            }
         }
     }
 
@@ -172,6 +207,7 @@ mod tests {
                 panic!("expected accessibility profile");
             };
             assert!(!profile.permits_submit());
+            assert!(!profile.permits_calibrated_window_point);
         }
     }
 

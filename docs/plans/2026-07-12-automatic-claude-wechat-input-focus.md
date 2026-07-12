@@ -19,7 +19,7 @@
 - Claude uses its Electron browser/application AX tree. `AXManualAccessibility` is enabled only when a read-only probe proves the normal tree is insufficient.
 - WeChat is treated as a process group: the main `com.tencent.xinWeChat` process plus only validated `com.tencent.flue.WeChatAppEx` application processes. Renderer/helper PIDs are not assumed to be keyboard targets.
 - Never select the first visible app as a target.
-- Never click the current mouse location, the Calico position, or a guessed bottom-center window coordinate.
+- Never click the current mouse location or the Calico position. A window-relative focus point is permitted only for an exact, calibrated app version whose real AX probe proves that both focused-element and hit-test APIs are unavailable; the captured app instance and window must still match, and unknown versions fail closed.
 - Never treat `AXWebArea` itself as a composer.
 - Never consider `AXFocused=true` successful until the exact candidate is read back from the system/app AX roots.
 - Never retry paste when paste completion is unknown, and never retry submit when submit completion is unknown.
@@ -27,6 +27,7 @@
 - Do not modify prompt management, category, import/export, sync, Calico animation, or unrelated window styling.
 - Keep the existing clipboard behavior during this focus-reliability project. Full multi-type clipboard restoration is a separate follow-up because it introduces asynchronous pasteboard-provider and restore-timing risks.
 - Keep non-Codex/Claude/WeChat applications on an explicit compatibility route; do not silently apply Claude/WeChat AX heuristics to unknown apps.
+- WeChat 4.1.2 is the only calibrated window-point exception in this plan. It uses the captured window center and a 65-point bottom offset, restores the user's mouse position after the click, and uses a paced Command-V sequence. This exception must not apply to any other WeChat version without a fresh real-app calibration.
 - Copy immutable session data while holding `Mutex` guards, then release every guard before AX calls, process queries, sleeps, or Tauri/AppKit dispatch. Never hold application state locks across blocking work.
 - Run bounded AX traversal on the existing `spawn_blocking` worker path. Dispatch `NSRunningApplication` activation and all `NSWindow`/`NSPanel` operations through the existing main-thread helper; keep those main-thread closures short and never perform AX tree traversal inside them.
 
@@ -799,7 +800,7 @@ Search in this order:
 1. exact current focused element if it passes all hard constraints;
 2. a bounded `AXParent` walk to an editable root;
 3. `AXChildren`, `AXVisibleChildren`, and `AXContents` inside the captured window;
-4. app-root/window-restricted hit testing only for points inside already discovered candidate frames.
+4. app-root/system hit testing inside a bounded lower-window grid only when normal traversal found no editable candidate. A hit result is discovery evidence only: its editable ancestor must belong to the exact captured window, carry explicit composer semantics such as `Prompt`/`Message`, pass every search/security exclusion, and remain unambiguous before it can be focused. No grid point is clicked.
 
 Use the Task 2 probe to add only stable semantic signals. Do not require nonstandard editable-ancestor attributes; use them as optional hints if exposed.
 

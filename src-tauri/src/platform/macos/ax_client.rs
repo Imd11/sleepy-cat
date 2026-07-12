@@ -326,6 +326,16 @@ pub(super) fn element_at_position(
     OwnedAxElement::created(element).ok_or(AxQueryError::InvalidElement)
 }
 
+pub(super) fn system_wide_element_at_position(
+    x: f64,
+    y: f64,
+    timeout: f32,
+) -> Result<OwnedAxElement, AxQueryError> {
+    let system_wide = OwnedCfValue::created(unsafe { AXUIElementCreateSystemWide() })
+        .ok_or(AxQueryError::InvalidElement)?;
+    element_at_position(system_wide.as_ptr(), x, y, timeout)
+}
+
 pub(super) fn perform_action(
     element: AXUIElementRef,
     action: &str,

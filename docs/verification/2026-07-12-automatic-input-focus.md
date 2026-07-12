@@ -14,17 +14,18 @@ No prompt text, conversation text, clipboard content, or raw Accessibility value
 
 - Codex remains on the captured-application first-responder route and does not require an AX window.
 - Claude uses its main application AX tree and enables manual accessibility only after a sparse-tree result.
-- WeChat accepts the main process plus a `WeChatAppEx` process only when bundle path and ancestry match the captured WeChat application; candidate geometry must remain inside the captured window.
+- Claude's sparse Electron tree is resolved with bounded system/application hit testing; the returned `AXTextArea` must belong to the exact captured window before focus is accepted.
+- WeChat 4.1.2 exposes neither a focused editable element nor a usable AX hit-test API (`kAXErrorNotImplemented`). Its calibrated profile therefore clicks one versioned point inside the exact captured window, restores the pointer, and uses a paced Command-V sequence. Other WeChat versions fail closed.
 - Search, secure, hidden, disabled, zero-size, wrong-process, wrong-window, `AXWebArea`, and ambiguous candidates fail closed.
 - Clipboard replacement occurs only after focus succeeds. Paste and submit events are each single-attempt operations.
 - Paste-only transactions cannot enter the submit phase.
 
 ## Automated Gates
 
-- GitHub Actions run: `29194628631`
+- Previous GitHub Actions run: `29194628631`
 - macOS `cargo fmt --check`: passed
 - macOS `cargo check`: passed
-- macOS `cargo test --lib`: 263 passed, 0 failed, 2 ignored
+- macOS `cargo test --lib`: 270 passed, 0 failed, 2 ignored
 - macOS `npm test`: 27 files passed, 317 tests passed
 - macOS `npm run build`: passed
 - Windows `cargo check`: passed
@@ -34,4 +35,9 @@ No prompt text, conversation text, clipboard content, or raw Accessibility value
 
 ## Real-App Gate
 
-Read-only probes were run without recording content. Real Claude/WeChat submit trials are intentionally not run without explicit confirmation that a disposable test conversation/account is selected. Until that approval and matrix are completed, this document does not claim real-app paste-and-submit acceptance.
+Read-only probes and non-submitting calibration were run without recording conversation content:
+
+- Claude Desktop 1.18286.0: one `paste_only` production-path trial started with the composer unfocused, resolved the exact `AXTextArea`, pasted the complete marker once, emitted no Return, and the marker was removed afterward.
+- WeChat 4.1.2: one direct calibrated-click trial and one full `paste_only` production-path trial pasted the complete marker once into the currently selected chat input, emitted no Return, and the marker was removed afterward. The generic zero-delay Command-V sequence was rejected because it did not paste reliably; the paced sequence passed.
+
+Real Claude/WeChat submit trials are not run without action-time confirmation that a disposable test conversation/account is selected. Until that confirmation and submit matrix are completed, this document does not claim real-app paste-and-submit acceptance.
