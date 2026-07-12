@@ -54,6 +54,7 @@ type IdleDirectorModule = {
     resetIdleClock(): void;
     resetToBaseline(): void;
     handleAttention(): boolean;
+    handleClickAttention(): boolean;
   };
 };
 
@@ -247,6 +248,32 @@ describe("Calico idle director", () => {
       state: "waking",
       reason: "hover-attention",
       priority: 2,
+    });
+  });
+
+  it("wakes Calico immediately on click even while pointer interaction is active", async () => {
+    const { createCalicoIdleDirector } = await loadDirectorModule();
+    const applied: IdleDirectorPayload[] = [];
+
+    const director = createCalicoIdleDirector({
+      applyMotion: (payload) => {
+        applied.push(payload);
+        return true;
+      },
+      resetMotion: vi.fn(),
+      getCurrentState: () => "sleeping",
+      isUserActive: () => true,
+      random: () => 0,
+      now: () => Date.now(),
+    });
+
+    director.start();
+    expect(director.handleClickAttention()).toBe(true);
+    expect(applied[0]).toMatchObject({
+      state: "waking",
+      reason: "click-attention",
+      priority: 2,
+      sequence: ["idle"],
     });
   });
 
