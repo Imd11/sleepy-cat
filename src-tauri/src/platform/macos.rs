@@ -17,7 +17,7 @@ use ax_client::{
 use composer_resolver::{resolve_composer, ComposerCandidate};
 use focus_controller::ComposerFingerprint;
 use input_profiles::{input_capability_profile, InputCapabilityProfile};
-use process_group::discover_trusted_candidate_pids;
+use process_group::{discover_trusted_candidate_processes, TrustedProcess};
 use serde::Serialize;
 use std::collections::{hash_map::DefaultHasher, VecDeque};
 use std::ffi::c_void;
@@ -530,8 +530,14 @@ struct PasteEvidenceSnapshot {
     selected_range: Option<(isize, isize)>,
 }
 
+struct FocusedComposer {
+    fingerprint: ComposerFingerprint,
+    element: OwnedCf,
+    trusted_processes: Vec<TrustedProcess>,
+}
+
 enum NativeFocusAttempt {
-    Focused(ComposerFingerprint),
+    Focused(FocusedComposer),
     SparseTree,
     Rejected,
 }
@@ -693,9 +699,11 @@ fn focus_editable_input_once(
             captured_window,
         ) == Ok(0)
         {
-            return Ok(NativeFocusAttempt::Focused(candidate_fingerprint(
-                &candidate.resolver,
-            )));
+            return Ok(NativeFocusAttempt::Focused(FocusedComposer {
+                fingerprint: candidate_fingerprint(&candidate.resolver),
+                element: candidate.element,
+                trusted_processes: Vec::new(),
+            }));
         }
     }
 
@@ -710,7 +718,10 @@ fn focus_editable_input_once(
     let Ok(index) = resolve_composer(&resolver_candidates, trusted_pids, captured_window) else {
         return Ok(NativeFocusAttempt::Rejected);
     };
-    let candidate = &candidates[index];
+    let candidate = candidates
+        .into_iter()
+        .nth(index)
+        .expect("resolved candidate index must exist");
 
     if ax_attribute_is_settable(candidate.element.as_ptr(), "AXFocused")
         && set_ax_bool_attribute(candidate.element.as_ptr(), "AXFocused", true)
@@ -722,9 +733,11 @@ fn focus_editable_input_once(
         let stable = copy_ax_attribute(app, "AXFocusedUIElement")
             .is_some_and(|focused| elements_equal(focused.as_ptr(), candidate.element.as_ptr()));
         if first && stable {
-            return Ok(NativeFocusAttempt::Focused(candidate_fingerprint(
-                &candidate.resolver,
-            )));
+            return Ok(NativeFocusAttempt::Focused(FocusedComposer {
+                fingerprint: candidate_fingerprint(&candidate.resolver),
+                element: candidate.element,
+                trusted_processes: Vec::new(),
+            }));
         }
     }
     Ok(NativeFocusAttempt::Rejected)
@@ -733,9 +746,23 @@ fn focus_editable_input_once(
 fn focus_editable_input_for_pid(
     pid: u32,
     bundle_id: &str,
+    main_launch_identity: ProcessLaunchIdentity,
     captured_window: &CandidateInput,
-) -> Result<Option<ComposerFingerprint>, String> {
-    let trusted_pids = discover_trusted_candidate_pids(pid, bundle_id);
+) -> Result<Option<FocusedComposer>, String> {
+    let trusted_processes = discover_trusted_candidate_processes(
+        pid,
+        bundle_id,
+        main_launch_identity,
+        Some(captured_window),
+        focused_window_frame_for_pid,
+    );
+    let trusted_pids = trusted_processes
+        .iter()
+        .map(|process| process.pid)
+        .collect::<Vec<_>>();
+    if trusted_pids.is_empty() {
+        return Ok(None);
+    }
     let profile = input_capability_profile(bundle_id, None);
     for candidate_pid in &trusted_pids {
         let Some(app) =
@@ -747,7 +774,10 @@ fn focus_editable_input_for_pid(
             AXUIElementSetMessagingTimeout(app.as_ptr(), 0.25);
         }
         match focus_editable_input_once(app.as_ptr(), &trusted_pids, captured_window) {
-            Ok(NativeFocusAttempt::Focused(fingerprint)) => return Ok(Some(fingerprint)),
+            Ok(NativeFocusAttempt::Focused(mut composer)) => {
+                composer.trusted_processes = trusted_processes.clone();
+                return Ok(Some(composer));
+            }
             Ok(NativeFocusAttempt::Rejected) => {}
             Ok(NativeFocusAttempt::SparseTree) => {
                 let permits_manual_accessibility = matches!(
@@ -761,10 +791,11 @@ fn focus_editable_input_for_pid(
                 }
                 set_ax_bool_attribute(app.as_ptr(), "AXManualAccessibility", true);
                 std::thread::sleep(Duration::from_millis(100));
-                if let NativeFocusAttempt::Focused(fingerprint) =
+                if let NativeFocusAttempt::Focused(mut composer) =
                     focus_editable_input_once(app.as_ptr(), &trusted_pids, captured_window)?
                 {
-                    return Ok(Some(fingerprint));
+                    composer.trusted_processes = trusted_processes.clone();
+                    return Ok(Some(composer));
                 }
             }
             Err(error) => eprintln!("Initial AX input resolution failed: {}", error),
@@ -782,18 +813,37 @@ fn verify_focused_editable_for_pid(pid: u32) -> Result<Option<u32>, String> {
     Ok(focused_editable_pid(app.as_ptr()))
 }
 
-fn focused_composer_matching(
-    trusted_pids: &[u32],
-    expected: &ComposerFingerprint,
-) -> Option<NativeEditableCandidate> {
+fn focused_window_frame_for_pid(pid: u32) -> Option<CandidateInput> {
+    let app = OwnedCf::created(unsafe { AXUIElementCreateApplication(pid as i32) })?;
+    unsafe {
+        AXUIElementSetMessagingTimeout(app.as_ptr(), 0.2);
+    }
+    focused_window(app.as_ptr()).and_then(|window| ax_element_frame(window.as_ptr()))
+}
+
+fn focused_composer_matching(expected: &FocusedComposer) -> Option<NativeEditableCandidate> {
+    if expected.trusted_processes.iter().any(|process| {
+        process_launch_identity(process.pid) != Some(process.launch_identity)
+    }) {
+        return None;
+    }
+    let trusted_pids = expected
+        .trusted_processes
+        .iter()
+        .map(|process| process.pid)
+        .collect::<Vec<_>>();
     trusted_pids.iter().find_map(|pid| {
         let app = OwnedCf::created(unsafe { AXUIElementCreateApplication(*pid as i32) })?;
         unsafe {
             AXUIElementSetMessagingTimeout(app.as_ptr(), 0.2);
         }
         let candidate = focused_editable_candidate(app.as_ptr())?;
-        fingerprints_match(expected, &candidate_fingerprint(&candidate.resolver))
-            .then_some(candidate)
+        (elements_equal(candidate.element.as_ptr(), expected.element.as_ptr())
+            && fingerprints_match(
+                &expected.fingerprint,
+                &candidate_fingerprint(&candidate.resolver),
+            ))
+        .then_some(candidate)
     })
 }
 
@@ -1023,7 +1073,7 @@ fn recover_target_after_activation(
     target_launch_identity: ProcessLaunchIdentity,
     click_point: Option<(f64, f64)>,
     captured_window: Option<&CandidateInput>,
-) -> Result<Option<ComposerFingerprint>, String> {
+) -> Result<Option<FocusedComposer>, String> {
     if !wait_for_frontmost_target(
         bundle_id,
         target_pid,
@@ -1058,7 +1108,12 @@ fn recover_target_after_activation(
         InputFocusPolicy::ResolveEditableElement => {
             let captured_window = captured_window
                 .ok_or_else(|| "The captured target window is no longer available.".to_string())?;
-            focus_editable_input_for_pid(target_pid, bundle_id, captured_window)?
+            focus_editable_input_for_pid(
+                target_pid,
+                bundle_id,
+                target_launch_identity,
+                captured_window,
+            )?
                 .ok_or_else(|| {
                     "No unambiguous editable composer was found in the captured window.".to_string()
                 })
@@ -1266,7 +1321,7 @@ where
     C: FnOnce(&str) -> Result<(), String>,
     A: FnMut(u32) -> Result<(), String>,
 {
-    let focused_composer = std::cell::RefCell::new(None::<ComposerFingerprint>);
+    let focused_composer = std::cell::RefCell::new(None::<FocusedComposer>);
     let before_paste = std::cell::RefCell::new(None::<PasteEvidenceSnapshot>);
     let observed_version = app_version_for_pid(target_pid);
     let profile = input_capability_profile(bundle_id, observed_version.as_deref());
@@ -1278,7 +1333,11 @@ where
         submit_key,
         copy_sender,
         is_accessibility_trusted,
+        || process_launch_identity(target_pid) == Some(target_launch_identity),
         |bundle_id, click_point, captured_window| {
+            if process_launch_identity(target_pid) != Some(target_launch_identity) {
+                return Err("The captured target process was replaced before activation.".to_string());
+            }
             activate_target(target_pid)?;
             let composer = recover_target_after_activation(
                 bundle_id,
@@ -1301,8 +1360,7 @@ where
             );
             if verified {
                 if let Some(composer) = composer.as_ref() {
-                    let trusted_pids = discover_trusted_candidate_pids(target_pid, bundle_id);
-                    if let Some(candidate) = focused_composer_matching(&trusted_pids, composer) {
+                    if let Some(candidate) = focused_composer_matching(composer) {
                         *before_paste.borrow_mut() =
                             Some(paste_evidence_snapshot(candidate.element.as_ptr()));
                     }
@@ -1315,11 +1373,11 @@ where
             InputCapabilityProfile::CodexFirstResponder
             | InputCapabilityProfile::LegacyCapturedTarget => true,
             InputCapabilityProfile::Accessibility(accessibility) => {
-                let Some(composer) = focused_composer.borrow().clone() else {
+                let composer = focused_composer.borrow();
+                let Some(composer) = composer.as_ref() else {
                     return false;
                 };
-                let trusted_pids = discover_trusted_candidate_pids(target_pid, bundle_id);
-                let Some(candidate) = focused_composer_matching(&trusted_pids, &composer) else {
+                let Some(candidate) = focused_composer_matching(composer) else {
                     return false;
                 };
                 let Some(before) = before_paste.borrow().as_ref().cloned() else {
@@ -1334,7 +1392,7 @@ where
     )
 }
 
-fn paste_prompt_and_submit_to_app_clipboard_with_ops<C, T, R, V, P, E, S, W>(
+fn paste_prompt_and_submit_to_app_clipboard_with_ops<C, T, I, R, V, P, E, S, W>(
     body: &str,
     bundle_id: &str,
     click_point: Option<(f64, f64)>,
@@ -1342,6 +1400,7 @@ fn paste_prompt_and_submit_to_app_clipboard_with_ops<C, T, R, V, P, E, S, W>(
     submit_key: NativeSubmitKey,
     copy_sender: C,
     is_trusted: T,
+    initial_target_valid: I,
     mut recover_target: R,
     mut verify_target: V,
     mut paste_sender: P,
@@ -1352,6 +1411,7 @@ fn paste_prompt_and_submit_to_app_clipboard_with_ops<C, T, R, V, P, E, S, W>(
 where
     C: FnOnce(&str) -> Result<(), String>,
     T: FnOnce() -> bool,
+    I: FnMut() -> bool,
     R: FnMut(&str, Option<(f64, f64)>, Option<&CandidateInput>) -> Result<(), String>,
     V: FnMut(&str, Option<&CandidateInput>) -> bool,
     P: FnMut() -> Result<(), String>,
@@ -1365,7 +1425,7 @@ where
     let mut copy_sender = Some(copy_sender);
     let transaction = run_transaction(
         submit_key,
-        || true,
+        initial_target_valid,
         || true,
         || recover_target(bundle_id, click_point, captured_window).is_ok(),
         || {
@@ -1448,7 +1508,7 @@ fn verify_target_focus_for_autosend(
     target_pid: u32,
     target_launch_identity: ProcessLaunchIdentity,
     captured_window: Option<&CandidateInput>,
-    expected_composer: Option<&ComposerFingerprint>,
+    expected_composer: Option<&FocusedComposer>,
 ) -> bool {
     if !frontmost_target_matches(bundle_id, target_pid, target_launch_identity) {
         return false;
@@ -1463,8 +1523,7 @@ fn verify_target_focus_for_autosend(
             let Some(expected_composer) = expected_composer else {
                 return false;
             };
-            let trusted_pids = discover_trusted_candidate_pids(target_pid, bundle_id);
-            focused_composer_matching(&trusted_pids, expected_composer).is_some()
+            focused_composer_matching(expected_composer).is_some()
         }
     }
 }
@@ -2050,6 +2109,7 @@ mod tests {
                 events.borrow_mut().push("permission".to_string());
                 trusted
             },
+            || true,
             |bundle_id, point, _| {
                 events.borrow_mut().push(format!("recover:{bundle_id}"));
                 recovered_point.replace(Some(point));
@@ -2267,6 +2327,7 @@ mod tests {
             NativeSubmitKey::Enter,
             |_| panic!("copy must not run before accessibility permission"),
             || false,
+            || panic!("target validation must not run without accessibility permission"),
             |_, _, _| panic!("recover must not run without accessibility permission"),
             |_, _| panic!("verify must not run without accessibility permission"),
             || panic!("paste must not run without accessibility permission"),
@@ -2292,6 +2353,7 @@ mod tests {
             None,
             NativeSubmitKey::Enter,
             |_| panic!("copy must not run before target focus is verified"),
+            || true,
             || true,
             |_, _, _| Err("no editable input".to_string()),
             |_, _| panic!("verify must not run when focus recovery fails"),
@@ -2323,6 +2385,7 @@ mod tests {
                 copy_count.set(copy_count.get() + 1);
                 Ok(())
             },
+            || true,
             || true,
             |_, _, _| Ok(()),
             |_, _| true,

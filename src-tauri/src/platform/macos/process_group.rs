@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::{app_info_for_pid, process_launch_identity, CandidateInput, ProcessLaunchIdentity};
+use super::{process_launch_identity, CandidateInput, ProcessLaunchIdentity};
 
 const WECHAT_BUNDLE_ID: &str = "com.tencent.xinWeChat";
 const WECHAT_APP_EX_BUNDLE_ID: &str = "com.tencent.flue.WeChatAppEx";
@@ -24,6 +24,7 @@ pub(super) struct TrustedProcess {
     pub role: ProcessRole,
     pub bundle_id: String,
     pub executable_path: PathBuf,
+    pub launch_identity: ProcessLaunchIdentity,
 }
 
 #[derive(Clone, Debug)]
@@ -64,6 +65,7 @@ pub(super) fn resolve_process_group(
         role: ProcessRole::MainApplication,
         bundle_id: main.bundle_id.clone(),
         executable_path: main.executable_path.clone(),
+        launch_identity: main.launch_identity,
     }];
     if scope == ProcessScope::MainOnly {
         return Ok(trusted);
@@ -90,6 +92,7 @@ pub(super) fn resolve_process_group(
             role: ProcessRole::BrowserApplication,
             bundle_id: candidate.bundle_id.clone(),
             executable_path: candidate.executable_path.clone(),
+            launch_identity: candidate.launch_identity,
         });
     }
     Ok(trusted)
@@ -131,19 +134,33 @@ fn frames_overlap(left: &CandidateInput, right: &CandidateInput) -> bool {
     width > 0.0 && height > 0.0
 }
 
-pub(super) fn discover_trusted_candidate_pids(main_pid: u32, main_bundle_id: &str) -> Vec<u32> {
-    let mut result = vec![main_pid];
-    if main_bundle_id != WECHAT_BUNDLE_ID {
-        return result;
-    }
+pub(super) fn discover_trusted_candidate_processes<F>(
+    main_pid: u32,
+    main_bundle_id: &str,
+    main_launch_identity: ProcessLaunchIdentity,
+    captured_window: Option<&CandidateInput>,
+    mut window_frame: F,
+) -> Vec<TrustedProcess>
+where
+    F: FnMut(u32) -> Option<CandidateInput>,
+{
     let Some(main_path) = executable_path(main_pid) else {
-        return result;
+        return Vec::new();
     };
-    let Some(main_root) = app_bundle_root(&main_path).map(Path::to_path_buf) else {
-        return result;
-    };
+    if process_launch_identity(main_pid) != Some(main_launch_identity) {
+        return Vec::new();
+    }
+    if main_bundle_id != WECHAT_BUNDLE_ID {
+        return vec![TrustedProcess {
+            pid: main_pid,
+            role: ProcessRole::MainApplication,
+            bundle_id: main_bundle_id.to_string(),
+            executable_path: main_path,
+            launch_identity: main_launch_identity,
+        }];
+    }
     let Ok(output) = Command::new("ps").args(["-axo", "pid=,ppid="]).output() else {
-        return result;
+        return Vec::new();
     };
     let processes = String::from_utf8_lossy(&output.stdout)
         .lines()
@@ -152,23 +169,51 @@ pub(super) fn discover_trusted_candidate_pids(main_pid: u32, main_bundle_id: &st
             Some((fields.next()?.parse().ok()?, fields.next()?.parse().ok()?))
         })
         .collect::<Vec<(u32, u32)>>();
-    for (pid, _) in &processes {
-        let Some(info) = app_info_for_pid(*pid) else {
-            continue;
-        };
-        let valid = info.app.bundle_id == WECHAT_APP_EX_BUNDLE_ID
-            && process_launch_identity(*pid).is_some()
-            && process_is_descendant(*pid, main_pid, &processes)
-            && executable_path(*pid)
-                .and_then(|path| app_bundle_root(&path).map(Path::to_path_buf))
-                .is_some_and(|root| root == main_root);
-        if valid {
-            result.push(*pid);
-        }
-    }
-    result.sort_unstable();
-    result.dedup();
-    result
+    let snapshots = processes
+        .iter()
+        .copied()
+        .filter(|(pid, _)| {
+            *pid == main_pid || process_is_descendant(*pid, main_pid, &processes)
+        })
+        .filter_map(|(pid, parent_pid)| {
+            let executable_path = executable_path(pid)?;
+            let launch_identity = process_launch_identity(pid)?;
+            let bundle_id = if pid == main_pid {
+                main_bundle_id.to_string()
+            } else if executable_path
+                .ancestors()
+                .any(|path| path.file_name().is_some_and(|name| name == "WeChatAppEx.app"))
+            {
+                WECHAT_APP_EX_BUNDLE_ID.to_string()
+            } else {
+                String::new()
+            };
+            let candidate_window = (bundle_id == WECHAT_APP_EX_BUNDLE_ID)
+                .then(|| window_frame(pid))
+                .flatten();
+            Some(ProcessSnapshot {
+                pid,
+                parent_pid,
+                bundle_id,
+                executable_path,
+                launch_identity,
+                window_frame: if pid == main_pid {
+                    captured_window.cloned()
+                } else {
+                    candidate_window
+                },
+            })
+        })
+        .collect::<Vec<_>>();
+    resolve_process_group(
+        main_pid,
+        main_bundle_id,
+        main_launch_identity,
+        captured_window,
+        ProcessScope::MainAndValidatedBrowserApplications,
+        &snapshots,
+    )
+    .unwrap_or_default()
 }
 
 fn process_is_descendant(pid: u32, ancestor: u32, processes: &[(u32, u32)]) -> bool {
