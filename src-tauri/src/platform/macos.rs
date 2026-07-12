@@ -1916,6 +1916,50 @@ mod tests {
     }
 
     #[test]
+    fn activating_clipboard_sender_never_retries_unknown_paste() {
+        let copy_count = std::cell::Cell::new(0);
+        let paste_count = std::cell::Cell::new(0);
+        let outcome = paste_prompt_and_submit_to_app_clipboard_with_ops(
+            "hello",
+            "com.anthropic.claudefordesktop",
+            None,
+            NativeSubmitKey::Enter,
+            |_| {
+                copy_count.set(copy_count.get() + 1);
+                Ok(())
+            },
+            || true,
+            |_, _| Ok(()),
+            || {
+                paste_count.set(paste_count.get() + 1);
+                Err("paste completion unknown".to_string())
+            },
+            |_| panic!("submit must not run after unknown paste completion"),
+            |_| panic!("sleep must not run after a failed paste event"),
+        );
+
+        assert_eq!(copy_count.get(), 1);
+        assert_eq!(paste_count.get(), 1);
+        assert!(!outcome.sent);
+        assert_eq!(outcome.reason, Some(AutosendFailureReason::PasteEventFailed));
+    }
+
+    #[test]
+    fn autosend_does_not_attempt_clipboard_restoration() {
+        let source = include_str!("macos.rs");
+        let start = source
+            .find("fn paste_prompt_and_submit_to_app_clipboard_with_ops")
+            .unwrap();
+        let end = source[start..]
+            .find("pub fn type_or_paste_prompt_and_submit_to_app_with_copier")
+            .unwrap();
+        let implementation = &source[start..start + end];
+
+        assert!(!implementation.contains("restore"));
+        assert!(!implementation.contains("NSPasteboard"));
+    }
+
+    #[test]
     fn activating_clipboard_sender_pastes_without_click_point() {
         let (outcome, events, _submitted_key, recovered_point) =
             run_activating_sender_with_ops(NativeSubmitKey::Enter, None, true);
