@@ -9,5 +9,5 @@ pub use unsupported as macos;
 pub use macos::{
     accessibility_status, frontmost_app, frontmost_app_with_pid, request_accessibility_permission,
     AccessibilityStatus, AutosendCompletion, AutosendOutcome, CandidateInput, FrontmostApp,
-    FrontmostAppWithPid, InputTarget, ProcessLaunchIdentity,
+    FrontmostAppWithPid, InputTarget, ProcessLaunchIdentity, TargetWindowIdentity,
 };

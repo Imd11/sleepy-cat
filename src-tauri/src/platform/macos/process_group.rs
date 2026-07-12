@@ -99,16 +99,13 @@ pub(super) fn resolve_process_group(
 }
 
 fn app_bundle_root(path: &Path) -> Option<&Path> {
-    let mut cursor = path;
-    loop {
-        if cursor
-            .extension()
-            .is_some_and(|extension| extension == "app")
-        {
-            return Some(cursor);
-        }
-        cursor = cursor.parent()?;
-    }
+    path.ancestors()
+        .filter(|ancestor| {
+            ancestor
+                .extension()
+                .is_some_and(|extension| extension == "app")
+        })
+        .last()
 }
 
 fn is_descendant_of(pid: u32, ancestor_pid: u32, snapshots: &[ProcessSnapshot]) -> bool {
@@ -333,7 +330,7 @@ mod tests {
                 21,
                 20,
                 WECHAT_APP_EX_BUNDLE_ID,
-                "/Applications/WeChat.app/Contents/Frameworks/WeChatAppEx",
+                "/Applications/WeChat.app/Contents/Frameworks/WeChatAppEx.app/Contents/MacOS/WeChatAppEx",
                 Some(frame(10.0)),
             ),
             process(
@@ -347,14 +344,14 @@ mod tests {
                 23,
                 999,
                 WECHAT_APP_EX_BUNDLE_ID,
-                "/Applications/WeChat.app/Contents/Frameworks/WeChatAppEx",
+                "/Applications/WeChat.app/Contents/Frameworks/WeChatAppEx.app/Contents/MacOS/WeChatAppEx",
                 Some(frame(10.0)),
             ),
             process(
                 24,
                 20,
                 WECHAT_APP_EX_BUNDLE_ID,
-                "/Applications/WeChat.app/Contents/Frameworks/WeChatAppEx",
+                "/Applications/WeChat.app/Contents/Frameworks/WeChatAppEx.app/Contents/MacOS/WeChatAppEx",
                 Some(frame(2_000.0)),
             ),
         ];

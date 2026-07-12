@@ -293,7 +293,7 @@ fn paste_prompt_sequence_and_submit_to_last_target_impl(
     };
     let target_pid = captured_identity.application.main_pid;
     let target_launch_identity = captured_identity.application.launch_identity;
-    let captured_window = captured_identity.window.map(|window| window.frame);
+    let captured_window = captured_identity.window;
     paste_prompt_sequence_and_submit_to_session_target_with_senders(
         bodies,
         interval_ms,
@@ -333,7 +333,7 @@ fn paste_prompt_and_submit_to_last_target_impl(
     };
     let target_pid = captured_identity.application.main_pid;
     let target_launch_identity = captured_identity.application.launch_identity;
-    let captured_window = captured_identity.window.map(|window| window.frame);
+    let captured_window = captured_identity.window;
     paste_prompt_and_submit_to_session_target_with_senders(
         body,
         state,
@@ -1005,14 +1005,7 @@ struct TargetApplicationIdentity {
     launch_identity: platform::ProcessLaunchIdentity,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-struct TargetWindowIdentity {
-    owner_pid: u32,
-    frame: CandidateInput,
-    role: Option<String>,
-    title_hash: Option<String>,
-    cg_window_id: Option<u32>,
-}
+type TargetWindowIdentity = platform::TargetWindowIdentity;
 
 #[derive(Clone, Debug, PartialEq)]
 struct CapturedTargetIdentity {
@@ -1718,7 +1711,7 @@ fn captured_identity_for_target(
     if let Some(identity) = recent_identity.filter(|identity| {
         identity.application.bundle_id == target.app.bundle_id
             && identity.application.main_pid == pid
-            && target_application_identity_is_current(&identity.application)
+            && captured_target_identity_is_current(identity)
     }) {
         return Some(identity.clone());
     }
@@ -1772,9 +1765,17 @@ fn bundle_requires_exact_window(bundle_id: &str) -> bool {
 }
 
 fn captured_target_identity_is_current(identity: &CapturedTargetIdentity) -> bool {
-    target_application_identity_is_current(&identity.application)
-        && (!bundle_requires_exact_window(&identity.application.bundle_id)
-            || identity.window.is_some())
+    if !target_application_identity_is_current(&identity.application) {
+        return false;
+    }
+    if !bundle_requires_exact_window(&identity.application.bundle_id) {
+        return true;
+    }
+    let Some(captured_window) = identity.window.as_ref() else {
+        return false;
+    };
+    platform::macos::current_target_window_identity(identity.application.main_pid)
+        .is_some_and(|current| window_identity_matches(captured_window, &current))
 }
 
 fn stale_target_outcome() -> AutosendOutcome {
@@ -1874,18 +1875,25 @@ fn record_last_input_target_if_valid(state: &LastInputTargetState, target: &plat
         state.clear();
         return;
     };
+    let window = platform::macos::current_target_window_identity(target.pid);
+    if bundle_requires_exact_window(&app.bundle_id) && window.is_none() {
+        state.clear();
+        return;
+    }
     let identity = CapturedTargetIdentity {
         application: TargetApplicationIdentity {
             bundle_id: app.bundle_id.clone(),
             main_pid: target.pid,
             launch_identity,
         },
-        window: Some(TargetWindowIdentity {
-            owner_pid: target.pid,
-            frame: target.window_frame.clone(),
-            role: Some("AXWindow".to_string()),
-            title_hash: None,
-            cg_window_id: None,
+        window: window.or_else(|| {
+            Some(TargetWindowIdentity {
+                owner_pid: target.pid,
+                frame: target.window_frame.clone(),
+                role: Some("AXWindow".to_string()),
+                title_hash: None,
+                cg_window_id: None,
+            })
         }),
     };
 
@@ -3102,7 +3110,7 @@ mod last_input_target_tests {
     }
 
     #[test]
-    fn records_app_only_target_without_focused_input_frame() {
+    fn rejects_wechat_target_without_exact_window_identity() {
         let state = LastInputTargetState::default();
         let target = platform::InputTarget {
             frame: CandidateInput {
@@ -3128,9 +3136,7 @@ mod last_input_target_tests {
 
         record_last_input_target_if_valid(&state, &target);
 
-        let stored = state.get().unwrap();
-        assert_eq!(stored.app.bundle_id, "com.tencent.xinWeChat");
-        assert!(stored.click_point.is_none());
+        assert!(state.get().is_none());
     }
 
     #[test]
@@ -3173,7 +3179,7 @@ mod last_input_target_tests {
     }
 
     #[test]
-    fn records_recovery_fallback_target_without_focused_input_frame() {
+    fn rejects_claude_target_without_exact_window_identity() {
         let state = LastInputTargetState::default();
         let target = platform::InputTarget {
             frame: CandidateInput {
@@ -3199,11 +3205,7 @@ mod last_input_target_tests {
 
         record_last_input_target_if_valid(&state, &target);
 
-        assert_eq!(
-            state.get().unwrap().app.bundle_id,
-            "com.anthropic.claudefordesktop"
-        );
-        assert!(state.get().unwrap().click_point.is_none());
+        assert!(state.get().is_none());
     }
 
     #[test]

@@ -166,6 +166,15 @@ pub struct CandidateInput {
     pub height: f64,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct TargetWindowIdentity {
+    pub owner_pid: u32,
+    pub frame: CandidateInput,
+    pub role: Option<String>,
+    pub title_hash: Option<String>,
+    pub cg_window_id: Option<u32>,
+}
+
 pub fn process_launch_identity(_pid: u32) -> Option<ProcessLaunchIdentity> {
     None
 }
@@ -191,6 +200,10 @@ pub fn frontmost_app_with_pid() -> Option<FrontmostAppWithPid> {
 }
 
 pub fn current_input_target() -> Option<InputTarget> {
+    None
+}
+
+pub fn current_target_window_identity(_pid: u32) -> Option<TargetWindowIdentity> {
     None
 }
 
@@ -230,7 +243,7 @@ pub fn paste_prompt_and_submit_to_app_clipboard_with_copier<C, A>(
     _target_pid: u32,
     _target_launch_identity: ProcessLaunchIdentity,
     _click_point: Option<(f64, f64)>,
-    _captured_window: Option<&CandidateInput>,
+    _captured_window: Option<&TargetWindowIdentity>,
     _submit_key: NativeSubmitKey,
     _activate_target: A,
     copy_sender: C,

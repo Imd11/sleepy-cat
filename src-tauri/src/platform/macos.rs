@@ -394,6 +394,15 @@ pub struct CandidateInput {
     pub height: f64,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct TargetWindowIdentity {
+    pub owner_pid: u32,
+    pub frame: CandidateInput,
+    pub role: Option<String>,
+    pub title_hash: Option<String>,
+    pub cg_window_id: Option<u32>,
+}
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct ProcBsdInfo {
@@ -533,6 +542,7 @@ struct PasteEvidenceSnapshot {
 struct FocusedComposer {
     fingerprint: ComposerFingerprint,
     element: OwnedCf,
+    window_element: OwnedCf,
     trusted_processes: Vec<TrustedProcess>,
 }
 
@@ -702,6 +712,7 @@ fn focus_editable_input_once(
             return Ok(NativeFocusAttempt::Focused(FocusedComposer {
                 fingerprint: candidate_fingerprint(&candidate.resolver),
                 element: candidate.element,
+                window_element: window,
                 trusted_processes: Vec::new(),
             }));
         }
@@ -736,6 +747,7 @@ fn focus_editable_input_once(
             return Ok(NativeFocusAttempt::Focused(FocusedComposer {
                 fingerprint: candidate_fingerprint(&candidate.resolver),
                 element: candidate.element,
+                window_element: window,
                 trusted_processes: Vec::new(),
             }));
         }
@@ -821,6 +833,21 @@ fn focused_window_frame_for_pid(pid: u32) -> Option<CandidateInput> {
     focused_window(app.as_ptr()).and_then(|window| ax_element_frame(window.as_ptr()))
 }
 
+pub fn current_target_window_identity(pid: u32) -> Option<TargetWindowIdentity> {
+    let app = OwnedCf::created(unsafe { AXUIElementCreateApplication(pid as i32) })?;
+    unsafe {
+        AXUIElementSetMessagingTimeout(app.as_ptr(), 0.2);
+    }
+    let window = focused_window(app.as_ptr())?;
+    Some(TargetWindowIdentity {
+        owner_pid: ax_element_pid(window.as_ptr())?,
+        frame: ax_element_frame(window.as_ptr())?,
+        role: ax_string_attribute(window.as_ptr(), "AXRole"),
+        title_hash: identifier_hash(ax_string_attribute(window.as_ptr(), "AXTitle").as_deref()),
+        cg_window_id: None,
+    })
+}
+
 fn focused_composer_matching(expected: &FocusedComposer) -> Option<NativeEditableCandidate> {
     if expected
         .trusted_processes
@@ -835,9 +862,16 @@ fn focused_composer_matching(expected: &FocusedComposer) -> Option<NativeEditabl
         .map(|process| process.pid)
         .collect::<Vec<_>>();
     trusted_pids.iter().find_map(|pid| {
+        if *pid != expected.fingerprint.owner_pid {
+            return None;
+        }
         let app = OwnedCf::created(unsafe { AXUIElementCreateApplication(*pid as i32) })?;
         unsafe {
             AXUIElementSetMessagingTimeout(app.as_ptr(), 0.2);
+        }
+        let current_window = focused_window(app.as_ptr())?;
+        if !elements_equal(current_window.as_ptr(), expected.window_element.as_ptr()) {
+            return None;
         }
         let candidate = focused_editable_candidate(app.as_ptr())?;
         (elements_equal(candidate.element.as_ptr(), expected.element.as_ptr())
@@ -1073,8 +1107,7 @@ fn recover_target_after_activation(
     bundle_id: &str,
     target_pid: u32,
     target_launch_identity: ProcessLaunchIdentity,
-    click_point: Option<(f64, f64)>,
-    captured_window: Option<&CandidateInput>,
+    captured_window: Option<&TargetWindowIdentity>,
 ) -> Result<Option<FocusedComposer>, String> {
     if !wait_for_frontmost_target(
         bundle_id,
@@ -1100,13 +1133,7 @@ fn recover_target_after_activation(
         })?;
     verify_captured_window_for_policy(input_focus_policy(bundle_id), target_pid, captured_window)?;
     match input_focus_policy(bundle_id) {
-        InputFocusPolicy::PreserveApplicationFirstResponder => {
-            if let Some((x, y)) = click_point {
-                click_target_point(x, y)
-                    .map_err(|error| format_autosend_error("click-input-target", &error))?;
-            }
-            Ok(None)
-        }
+        InputFocusPolicy::PreserveApplicationFirstResponder => Ok(None),
         InputFocusPolicy::ResolveEditableElement => {
             let captured_window = captured_window
                 .ok_or_else(|| "The captured target window is no longer available.".to_string())?;
@@ -1114,7 +1141,7 @@ fn recover_target_after_activation(
                 target_pid,
                 bundle_id,
                 target_launch_identity,
-                captured_window,
+                &captured_window.frame,
             )?
             .ok_or_else(|| {
                 "No unambiguous editable composer was found in the captured window.".to_string()
@@ -1314,7 +1341,7 @@ pub fn paste_prompt_and_submit_to_app_clipboard_with_copier<C, A>(
     target_pid: u32,
     target_launch_identity: ProcessLaunchIdentity,
     click_point: Option<(f64, f64)>,
-    captured_window: Option<&CandidateInput>,
+    captured_window: Option<&TargetWindowIdentity>,
     submit_key: NativeSubmitKey,
     mut activate_target: A,
     copy_sender: C,
@@ -1336,7 +1363,7 @@ where
         copy_sender,
         is_accessibility_trusted,
         || process_launch_identity(target_pid) == Some(target_launch_identity),
-        |bundle_id, click_point, captured_window| {
+        |bundle_id, _click_point, captured_window| {
             if process_launch_identity(target_pid) != Some(target_launch_identity) {
                 return Err(
                     "The captured target process was replaced before activation.".to_string(),
@@ -1347,7 +1374,6 @@ where
                 bundle_id,
                 target_pid,
                 target_launch_identity,
-                click_point,
                 captured_window,
             )?;
             *focused_composer.borrow_mut() = composer;
@@ -1400,7 +1426,7 @@ fn paste_prompt_and_submit_to_app_clipboard_with_ops<C, T, I, R, V, P, E, S, W>(
     body: &str,
     bundle_id: &str,
     click_point: Option<(f64, f64)>,
-    captured_window: Option<&CandidateInput>,
+    captured_window: Option<&TargetWindowIdentity>,
     submit_key: NativeSubmitKey,
     copy_sender: C,
     is_trusted: T,
@@ -1416,8 +1442,8 @@ where
     C: FnOnce(&str) -> Result<(), String>,
     T: FnOnce() -> bool,
     I: FnMut() -> bool,
-    R: FnMut(&str, Option<(f64, f64)>, Option<&CandidateInput>) -> Result<(), String>,
-    V: FnMut(&str, Option<&CandidateInput>) -> bool,
+    R: FnMut(&str, Option<(f64, f64)>, Option<&TargetWindowIdentity>) -> Result<(), String>,
+    V: FnMut(&str, Option<&TargetWindowIdentity>) -> bool,
     P: FnMut() -> Result<(), String>,
     E: FnMut() -> bool,
     S: FnMut(NativeSubmitKey) -> Result<(), String>,
@@ -1450,17 +1476,17 @@ where
         None if submit_key == NativeSubmitKey::None => AutosendOutcome::pasted_only(),
         None => AutosendOutcome::sent(),
         Some(TransactionFailure::TargetChanged) => AutosendOutcome::failed(
-            false,
+            transaction.clipboard_written,
             AutosendFailureReason::TargetChanged,
             "The target app or composer changed during prompt delivery.".to_string(),
         ),
         Some(TransactionFailure::ComposerUnavailable) => AutosendOutcome::failed(
-            false,
+            transaction.clipboard_written,
             AutosendFailureReason::ComposerNotFound,
             "No unambiguous composer was found in the captured window.".to_string(),
         ),
         Some(TransactionFailure::FocusNotAcquired) => AutosendOutcome::failed(
-            false,
+            transaction.clipboard_written,
             AutosendFailureReason::FocusNotAcquired,
             "The target composer could not be focused and verified.".to_string(),
         ),
@@ -1511,7 +1537,7 @@ fn verify_target_focus_for_autosend(
     bundle_id: &str,
     target_pid: u32,
     target_launch_identity: ProcessLaunchIdentity,
-    captured_window: Option<&CandidateInput>,
+    captured_window: Option<&TargetWindowIdentity>,
     expected_composer: Option<&FocusedComposer>,
 ) -> bool {
     if !frontmost_target_matches(bundle_id, target_pid, target_launch_identity) {
@@ -1535,21 +1561,28 @@ fn verify_target_focus_for_autosend(
 fn verify_captured_window_for_policy(
     policy: InputFocusPolicy,
     pid: u32,
-    captured_window: Option<&CandidateInput>,
+    captured_window: Option<&TargetWindowIdentity>,
 ) -> Result<(), String> {
     if policy == InputFocusPolicy::PreserveApplicationFirstResponder {
         return Ok(());
     }
     let captured_window = captured_window
         .ok_or_else(|| "The captured target window is no longer available.".to_string())?;
-    let app = OwnedCf::created(unsafe { AXUIElementCreateApplication(pid as i32) })
-        .ok_or_else(|| "Could not create the target accessibility element.".to_string())?;
-    let current = focused_window(app.as_ptr())
-        .and_then(|window| ax_element_frame(window.as_ptr()))
+    let current = current_target_window_identity(pid)
         .ok_or_else(|| "The target app does not expose its focused window.".to_string())?;
-    window_frames_match(captured_window, &current)
+    target_window_identities_match(captured_window, &current)
         .then_some(())
         .ok_or_else(|| "The target window changed before prompt delivery.".to_string())
+}
+
+fn target_window_identities_match(
+    captured: &TargetWindowIdentity,
+    current: &TargetWindowIdentity,
+) -> bool {
+    captured.owner_pid == current.owner_pid
+        && captured.role == current.role
+        && captured.title_hash == current.title_hash
+        && window_frames_match(&captured.frame, &current.frame)
 }
 
 fn window_frames_match(captured: &CandidateInput, current: &CandidateInput) -> bool {
@@ -1752,20 +1785,6 @@ fn run_system_events_script(script: &str) -> Result<(), String> {
     } else {
         Err(String::from_utf8_lossy(&output.stderr).to_string())
     }
-}
-
-#[allow(dead_code)]
-fn click_target_point(x: f64, y: f64) -> Result<(), String> {
-    run_system_events_script(&click_target_point_script(x, y))
-}
-
-fn click_target_point_script(x: f64, y: f64) -> String {
-    format!(
-        r#"tell application "System Events"
-    click at {{{:.0}, {:.0}}}
-end tell"#,
-        x, y
-    )
 }
 
 fn should_direct_type(body: &str) -> bool {
@@ -2194,6 +2213,63 @@ mod tests {
             outcome.reason,
             Some(AutosendFailureReason::MissingAccessibilityPermission)
         );
+    }
+
+    #[test]
+    fn target_change_after_clipboard_write_reports_prompt_was_copied() {
+        let validation_count = std::cell::Cell::new(0);
+        let outcome = paste_prompt_and_submit_to_app_clipboard_with_ops(
+            "hello",
+            "com.anthropic.claudefordesktop",
+            None,
+            None,
+            NativeSubmitKey::Enter,
+            |_| Ok(()),
+            || true,
+            || {
+                let next = validation_count.get() + 1;
+                validation_count.set(next);
+                next == 1
+            },
+            |_, _, _| Ok(()),
+            |_, _| true,
+            || panic!("paste must not run after the target changes"),
+            || panic!("paste verification must not run after the target changes"),
+            |_| panic!("submit must not run after the target changes"),
+            |_| {},
+        );
+
+        assert!(outcome.copied);
+        assert!(!outcome.sent);
+        assert_eq!(outcome.reason, Some(AutosendFailureReason::TargetChanged));
+    }
+
+    #[test]
+    fn target_window_identity_requires_owner_role_title_and_frame() {
+        let captured = TargetWindowIdentity {
+            owner_pid: 42,
+            frame: CandidateInput {
+                x: 10.0,
+                y: 20.0,
+                width: 800.0,
+                height: 600.0,
+            },
+            role: Some("AXWindow".to_string()),
+            title_hash: Some("title-a".to_string()),
+            cg_window_id: None,
+        };
+        let mut current = captured.clone();
+        current.frame.x += 2.0;
+        assert!(target_window_identities_match(&captured, &current));
+
+        current.role = Some("AXSheet".to_string());
+        assert!(!target_window_identities_match(&captured, &current));
+        current = captured.clone();
+        current.title_hash = Some("title-b".to_string());
+        assert!(!target_window_identities_match(&captured, &current));
+        current = captured.clone();
+        current.owner_pid = 43;
+        assert!(!target_window_identities_match(&captured, &current));
     }
 
     #[test]
@@ -2762,17 +2838,7 @@ mod tests {
     }
 
     #[test]
-    fn click_target_point_script_only_clicks_recorded_point() {
-        let script = click_target_point_script(640.0, 720.0);
-
-        assert!(script.contains("tell application \"System Events\""));
-        assert!(script.contains("click at {640, 720}"));
-        assert!(!script.contains("keystroke"));
-        assert!(!script.contains("key code 36"));
-    }
-
-    #[test]
-    fn target_recovery_function_waits_for_exact_process_and_clicks_only_optional_point() {
+    fn target_recovery_function_waits_for_exact_process_without_clicking() {
         let source = include_str!("macos.rs");
         let start = source
             .find("fn recover_target_after_activation")
@@ -2784,7 +2850,7 @@ mod tests {
 
         assert!(!recovery_source.contains("activate_app_by_bundle_id"));
         assert!(recovery_source.contains("wait_for_frontmost_target"));
-        assert!(recovery_source.contains("click_target_point"));
+        assert!(!recovery_source.contains("click_target_point"));
         assert!(recovery_source.contains("Duration::from_millis(1_500)"));
     }
 
