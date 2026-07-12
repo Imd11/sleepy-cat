@@ -2489,7 +2489,8 @@ mod tests {
             .expect("next legacy helper should follow activating sender");
         let sender_source = &source[start..start + end];
 
-        assert!(sender_source.contains("recover_target_app_for_autosend"));
+        assert!(sender_source.contains("recover_target_after_activation"));
+        assert!(sender_source.contains("activate_target(target_pid)"));
         assert!(sender_source.contains("post_focus_preserving_submit_key"));
         assert!(!sender_source.contains("keystroke \"{body}\""));
         assert!(!sender_source.contains("keystroke \"Test body\""));
