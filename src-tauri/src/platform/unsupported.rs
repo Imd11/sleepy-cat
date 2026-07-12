@@ -12,6 +12,12 @@ pub struct FrontmostAppWithPid {
     pub pid: Option<u32>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct ProcessLaunchIdentity {
+    pub seconds: u64,
+    pub microseconds: u64,
+}
+
 #[derive(Debug, Serialize)]
 pub struct AccessibilityStatus {
     pub trusted: bool,
@@ -26,12 +32,25 @@ pub enum AutosendFailureReason {
     PasteEventFailed,
     ReturnEventFailed,
     TargetFocusFailed,
+    TargetChanged,
+    ComposerNotFound,
+    ComposerAmbiguous,
+    FocusNotAcquired,
+    PasteNotConfirmed,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AutosendCompletion {
+    PastedOnly,
+    Submitted,
 }
 
 #[derive(Clone, Debug, Serialize)]
 pub struct AutosendOutcome {
     pub copied: bool,
     pub sent: bool,
+    pub completion: Option<AutosendCompletion>,
     pub error: Option<String>,
     pub reason: Option<AutosendFailureReason>,
 }
@@ -48,6 +67,17 @@ impl AutosendOutcome {
         Self {
             copied: true,
             sent: true,
+            completion: Some(AutosendCompletion::Submitted),
+            error: None,
+            reason: None,
+        }
+    }
+
+    pub fn pasted_only() -> Self {
+        Self {
+            copied: true,
+            sent: false,
+            completion: Some(AutosendCompletion::PastedOnly),
             error: None,
             reason: None,
         }
@@ -57,6 +87,7 @@ impl AutosendOutcome {
         Self {
             copied: false,
             sent: false,
+            completion: None,
             error: Some(error),
             reason: Some(AutosendFailureReason::CopyFailed),
         }
@@ -68,8 +99,9 @@ impl AutosendOutcome {
 
     pub fn missing_accessibility_permission() -> Self {
         Self {
-            copied: true,
+            copied: false,
             sent: false,
+            completion: None,
             error: Some("Accessibility permission is only available on macOS.".to_string()),
             reason: Some(AutosendFailureReason::MissingAccessibilityPermission),
         }
@@ -79,6 +111,7 @@ impl AutosendOutcome {
         Self {
             copied: true,
             sent: false,
+            completion: None,
             error: Some(error),
             reason: Some(AutosendFailureReason::NoSafeTarget),
         }
@@ -88,6 +121,7 @@ impl AutosendOutcome {
         Self {
             copied: true,
             sent: false,
+            completion: None,
             error: Some(error),
             reason: Some(AutosendFailureReason::PasteEventFailed),
         }
@@ -97,6 +131,7 @@ impl AutosendOutcome {
         Self {
             copied: true,
             sent: false,
+            completion: None,
             error: Some(error),
             reason: Some(AutosendFailureReason::ReturnEventFailed),
         }
@@ -104,8 +139,9 @@ impl AutosendOutcome {
 
     pub fn target_focus_failed(error: String) -> Self {
         Self {
-            copied: true,
+            copied: false,
             sent: false,
+            completion: None,
             error: Some(error),
             reason: Some(AutosendFailureReason::TargetFocusFailed),
         }
@@ -119,14 +155,19 @@ pub struct InputTarget {
     pub button_position: (f64, f64),
     pub click_point: (f64, f64),
     pub app: Option<FrontmostApp>,
+    pub pid: u32,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
 pub struct CandidateInput {
     pub x: f64,
     pub y: f64,
     pub width: f64,
     pub height: f64,
+}
+
+pub fn process_launch_identity(_pid: u32) -> Option<ProcessLaunchIdentity> {
+    None
 }
 
 pub fn accessibility_status() -> AccessibilityStatus {
@@ -147,10 +188,6 @@ pub fn frontmost_app() -> Option<FrontmostApp> {
 
 pub fn frontmost_app_with_pid() -> Option<FrontmostAppWithPid> {
     None
-}
-
-pub fn visible_apps() -> Vec<FrontmostApp> {
-    Vec::new()
 }
 
 pub fn current_input_target() -> Option<InputTarget> {

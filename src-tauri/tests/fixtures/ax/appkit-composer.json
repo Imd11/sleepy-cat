@@ -1,0 +1,9 @@
+{
+  "window": {"x":0,"y":0,"width":1000,"height":800},
+  "trustedPids": [10],
+  "expectedIndex": 1,
+  "candidates": [
+    {"pid":10,"role":"AXTextField","y":30,"excluded":true},
+    {"pid":10,"role":"AXTextArea","y":660,"excluded":false}
+  ]
+}

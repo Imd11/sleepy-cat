@@ -1,6 +1,24 @@
 #![cfg(target_os = "macos")]
 
+mod ax_client;
+mod ax_diagnostics;
+mod autosend_transaction;
+mod composer_resolver;
+mod focus_controller;
+mod input_profiles;
+mod process_group;
+
+use ax_client::{
+    ax_attribute_is_settable, ax_bool_attribute, ax_element_frame, ax_element_pid,
+    ax_string_attribute, copy_ax_attribute, elements_equal, set_ax_bool_attribute,
+    traversal_children, OwnedCfValue as OwnedCf,
+};
+use autosend_transaction::{run_transaction, TransactionFailure};
+use composer_resolver::{resolve_composer, ComposerCandidate};
+use input_profiles::{input_capability_profile, InputCapabilityProfile};
+use process_group::discover_trusted_candidate_pids;
 use serde::Serialize;
+use std::collections::VecDeque;
 use std::ffi::c_void;
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -23,6 +41,12 @@ pub struct FrontmostAppWithPid {
     pub pid: Option<u32>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct ProcessLaunchIdentity {
+    pub seconds: u64,
+    pub microseconds: u64,
+}
+
 #[derive(Debug, Serialize)]
 pub struct AccessibilityStatus {
     pub trusted: bool,
@@ -37,12 +61,25 @@ pub enum AutosendFailureReason {
     PasteEventFailed,
     ReturnEventFailed,
     TargetFocusFailed,
+    TargetChanged,
+    ComposerNotFound,
+    ComposerAmbiguous,
+    FocusNotAcquired,
+    PasteNotConfirmed,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AutosendCompletion {
+    PastedOnly,
+    Submitted,
 }
 
 #[derive(Clone, Debug, Serialize)]
 pub struct AutosendOutcome {
     pub copied: bool,
     pub sent: bool,
+    pub completion: Option<AutosendCompletion>,
     pub error: Option<String>,
     pub reason: Option<AutosendFailureReason>,
 }
@@ -54,11 +91,48 @@ pub enum NativeSubmitKey {
     CommandEnter,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum InputFocusPolicy {
+    PreserveApplicationFirstResponder,
+    ResolveEditableElement,
+}
+
+fn input_focus_policy(bundle_id: &str) -> InputFocusPolicy {
+    match input_capability_profile(bundle_id, None) {
+        InputCapabilityProfile::CodexFirstResponder
+        | InputCapabilityProfile::LegacyCapturedTarget => {
+            InputFocusPolicy::PreserveApplicationFirstResponder
+        }
+        InputCapabilityProfile::Accessibility(_) => InputFocusPolicy::ResolveEditableElement,
+    }
+}
+
 impl AutosendOutcome {
+    fn failed(copied: bool, reason: AutosendFailureReason, error: String) -> Self {
+        Self {
+            copied,
+            sent: false,
+            completion: None,
+            error: Some(error),
+            reason: Some(reason),
+        }
+    }
+
     pub fn sent() -> Self {
         Self {
             copied: true,
             sent: true,
+            completion: Some(AutosendCompletion::Submitted),
+            error: None,
+            reason: None,
+        }
+    }
+
+    pub fn pasted_only() -> Self {
+        Self {
+            copied: true,
+            sent: false,
+            completion: Some(AutosendCompletion::PastedOnly),
             error: None,
             reason: None,
         }
@@ -68,6 +142,7 @@ impl AutosendOutcome {
         Self {
             copied: false,
             sent: false,
+            completion: None,
             error: Some(error),
             reason: Some(AutosendFailureReason::CopyFailed),
         }
@@ -81,6 +156,7 @@ impl AutosendOutcome {
         Self {
             copied: false,
             sent: false,
+            completion: None,
             error: Some(ACCESSIBILITY_PERMISSION_REQUIRED_ERROR.to_string()),
             reason: Some(AutosendFailureReason::MissingAccessibilityPermission),
         }
@@ -90,6 +166,7 @@ impl AutosendOutcome {
         Self {
             copied: true,
             sent: false,
+            completion: None,
             error: Some(error),
             reason: Some(AutosendFailureReason::NoSafeTarget),
         }
@@ -99,6 +176,7 @@ impl AutosendOutcome {
         Self {
             copied: true,
             sent: false,
+            completion: None,
             error: Some(error),
             reason: Some(AutosendFailureReason::PasteEventFailed),
         }
@@ -108,6 +186,7 @@ impl AutosendOutcome {
         Self {
             copied: true,
             sent: false,
+            completion: None,
             error: Some(error),
             reason: Some(AutosendFailureReason::ReturnEventFailed),
         }
@@ -115,8 +194,9 @@ impl AutosendOutcome {
 
     pub fn target_focus_failed(error: String) -> Self {
         Self {
-            copied: true,
+            copied: false,
             sent: false,
+            completion: None,
             error: Some(error),
             reason: Some(AutosendFailureReason::TargetFocusFailed),
         }
@@ -265,31 +345,31 @@ fn app_info_for_asn(asn: &str) -> Option<FrontmostAppInfo> {
         .output()
         .ok()?;
 
-    let info_stdout = String::from_utf8_lossy(&info.stdout);
-    let info_trimmed = info_stdout.trim();
+    app_info_from_lsappinfo_output(String::from_utf8_lossy(&info.stdout).as_ref())
+}
+
+fn app_info_for_pid(pid: u32) -> Option<FrontmostAppInfo> {
+    let info = Command::new("lsappinfo")
+        .args(["info", "-pid", &pid.to_string()])
+        .output()
+        .ok()?;
+    info.status
+        .success()
+        .then(|| app_info_from_lsappinfo_output(String::from_utf8_lossy(&info.stdout).as_ref()))
+        .flatten()
+}
+
+fn app_info_from_lsappinfo_output(info: &str) -> Option<FrontmostAppInfo> {
+    let info_trimmed = info.trim();
 
     let name = parse_app_name(info_trimmed).unwrap_or_else(|| "Unknown".to_string());
-    let bundle_id = parse_bundle_id(info_trimmed).unwrap_or_else(|| format!("unknown.{}", &asn));
     let pid = parse_pid(info_trimmed)?;
+    let bundle_id = parse_bundle_id(info_trimmed).unwrap_or_else(|| format!("unknown.pid.{pid}"));
 
     Some(FrontmostAppInfo {
         app: FrontmostApp { name, bundle_id },
         pid,
     })
-}
-
-pub fn visible_apps() -> Vec<FrontmostApp> {
-    let Ok(output) = Command::new("lsappinfo").arg("visibleProcessList").output() else {
-        return Vec::new();
-    };
-    if !output.status.success() {
-        return Vec::new();
-    }
-
-    parse_visible_process_asns(String::from_utf8_lossy(&output.stdout).as_ref())
-        .into_iter()
-        .filter_map(|asn| app_info_for_asn(&asn).map(|info| info.app))
-        .collect()
 }
 
 // ── Current Input Target ──────────────────────────────────────────────────────
@@ -301,14 +381,337 @@ pub struct InputTarget {
     pub button_position: (f64, f64),
     pub click_point: (f64, f64),
     pub app: Option<FrontmostApp>,
+    pub pid: u32,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
 pub struct CandidateInput {
     pub x: f64,
     pub y: f64,
     pub width: f64,
     pub height: f64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct ProcBsdInfo {
+    flags: u32,
+    status: u32,
+    xstatus: u32,
+    pid: u32,
+    ppid: u32,
+    uid: u32,
+    gid: u32,
+    ruid: u32,
+    rgid: u32,
+    svuid: u32,
+    svgid: u32,
+    rfu_1: u32,
+    comm: [u8; 16],
+    name: [u8; 32],
+    nfiles: u32,
+    pgid: u32,
+    pjobc: u32,
+    e_tdev: u32,
+    e_tpgid: u32,
+    nice: i32,
+    start_tvsec: u64,
+    start_tvusec: u64,
+}
+
+const PROC_PIDTBSDINFO: i32 = 3;
+
+unsafe extern "C" {
+    fn proc_pidinfo(pid: i32, flavor: i32, arg: u64, buffer: *mut c_void, buffersize: i32) -> i32;
+}
+
+pub fn process_launch_identity(pid: u32) -> Option<ProcessLaunchIdentity> {
+    let mut info = std::mem::MaybeUninit::<ProcBsdInfo>::zeroed();
+    let expected = std::mem::size_of::<ProcBsdInfo>() as i32;
+    let written = unsafe {
+        proc_pidinfo(
+            pid.try_into().ok()?,
+            PROC_PIDTBSDINFO,
+            0,
+            info.as_mut_ptr().cast(),
+            expected,
+        )
+    };
+    if written != expected {
+        return None;
+    }
+    let info = unsafe { info.assume_init() };
+    Some(ProcessLaunchIdentity {
+        seconds: info.start_tvsec,
+        microseconds: info.start_tvusec,
+    })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EditableRole {
+    TextArea,
+    TextField,
+    SearchField,
+    ComboBox,
+    WebArea,
+}
+
+#[derive(Clone, Debug)]
+struct EditableCandidate {
+    role: EditableRole,
+    frame: CandidateInput,
+    enabled: bool,
+    focused: bool,
+    depth: usize,
+}
+
+fn editable_candidate_score(candidate: &EditableCandidate, window: &CandidateInput) -> i32 {
+    if !candidate.enabled || candidate.frame.width <= 1.0 || candidate.frame.height <= 1.0 {
+        return i32::MIN;
+    }
+
+    let mut score = match candidate.role {
+        EditableRole::TextArea => 100,
+        EditableRole::TextField => 60,
+        EditableRole::ComboBox => 45,
+        EditableRole::WebArea => 20,
+        EditableRole::SearchField => -60,
+    };
+    if candidate.focused {
+        score += 200;
+    }
+    if candidate.frame.y + (candidate.frame.height / 2.0) >= window.y + (window.height * 0.45) {
+        score += 35;
+    }
+    if candidate.frame.width >= window.width * 0.35 {
+        score += 25;
+    }
+    if candidate.frame.height >= 40.0 {
+        score += 20;
+    }
+    score - i32::try_from(candidate.depth.min(20)).unwrap_or(20)
+}
+
+fn select_editable_candidate(
+    candidates: &[EditableCandidate],
+    window: &CandidateInput,
+) -> Option<usize> {
+    const MIN_SCORE: i32 = 80;
+    const MIN_SCORE_MARGIN: i32 = 15;
+
+    let mut ranked: Vec<(usize, i32)> = candidates
+        .iter()
+        .enumerate()
+        .map(|(index, candidate)| (index, editable_candidate_score(candidate, window)))
+        .filter(|(_, score)| *score >= MIN_SCORE)
+        .collect();
+    ranked.sort_unstable_by(|left, right| right.1.cmp(&left.1));
+
+    let (best_index, best_score) = *ranked.first()?;
+    if ranked
+        .get(1)
+        .is_some_and(|(_, next_score)| best_score - *next_score < MIN_SCORE_MARGIN)
+    {
+        return None;
+    }
+    Some(best_index)
+}
+
+struct NativeEditableCandidate {
+    resolver: ComposerCandidate,
+    element: OwnedCf,
+}
+
+fn editable_role(role: &str) -> Option<EditableRole> {
+    match role {
+        "AXTextArea" => Some(EditableRole::TextArea),
+        "AXTextField" => Some(EditableRole::TextField),
+        "AXSearchField" => Some(EditableRole::SearchField),
+        "AXComboBox" => Some(EditableRole::ComboBox),
+        "AXWebArea" => Some(EditableRole::WebArea),
+        _ => None,
+    }
+}
+
+fn role_can_receive_prompt(
+    role: EditableRole,
+    _ax_editable: bool,
+    _value_settable: bool,
+) -> bool {
+    match role {
+        EditableRole::SearchField => false,
+        EditableRole::WebArea => false,
+        EditableRole::TextArea | EditableRole::TextField | EditableRole::ComboBox => true,
+    }
+}
+
+fn native_editable_candidate(element: OwnedCf, depth: usize) -> Option<NativeEditableCandidate> {
+    let role_name = ax_string_attribute(element.as_ptr(), "AXRole")?;
+    let role = editable_role(&role_name)?;
+    if !role_can_receive_prompt(
+        role,
+        ax_bool_attribute(element.as_ptr(), "AXEditable").unwrap_or(false),
+        ax_attribute_is_settable(element.as_ptr(), "AXValue"),
+    ) {
+        return None;
+    }
+    let frame = ax_element_frame(element.as_ptr())?;
+    let enabled = ax_bool_attribute(element.as_ptr(), "AXEnabled").unwrap_or(true);
+    let focused = ax_bool_attribute(element.as_ptr(), "AXFocused").unwrap_or(false);
+    let subrole = ax_string_attribute(element.as_ptr(), "AXSubrole");
+    Some(NativeEditableCandidate {
+        resolver: ComposerCandidate {
+            owner_pid: ax_element_pid(element.as_ptr())?,
+            role: role_name,
+            secure: subrole.as_deref() == Some("AXSecureTextField"),
+            subrole,
+            identifier: ax_string_attribute(element.as_ptr(), "AXIdentifier"),
+            title: ax_string_attribute(element.as_ptr(), "AXTitle"),
+            description: ax_string_attribute(element.as_ptr(), "AXDescription"),
+            placeholder: ax_string_attribute(element.as_ptr(), "AXPlaceholderValue"),
+            help: ax_string_attribute(element.as_ptr(), "AXHelp"),
+            frame,
+            enabled,
+            visible: !ax_bool_attribute(element.as_ptr(), "AXHidden").unwrap_or(false),
+            focused,
+            window_matches: true,
+            editable: true,
+            depth,
+        },
+        element,
+    })
+}
+
+fn focused_editable_pid(app: AXUIElementRef) -> Option<u32> {
+    let focused = copy_ax_attribute(app, "AXFocusedUIElement")?;
+    let role = editable_role(&ax_string_attribute(focused.as_ptr(), "AXRole")?)?;
+    if !role_can_receive_prompt(
+        role,
+        ax_bool_attribute(focused.as_ptr(), "AXEditable").unwrap_or(false),
+        ax_attribute_is_settable(focused.as_ptr(), "AXValue"),
+    ) {
+        return None;
+    }
+    if !ax_bool_attribute(focused.as_ptr(), "AXEnabled").unwrap_or(true) {
+        return None;
+    }
+    ax_element_pid(focused.as_ptr())
+}
+
+fn focused_window(app: AXUIElementRef) -> Option<OwnedCf> {
+    copy_ax_attribute(app, "AXFocusedWindow").or_else(|| copy_ax_attribute(app, "AXMainWindow"))
+}
+
+fn collect_editable_candidates(window: AXUIElementRef) -> Vec<NativeEditableCandidate> {
+    const MAX_ELEMENTS: usize = 600;
+    const MAX_DEPTH: usize = 14;
+    const MAX_SCAN_TIME: Duration = Duration::from_millis(220);
+
+    let started = Instant::now();
+    let mut queue: VecDeque<(OwnedCf, usize)> = traversal_children(window)
+        .into_iter()
+        .map(|child| (child, 1))
+        .collect();
+    let mut candidates = Vec::new();
+    let mut visited = 0;
+
+    while let Some((element, depth)) = queue.pop_front() {
+        if visited >= MAX_ELEMENTS || started.elapsed() >= MAX_SCAN_TIME {
+            break;
+        }
+        visited += 1;
+
+        if depth < MAX_DEPTH {
+            queue.extend(
+                traversal_children(element.as_ptr())
+                    .into_iter()
+                    .map(|child| (child, depth + 1)),
+            );
+        }
+        if let Some(candidate) = native_editable_candidate(element, depth) {
+            candidates.push(candidate);
+        }
+    }
+    candidates
+}
+
+fn focus_editable_input_once(
+    app: AXUIElementRef,
+    trusted_pids: &[u32],
+) -> Result<Option<u32>, String> {
+    if let Some(pid) = focused_editable_pid(app) {
+        if trusted_pids.contains(&pid) {
+            return Ok(Some(pid));
+        }
+    }
+
+    let window = focused_window(app)
+        .ok_or_else(|| "The target app does not expose a focused window.".to_string())?;
+    let window_frame = ax_element_frame(window.as_ptr())
+        .ok_or_else(|| "The target window does not expose its frame.".to_string())?;
+    let candidates = collect_editable_candidates(window.as_ptr());
+    let resolver_candidates: Vec<ComposerCandidate> = candidates
+        .iter()
+        .map(|candidate| candidate.resolver.clone())
+        .collect();
+    let Ok(index) = resolve_composer(&resolver_candidates, trusted_pids, &window_frame) else {
+        return Ok(None);
+    };
+    let candidate = &candidates[index];
+
+    if ax_attribute_is_settable(candidate.element.as_ptr(), "AXFocused")
+        && set_ax_bool_attribute(candidate.element.as_ptr(), "AXFocused", true)
+    {
+        std::thread::sleep(Duration::from_millis(50));
+        let first = copy_ax_attribute(app, "AXFocusedUIElement")
+            .is_some_and(|focused| elements_equal(focused.as_ptr(), candidate.element.as_ptr()));
+        std::thread::sleep(Duration::from_millis(35));
+        let stable = copy_ax_attribute(app, "AXFocusedUIElement")
+            .is_some_and(|focused| elements_equal(focused.as_ptr(), candidate.element.as_ptr()));
+        if first && stable {
+            return Ok(ax_element_pid(candidate.element.as_ptr()));
+        }
+    }
+    Ok(None)
+}
+
+fn focus_editable_input_for_pid(pid: u32) -> Result<Option<u32>, String> {
+    let bundle_id = app_info_for_pid(pid)
+        .map(|info| info.app.bundle_id)
+        .ok_or_else(|| "Could not identify the target application process.".to_string())?;
+    let trusted_pids = discover_trusted_candidate_pids(pid, &bundle_id);
+    for candidate_pid in &trusted_pids {
+        let Some(app) = OwnedCf::created(unsafe {
+            AXUIElementCreateApplication(*candidate_pid as i32)
+        }) else {
+            continue;
+        };
+        unsafe {
+            AXUIElementSetMessagingTimeout(app.as_ptr(), 0.25);
+        }
+        match focus_editable_input_once(app.as_ptr(), &trusted_pids) {
+            Ok(Some(element_pid)) => return Ok(Some(element_pid)),
+            Ok(None) => {}
+            Err(error) => eprintln!("Initial AX input resolution failed: {}", error),
+        }
+        if bundle_id == "com.anthropic.claudefordesktop" && *candidate_pid == pid {
+            set_ax_bool_attribute(app.as_ptr(), "AXManualAccessibility", true);
+            std::thread::sleep(Duration::from_millis(100));
+            if let Some(element_pid) = focus_editable_input_once(app.as_ptr(), &trusted_pids)? {
+                return Ok(Some(element_pid));
+            }
+        }
+    }
+    Ok(None)
+}
+
+fn verify_focused_editable_for_pid(pid: u32) -> Result<Option<u32>, String> {
+    let app = OwnedCf::created(unsafe { AXUIElementCreateApplication(pid as i32) })
+        .ok_or_else(|| "Could not create the target accessibility element.".to_string())?;
+    unsafe {
+        AXUIElementSetMessagingTimeout(app.as_ptr(), 0.2);
+    }
+    Ok(focused_editable_pid(app.as_ptr()))
 }
 
 pub fn current_input_target() -> Option<InputTarget> {
@@ -375,7 +778,9 @@ end run"#,
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    parse_focused_input_output(stdout.trim(), &app)
+    let mut target = parse_focused_input_output(stdout.trim(), &app)?;
+    target.pid = pid;
+    Some(target)
 }
 
 fn parse_xy(s: &str) -> Option<(f64, f64)> {
@@ -400,6 +805,8 @@ type CGEventRef = *mut c_void;
 type CGEventFlags = u64;
 #[allow(dead_code)]
 type CGKeyCode = u16;
+type AXUIElementRef = *const c_void;
+type CFTypeRef = *const c_void;
 
 #[allow(dead_code)]
 const CG_EVENT_FLAG_MASK_COMMAND: CGEventFlags = 1 << 20;
@@ -422,6 +829,12 @@ extern "C" {
     fn CGEventSetFlags(event: CGEventRef, flags: CGEventFlags);
     fn CGEventPost(tap: u32, event: CGEventRef);
     fn CFRelease(cf: *const c_void);
+}
+
+#[link(name = "ApplicationServices", kind = "framework")]
+extern "C" {
+    fn AXUIElementCreateApplication(pid: i32) -> AXUIElementRef;
+    fn AXUIElementSetMessagingTimeout(element: AXUIElementRef, timeout: f32) -> i32;
 }
 
 #[allow(dead_code)]
@@ -482,12 +895,24 @@ pub fn focus_preserving_paste_and_submit(submit_key: NativeSubmitKey) -> Autosen
             &error,
         ));
     }
-    AutosendOutcome::sent()
+    if submit_key == NativeSubmitKey::None {
+        AutosendOutcome::pasted_only()
+    } else {
+        AutosendOutcome::sent()
+    }
 }
 
 pub fn recover_target_app_for_autosend(
     bundle_id: &str,
     click_point: Option<(f64, f64)>,
+) -> Result<(), String> {
+    recover_target_app_for_autosend_in_window(bundle_id, click_point, None)
+}
+
+fn recover_target_app_for_autosend_in_window(
+    bundle_id: &str,
+    click_point: Option<(f64, f64)>,
+    captured_window: Option<&CandidateInput>,
 ) -> Result<(), String> {
     if let Err(error) = activate_app_by_bundle_id(bundle_id) {
         return Err(format_autosend_error("activate-target", &error));
@@ -502,14 +927,63 @@ pub fn recover_target_app_for_autosend(
 
     std::thread::sleep(Duration::from_millis(160));
 
-    if let Some((x, y)) = click_point {
-        if let Err(error) = click_target_point(x, y) {
-            return Err(format_autosend_error("click-input-target", &error));
-        }
-        std::thread::sleep(Duration::from_millis(120));
-    }
+    let app_info = frontmost_app_info()
+        .filter(|info| info.app.bundle_id == bundle_id)
+        .ok_or_else(|| {
+            format!(
+                "Target app is not frontmost after activation: {}",
+                bundle_id
+            )
+        })?;
+    verify_captured_window_for_policy(
+        input_focus_policy(bundle_id),
+        app_info.pid,
+        captured_window,
+    )?;
+    prepare_focus_for_policy_with_ops(
+        input_focus_policy(bundle_id),
+        app_info.pid,
+        click_point,
+        focus_editable_input_for_pid,
+        |x, y| {
+            click_target_point(x, y)
+                .map_err(|error| format_autosend_error("click-input-target", &error))?;
+            std::thread::sleep(Duration::from_millis(120));
+            Ok(())
+        },
+        verify_focused_editable_for_pid,
+    )?;
 
     Ok(())
+}
+
+fn prepare_focus_for_policy_with_ops<N, C, V>(
+    policy: InputFocusPolicy,
+    app_pid: u32,
+    click_point: Option<(f64, f64)>,
+    native_focus: N,
+    click_target: C,
+    verify_focus: V,
+) -> Result<Option<u32>, String>
+where
+    N: FnOnce(u32) -> Result<Option<u32>, String>,
+    C: FnOnce(f64, f64) -> Result<(), String>,
+    V: FnOnce(u32) -> Result<Option<u32>, String>,
+{
+    if policy == InputFocusPolicy::PreserveApplicationFirstResponder {
+        if let Some((x, y)) = click_point {
+            click_target(x, y)?;
+        }
+        return Ok(None);
+    }
+
+    match native_focus(app_pid) {
+        Ok(Some(element_pid)) => return Ok(Some(element_pid)),
+        Ok(None) => Err(
+            "No editable input element was found in the target window.".to_string()
+        ),
+        Err(error) => Err(error),
+    }
 }
 
 #[allow(dead_code)]
@@ -673,6 +1147,7 @@ pub fn paste_prompt_and_submit_to_app_clipboard_with_copier<C>(
     body: &str,
     bundle_id: &str,
     click_point: Option<(f64, f64)>,
+    captured_window: Option<&CandidateInput>,
     submit_key: NativeSubmitKey,
     copy_sender: C,
 ) -> AutosendOutcome
@@ -683,62 +1158,187 @@ where
         body,
         bundle_id,
         click_point,
+        captured_window,
         submit_key,
         copy_sender,
         is_accessibility_trusted,
-        recover_target_app_for_autosend,
+        recover_target_app_for_autosend_in_window,
+        verify_target_focus_for_autosend,
         post_paste_shortcut,
         post_focus_preserving_submit_key,
         std::thread::sleep,
     )
 }
 
-fn paste_prompt_and_submit_to_app_clipboard_with_ops<C, T, R, P, S, W>(
+fn paste_prompt_and_submit_to_app_clipboard_with_ops<C, T, R, V, P, S, W>(
     body: &str,
     bundle_id: &str,
     click_point: Option<(f64, f64)>,
+    captured_window: Option<&CandidateInput>,
     submit_key: NativeSubmitKey,
     copy_sender: C,
     is_trusted: T,
-    recover_target: R,
-    paste_sender: P,
-    submit_sender: S,
-    sleeper: W,
+    mut recover_target: R,
+    mut verify_target: V,
+    mut paste_sender: P,
+    mut submit_sender: S,
+    mut sleeper: W,
 ) -> AutosendOutcome
 where
     C: FnOnce(&str) -> Result<(), String>,
     T: FnOnce() -> bool,
-    R: FnOnce(&str, Option<(f64, f64)>) -> Result<(), String>,
-    P: FnOnce() -> Result<(), String>,
-    S: FnOnce(NativeSubmitKey) -> Result<(), String>,
-    W: FnOnce(Duration),
+    R: FnMut(&str, Option<(f64, f64)>, Option<&CandidateInput>) -> Result<(), String>,
+    V: FnMut(&str, Option<&CandidateInput>) -> bool,
+    P: FnMut() -> Result<(), String>,
+    S: FnMut(NativeSubmitKey) -> Result<(), String>,
+    W: FnMut(Duration),
 {
     if !is_trusted() {
         return AutosendOutcome::missing_accessibility_permission();
     }
-    if let Err(error) = copy_sender(body) {
-        return AutosendOutcome::copy_failed(error);
-    }
-    if let Err(error) = recover_target(bundle_id, click_point) {
-        return AutosendOutcome::target_focus_failed(error);
-    }
-    if let Err(error) = paste_sender() {
-        return AutosendOutcome::paste_event_failed(format_autosend_error("native-paste", &error));
-    }
+    let observed_version = frontmost_app_info()
+        .filter(|info| info.app.bundle_id == bundle_id)
+        .and_then(|info| app_version_for_pid(info.pid));
+    let submit_evidence_permitted = match input_capability_profile(
+        bundle_id,
+        observed_version.as_deref(),
+    ) {
+        InputCapabilityProfile::Accessibility(profile) => profile.permits_submit(),
+        InputCapabilityProfile::CodexFirstResponder
+        | InputCapabilityProfile::LegacyCapturedTarget => true,
+    };
+    let mut copy_sender = Some(copy_sender);
+    let transaction = run_transaction(
+        submit_key,
+        || true,
+        || true,
+        || recover_target(bundle_id, click_point, captured_window).is_ok(),
+        || {
+            copy_sender
+                .take()
+                .is_some_and(|copy_sender| copy_sender(body).is_ok())
+        },
+        || verify_target(bundle_id, captured_window),
+        || paste_sender().is_ok(),
+        || {
+            sleeper(Duration::from_millis(220));
+            submit_evidence_permitted
+        },
+        |key| submit_sender(key).is_ok(),
+    );
 
-    sleeper(Duration::from_millis(220));
-
-    if submit_key == NativeSubmitKey::None {
-        return AutosendOutcome::sent();
+    match transaction.failure {
+        None if submit_key == NativeSubmitKey::None => AutosendOutcome::pasted_only(),
+        None => AutosendOutcome::sent(),
+        Some(TransactionFailure::TargetChanged) => AutosendOutcome::failed(
+            false,
+            AutosendFailureReason::TargetChanged,
+            "The target app or composer changed during prompt delivery.".to_string(),
+        ),
+        Some(TransactionFailure::ComposerUnavailable) => AutosendOutcome::failed(
+            false,
+            AutosendFailureReason::ComposerNotFound,
+            "No unambiguous composer was found in the captured window.".to_string(),
+        ),
+        Some(TransactionFailure::FocusNotAcquired) => AutosendOutcome::failed(
+            false,
+            AutosendFailureReason::FocusNotAcquired,
+            "The target composer could not be focused and verified.".to_string(),
+        ),
+        Some(TransactionFailure::ClipboardWriteFailed) => {
+            AutosendOutcome::copy_failed("Clipboard write failed.".to_string())
+        }
+        Some(TransactionFailure::PasteEventFailed) => AutosendOutcome::paste_event_failed(
+            "The prompt paste event failed; it was not retried.".to_string(),
+        ),
+        Some(TransactionFailure::PasteNotConfirmed) => AutosendOutcome::failed(
+            true,
+            AutosendFailureReason::PasteNotConfirmed,
+            "The prompt paste could not be confirmed; it was not retried.".to_string(),
+        ),
+        Some(TransactionFailure::SubmitEventFailed) => AutosendOutcome::return_event_failed(
+            "The prompt was pasted, but the submit key failed.".to_string(),
+        ),
     }
-    if let Err(error) = submit_sender(submit_key) {
-        return AutosendOutcome::return_event_failed(format_autosend_error(
-            "native-submit",
-            &error,
-        ));
-    }
+}
 
-    AutosendOutcome::sent()
+fn app_version_for_pid(pid: u32) -> Option<String> {
+    let output = Command::new("lsappinfo")
+        .args(["info", "-pid", &pid.to_string()])
+        .output()
+        .ok()?;
+    let info = String::from_utf8_lossy(&output.stdout);
+    let app_path = parse_quoted_lsappinfo_value(&info, "bundlepath")
+        .or_else(|| parse_quoted_lsappinfo_value(&info, "bundle path"))?;
+    let info_path = format!("{app_path}/Contents/Info");
+    let output = Command::new("defaults")
+        .args(["read", &info_path, "CFBundleShortVersionString"])
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .filter(|version| !version.is_empty())
+}
+
+fn parse_quoted_lsappinfo_value(info: &str, key: &str) -> Option<String> {
+    let marker = format!("{key}=\"");
+    let value = info.split(&marker).nth(1)?;
+    Some(value.split('"').next()?.to_string())
+}
+
+fn verify_target_focus_for_autosend(
+    bundle_id: &str,
+    captured_window: Option<&CandidateInput>,
+) -> bool {
+    let Some(app) = frontmost_app_info().filter(|info| info.app.bundle_id == bundle_id) else {
+        return false;
+    };
+    let policy = input_focus_policy(bundle_id);
+    if verify_captured_window_for_policy(policy, app.pid, captured_window).is_err() {
+        return false;
+    }
+    match policy {
+        InputFocusPolicy::PreserveApplicationFirstResponder => true,
+        InputFocusPolicy::ResolveEditableElement => {
+            let trusted_pids = discover_trusted_candidate_pids(app.pid, bundle_id);
+            trusted_pids.iter().any(|pid| {
+                verify_focused_editable_for_pid(*pid)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|owner_pid| trusted_pids.contains(&owner_pid))
+            })
+        }
+    }
+}
+
+fn verify_captured_window_for_policy(
+    policy: InputFocusPolicy,
+    pid: u32,
+    captured_window: Option<&CandidateInput>,
+) -> Result<(), String> {
+    if policy == InputFocusPolicy::PreserveApplicationFirstResponder {
+        return Ok(());
+    }
+    let captured_window = captured_window
+        .ok_or_else(|| "The captured target window is no longer available.".to_string())?;
+    let app = OwnedCf::created(unsafe { AXUIElementCreateApplication(pid as i32) })
+        .ok_or_else(|| "Could not create the target accessibility element.".to_string())?;
+    let current = focused_window(app.as_ptr())
+        .and_then(|window| ax_element_frame(window.as_ptr()))
+        .ok_or_else(|| "The target app does not expose its focused window.".to_string())?;
+    window_frames_match(captured_window, &current)
+        .then_some(())
+        .ok_or_else(|| "The target window changed before prompt delivery.".to_string())
+}
+
+fn window_frames_match(captured: &CandidateInput, current: &CandidateInput) -> bool {
+    const TOLERANCE: f64 = 3.0;
+    (captured.x - current.x).abs() <= TOLERANCE
+        && (captured.y - current.y).abs() <= TOLERANCE
+        && (captured.width - current.width).abs() <= TOLERANCE
+        && (captured.height - current.height).abs() <= TOLERANCE
 }
 
 #[allow(dead_code)]
@@ -1223,6 +1823,7 @@ pub fn parse_focused_input_output(raw: &str, app: &FrontmostApp) -> Option<Input
         button_position,
         click_point,
         app: Some(app.clone()),
+        pid: 0,
     })
 }
 
@@ -1280,6 +1881,7 @@ mod tests {
             "hello",
             "com.openai.codex",
             click_point,
+            None,
             submit_key,
             |body| {
                 events.borrow_mut().push(format!("copy:{body}"));
@@ -1289,10 +1891,14 @@ mod tests {
                 events.borrow_mut().push("permission".to_string());
                 trusted
             },
-            |bundle_id, point| {
+            |bundle_id, point, _| {
                 events.borrow_mut().push(format!("recover:{bundle_id}"));
                 recovered_point.replace(Some(point));
                 Ok(())
+            },
+            |_, _| {
+                events.borrow_mut().push("verify".to_string());
+                true
             },
             || {
                 events.borrow_mut().push("paste".to_string());
@@ -1431,6 +2037,7 @@ mod tests {
 
         assert!(outcome.copied);
         assert!(outcome.sent);
+        assert_eq!(outcome.completion, Some(AutosendCompletion::Submitted));
         assert!(outcome.error.is_none());
         assert!(outcome.reason.is_none());
     }
@@ -1441,14 +2048,19 @@ mod tests {
             run_activating_sender_with_ops(NativeSubmitKey::Enter, Some((640.0, 720.0)), true);
 
         assert!(outcome.sent);
+        assert_eq!(outcome.completion, Some(AutosendCompletion::Submitted));
         assert_eq!(
             events,
             vec![
                 "permission".to_string(),
-                "copy:hello".to_string(),
                 "recover:com.openai.codex".to_string(),
+                "verify".to_string(),
+                "copy:hello".to_string(),
+                "verify".to_string(),
                 "paste".to_string(),
                 "sleep".to_string(),
+                "verify".to_string(),
+                "verify".to_string(),
                 "submit".to_string(),
             ]
         );
@@ -1470,15 +2082,17 @@ mod tests {
         let (outcome, events, submitted_key, _recovered_point) =
             run_activating_sender_with_ops(NativeSubmitKey::None, None, true);
 
-        assert!(outcome.sent);
+        assert!(!outcome.sent);
+        assert_eq!(outcome.completion, Some(AutosendCompletion::PastedOnly));
         assert_eq!(
             events,
             vec![
                 "permission".to_string(),
-                "copy:hello".to_string(),
                 "recover:com.openai.codex".to_string(),
+                "verify".to_string(),
+                "copy:hello".to_string(),
+                "verify".to_string(),
                 "paste".to_string(),
-                "sleep".to_string(),
             ]
         );
         assert_eq!(submitted_key, None);
@@ -1490,10 +2104,12 @@ mod tests {
             "hello",
             "com.openai.codex",
             None,
+            None,
             NativeSubmitKey::Enter,
             |_| panic!("copy must not run before accessibility permission"),
             || false,
-            |_, _| panic!("recover must not run without accessibility permission"),
+            |_, _, _| panic!("recover must not run without accessibility permission"),
+            |_, _| panic!("verify must not run without accessibility permission"),
             || panic!("paste must not run without accessibility permission"),
             |_| panic!("submit must not run without accessibility permission"),
             |_| panic!("sleep must not run without accessibility permission"),
@@ -1505,6 +2121,77 @@ mod tests {
             outcome.reason,
             Some(AutosendFailureReason::MissingAccessibilityPermission)
         );
+    }
+
+    #[test]
+    fn activating_clipboard_sender_does_not_replace_clipboard_when_focus_fails() {
+        let outcome = paste_prompt_and_submit_to_app_clipboard_with_ops(
+            "hello",
+            "com.anthropic.claudefordesktop",
+            None,
+            None,
+            NativeSubmitKey::Enter,
+            |_| panic!("copy must not run before target focus is verified"),
+            || true,
+            |_, _, _| Err("no editable input".to_string()),
+            |_, _| panic!("verify must not run when focus recovery fails"),
+            || panic!("paste must not run when focus recovery fails"),
+            |_| panic!("submit must not run when focus recovery fails"),
+            |_| panic!("sleep must not run when focus recovery fails"),
+        );
+
+        assert!(!outcome.copied);
+        assert!(!outcome.sent);
+        assert_eq!(
+            outcome.reason,
+            Some(AutosendFailureReason::TargetFocusFailed)
+        );
+    }
+
+    #[test]
+    fn activating_clipboard_sender_never_retries_unknown_paste() {
+        let copy_count = std::cell::Cell::new(0);
+        let paste_count = std::cell::Cell::new(0);
+        let outcome = paste_prompt_and_submit_to_app_clipboard_with_ops(
+            "hello",
+            "com.anthropic.claudefordesktop",
+            None,
+            None,
+            NativeSubmitKey::Enter,
+            |_| {
+                copy_count.set(copy_count.get() + 1);
+                Ok(())
+            },
+            || true,
+            |_, _, _| Ok(()),
+            |_, _| true,
+            || {
+                paste_count.set(paste_count.get() + 1);
+                Err("paste completion unknown".to_string())
+            },
+            |_| panic!("submit must not run after unknown paste completion"),
+            |_| panic!("sleep must not run after a failed paste event"),
+        );
+
+        assert_eq!(copy_count.get(), 1);
+        assert_eq!(paste_count.get(), 1);
+        assert!(!outcome.sent);
+        assert_eq!(outcome.reason, Some(AutosendFailureReason::PasteEventFailed));
+    }
+
+    #[test]
+    fn autosend_does_not_attempt_clipboard_restoration() {
+        let source = include_str!("macos.rs");
+        let start = source
+            .find("fn paste_prompt_and_submit_to_app_clipboard_with_ops")
+            .unwrap();
+        let end = source[start..]
+            .find("pub fn type_or_paste_prompt_and_submit_to_app_with_copier")
+            .unwrap();
+        let implementation = &source[start..start + end];
+
+        assert!(!implementation.contains("restore"));
+        assert!(!implementation.contains("NSPasteboard"));
     }
 
     #[test]
@@ -1596,6 +2283,171 @@ mod tests {
     #[test]
     fn native_submit_key_supports_command_enter() {
         assert_eq!(NativeSubmitKey::CommandEnter, NativeSubmitKey::CommandEnter);
+    }
+
+    #[test]
+    fn codex_keeps_activation_only_focus_policy() {
+        assert_eq!(
+            input_focus_policy("com.openai.codex"),
+            InputFocusPolicy::PreserveApplicationFirstResponder
+        );
+    }
+
+    #[test]
+    fn other_apps_use_verified_editable_focus_policy() {
+        assert_eq!(
+            input_focus_policy("com.anthropic.claudefordesktop"),
+            InputFocusPolicy::ResolveEditableElement
+        );
+        assert_eq!(
+            input_focus_policy("com.tencent.xinWeChat"),
+            InputFocusPolicy::ResolveEditableElement
+        );
+    }
+
+    #[test]
+    fn codex_focus_preparation_does_not_invoke_native_ax_resolution() {
+        let mut clicked = None;
+        let result = prepare_focus_for_policy_with_ops(
+            InputFocusPolicy::PreserveApplicationFirstResponder,
+            42,
+            Some((640.0, 720.0)),
+            |_| panic!("Codex must keep the existing activation-only path"),
+            |x, y| {
+                clicked = Some((x, y));
+                Ok(())
+            },
+            |_| panic!("Codex must not require AX focus verification"),
+        );
+
+        assert!(result.is_ok());
+        assert_eq!(clicked, Some((640.0, 720.0)));
+    }
+
+    #[test]
+    fn verified_native_focus_skips_coordinate_click_for_other_apps() {
+        let result = prepare_focus_for_policy_with_ops(
+            InputFocusPolicy::ResolveEditableElement,
+            84,
+            Some((640.0, 720.0)),
+            |pid| {
+                assert_eq!(pid, 84);
+                Ok(Some(86))
+            },
+            |_, _| panic!("verified native focus must avoid coordinate fallback"),
+            |_| panic!("native focus result is already verified"),
+        );
+
+        assert_eq!(result, Ok(Some(86)));
+    }
+
+    #[test]
+    fn coordinate_fallback_for_other_apps_requires_focus_verification() {
+        let result = prepare_focus_for_policy_with_ops(
+            InputFocusPolicy::ResolveEditableElement,
+            84,
+            Some((640.0, 720.0)),
+            |_| Ok(None),
+            |_, _| Ok(()),
+            |pid| {
+                assert_eq!(pid, 84);
+                Ok(None)
+            },
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn editable_candidate_scoring_prefers_large_lower_text_area_over_search() {
+        let window = CandidateInput {
+            x: 0.0,
+            y: 0.0,
+            width: 1200.0,
+            height: 900.0,
+        };
+        let composer = EditableCandidate {
+            role: EditableRole::TextArea,
+            frame: CandidateInput {
+                x: 220.0,
+                y: 650.0,
+                width: 760.0,
+                height: 150.0,
+            },
+            enabled: true,
+            focused: false,
+            depth: 5,
+        };
+        let search = EditableCandidate {
+            role: EditableRole::SearchField,
+            frame: CandidateInput {
+                x: 20.0,
+                y: 40.0,
+                width: 280.0,
+                height: 32.0,
+            },
+            enabled: true,
+            focused: false,
+            depth: 3,
+        };
+
+        assert!(
+            editable_candidate_score(&composer, &window)
+                > editable_candidate_score(&search, &window)
+        );
+    }
+
+    #[test]
+    fn editable_candidate_selection_rejects_ambiguous_fields() {
+        let window = CandidateInput {
+            x: 0.0,
+            y: 0.0,
+            width: 1000.0,
+            height: 800.0,
+        };
+        let candidates = vec![
+            EditableCandidate {
+                role: EditableRole::TextArea,
+                frame: CandidateInput {
+                    x: 100.0,
+                    y: 580.0,
+                    width: 700.0,
+                    height: 100.0,
+                },
+                enabled: true,
+                focused: false,
+                depth: 4,
+            },
+            EditableCandidate {
+                role: EditableRole::TextArea,
+                frame: CandidateInput {
+                    x: 100.0,
+                    y: 590.0,
+                    width: 700.0,
+                    height: 100.0,
+                },
+                enabled: true,
+                focused: false,
+                depth: 4,
+            },
+        ];
+
+        assert_eq!(select_editable_candidate(&candidates, &window), None);
+    }
+
+    #[test]
+    fn search_and_non_editable_web_areas_cannot_receive_prompts() {
+        assert!(!role_can_receive_prompt(
+            EditableRole::SearchField,
+            true,
+            true
+        ));
+        assert!(!role_can_receive_prompt(
+            EditableRole::WebArea,
+            false,
+            false
+        ));
+        assert!(!role_can_receive_prompt(EditableRole::WebArea, true, false));
     }
 
     #[test]
@@ -1739,6 +2591,18 @@ mod tests {
         assert_eq!(parse_pid("pid: 12345 type=\"Foreground\""), Some(12345));
         assert!(parse_pid("pid = not-a-number type=\"Foreground\"").is_none());
         assert!(parse_pid("bundleID=\"com.apple.finder\"").is_none());
+    }
+
+    #[test]
+    fn parses_app_info_from_lsappinfo_pid_output() {
+        let info = r#""Claude" ASN:0x0-0xadbbdb1:
+    bundleID="com.anthropic.claudefordesktop"
+    pid = 67565 type="Foreground""#;
+
+        let parsed = app_info_from_lsappinfo_output(info).unwrap();
+        assert_eq!(parsed.pid, 67565);
+        assert_eq!(parsed.app.name, "Claude");
+        assert_eq!(parsed.app.bundle_id, "com.anthropic.claudefordesktop");
     }
 
     #[test]
@@ -1990,5 +2854,18 @@ mod tests {
             script.find("click at {640, 720}").unwrap()
                 < script.find("keystroke \"v\" using command down").unwrap()
         );
+    }
+
+    #[test]
+    fn native_input_diagnostics_registers_reusable_ax_modules() {
+        let source = include_str!("macos.rs");
+        let production = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("production source should precede tests");
+
+        assert!(production.contains("mod ax_client;"));
+        assert!(production.contains("mod ax_diagnostics;"));
+        assert!(!production.contains("pub mod ax_diagnostics;"));
     }
 }

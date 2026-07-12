@@ -476,7 +476,13 @@ describe("app", () => {
     const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockImplementation(async (command: string) => {
       if (command === "paste_prompt_and_submit_to_last_target") {
-        return { copied: true, sent: true, error: null, reason: null };
+        return {
+          copied: true,
+          sent: false,
+          completion: "pasted_only",
+          error: null,
+          reason: null,
+        };
       }
       return undefined;
     });
@@ -983,7 +989,13 @@ describe("app", () => {
     const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockImplementation(async (command: string) => {
       if (command === "paste_prompt_and_submit_to_last_target") {
-        return { copied: true, sent: true, error: null, reason: null };
+        return {
+          copied: true,
+          sent: false,
+          completion: "pasted_only",
+          error: null,
+          reason: null,
+        };
       }
       return undefined;
     });

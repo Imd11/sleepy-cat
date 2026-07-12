@@ -37,19 +37,27 @@ export type AutosendFailureReason =
   | "no_safe_target"
   | "paste_event_failed"
   | "return_event_failed"
-  | "target_focus_failed";
+  | "target_focus_failed"
+  | "target_changed"
+  | "composer_not_found"
+  | "composer_ambiguous"
+  | "focus_not_acquired"
+  | "paste_not_confirmed";
 
 export type NativeSubmitKey = "none" | "enter" | "command_enter";
+export type AutosendCompletion = "pasted_only" | "submitted";
 
 export interface AutosendOutcome {
   copied: boolean;
   sent: boolean;
+  completion?: AutosendCompletion | null;
   error: string | null;
   reason: AutosendFailureReason | null;
 }
 
 export interface AutosendSequenceOutcome extends AutosendOutcome {
   sent_count: number;
+  processed_count?: number;
   failed_index: number | null;
 }
 

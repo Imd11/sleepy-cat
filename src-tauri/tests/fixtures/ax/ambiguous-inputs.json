@@ -1,0 +1,9 @@
+{
+  "window": {"x":0,"y":0,"width":1000,"height":800},
+  "trustedPids": [50],
+  "expectedError": "ambiguous",
+  "candidates": [
+    {"pid":50,"role":"AXTextArea","y":650,"excluded":false},
+    {"pid":50,"role":"AXTextArea","y":652,"excluded":false}
+  ]
+}

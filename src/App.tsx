@@ -141,7 +141,10 @@ function statusForAutosendOutcome(
   message: string;
   requiresAttention?: boolean;
 } {
-  if (outcome.sent) {
+  if (outcome.completion === "pasted_only") {
+    return { kind: "sent", message: t.autosend.insertedIntoInput };
+  }
+  if (outcome.completion === "submitted" || outcome.sent) {
     return { kind: "sent", message: successMessage };
   }
 
@@ -162,6 +165,16 @@ function statusForAutosendOutcome(
       return { kind: "failed", message: t.autosend.pastedNotSent };
     case "target_focus_failed":
       return { kind: "failed", message: t.autosend.targetFocusFailed };
+    case "target_changed":
+      return { kind: "failed", message: t.autosend.targetChanged };
+    case "composer_not_found":
+      return { kind: "failed", message: t.autosend.composerNotFound };
+    case "composer_ambiguous":
+      return { kind: "failed", message: t.autosend.composerAmbiguous };
+    case "focus_not_acquired":
+      return { kind: "failed", message: t.autosend.focusNotAcquired };
+    case "paste_not_confirmed":
+      return { kind: "failed", message: t.autosend.pasteNotConfirmed };
     default:
       return {
         kind: "failed",
@@ -175,7 +188,10 @@ function statusForAutosendSequenceOutcome(outcome: AutosendSequenceOutcome, t: M
   message: string;
   requiresAttention?: boolean;
 } {
-  if (outcome.sent) {
+  if (outcome.completion === "pasted_only") {
+    return { kind: "sent", message: t.autosend.insertedIntoInput };
+  }
+  if (outcome.completion === "submitted" || outcome.sent) {
     return { kind: "sent", message: t.autosend.sent };
   }
   if (outcome.reason === "missing_accessibility_permission") {
