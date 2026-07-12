@@ -12,8 +12,8 @@ use autosend_transaction::{run_transaction, TransactionFailure};
 use ax_client::{
     ax_attribute_is_settable, ax_bool_attribute, ax_element_frame, ax_element_pid,
     ax_range_attribute, ax_string_attribute, copy_ax_attribute, element_at_position,
-    elements_equal, set_ax_bool_attribute, system_wide_element_at_position, traversal_children,
-    OwnedCfValue as OwnedCf,
+    elements_equal, set_ax_bool_attribute, set_messaging_timeout, system_wide_element_at_position,
+    traversal_children, OwnedCfValue as OwnedCf,
 };
 use composer_resolver::{resolve_composer, ComposerCandidate};
 use focus_controller::ComposerFingerprint;
@@ -711,8 +711,88 @@ fn composer_hit_test_points(window: &CandidateInput) -> Vec<(f64, f64)> {
         .collect()
 }
 
-fn element_belongs_to_window(element: AXUIElementRef, window: AXUIElementRef) -> bool {
+fn bounded_ax_query(element: AXUIElementRef, deadline: Instant) -> Option<()> {
+    let timeout = remaining_ax_timeout(deadline, Instant::now())?;
+    set_messaging_timeout(element, timeout);
+    Some(())
+}
+
+fn hit_test_editable_candidate(
+    element: OwnedCf,
+    depth: usize,
+    deadline: Instant,
+) -> Option<NativeEditableCandidate> {
+    bounded_ax_query(element.as_ptr(), deadline)?;
+    let role_name = ax_string_attribute(element.as_ptr(), "AXRole")?;
+    let role = editable_role(&role_name)?;
+    bounded_ax_query(element.as_ptr(), deadline)?;
+    let editable = ax_bool_attribute(element.as_ptr(), "AXEditable").unwrap_or(false);
+    bounded_ax_query(element.as_ptr(), deadline)?;
+    let value_settable = ax_attribute_is_settable(element.as_ptr(), "AXValue");
+    if !role_can_receive_prompt(role, editable, value_settable) {
+        return None;
+    }
+    bounded_ax_query(element.as_ptr(), deadline)?;
+    let frame = ax_element_frame(element.as_ptr())?;
+    bounded_ax_query(element.as_ptr(), deadline)?;
+    let enabled = ax_bool_attribute(element.as_ptr(), "AXEnabled").unwrap_or(true);
+    bounded_ax_query(element.as_ptr(), deadline)?;
+    let focused = ax_bool_attribute(element.as_ptr(), "AXFocused").unwrap_or(false);
+    bounded_ax_query(element.as_ptr(), deadline)?;
+    let subrole = ax_string_attribute(element.as_ptr(), "AXSubrole");
+    if matches!(
+        subrole.as_deref(),
+        Some("AXSecureTextField" | "AXSearchField")
+    ) {
+        return None;
+    }
+    bounded_ax_query(element.as_ptr(), deadline)?;
+    let identifier = ax_string_attribute(element.as_ptr(), "AXIdentifier");
+    bounded_ax_query(element.as_ptr(), deadline)?;
+    let title = ax_string_attribute(element.as_ptr(), "AXTitle");
+    bounded_ax_query(element.as_ptr(), deadline)?;
+    let description = ax_string_attribute(element.as_ptr(), "AXDescription");
+    bounded_ax_query(element.as_ptr(), deadline)?;
+    let placeholder = ax_string_attribute(element.as_ptr(), "AXPlaceholderValue");
+    bounded_ax_query(element.as_ptr(), deadline)?;
+    let help = ax_string_attribute(element.as_ptr(), "AXHelp");
+    bounded_ax_query(element.as_ptr(), deadline)?;
+    let hidden = ax_bool_attribute(element.as_ptr(), "AXHidden").unwrap_or(false);
+    bounded_ax_query(element.as_ptr(), deadline)?;
+    let owner_pid = ax_element_pid(element.as_ptr())?;
+
+    Some(NativeEditableCandidate {
+        resolver: ComposerCandidate {
+            owner_pid,
+            role: role_name,
+            secure: subrole.as_deref() == Some("AXSecureTextField"),
+            subrole,
+            identifier,
+            title,
+            description,
+            placeholder,
+            help,
+            frame,
+            enabled,
+            visible: !hidden,
+            focused,
+            window_matches: true,
+            editable: true,
+            depth,
+        },
+        element,
+    })
+}
+
+fn element_belongs_to_window_before_deadline(
+    element: AXUIElementRef,
+    window: AXUIElementRef,
+    deadline: Instant,
+) -> bool {
     for attribute in ["AXWindow", "AXTopLevelUIElement"] {
+        if bounded_ax_query(element, deadline).is_none() {
+            return false;
+        }
         if copy_ax_attribute(element, attribute)
             .is_some_and(|owner| elements_equal(owner.as_ptr(), window))
         {
@@ -724,6 +804,9 @@ fn element_belongs_to_window(element: AXUIElementRef, window: AXUIElementRef) ->
         return false;
     };
     for _ in 0..16 {
+        if bounded_ax_query(current.as_ptr(), deadline).is_none() {
+            return false;
+        }
         if elements_equal(current.as_ptr(), window) {
             return true;
         }
@@ -770,10 +853,14 @@ fn collect_hit_test_editable_candidates(
                 for depth in 0..8 {
                     let retained = unsafe { OwnedCf::retained(element.as_ptr()) };
                     if let Some(mut candidate) =
-                        retained.and_then(|item| native_editable_candidate(item, depth))
+                        retained.and_then(|item| hit_test_editable_candidate(item, depth, deadline))
                     {
                         candidate.resolver.window_matches =
-                            element_belongs_to_window(candidate.element.as_ptr(), window);
+                            element_belongs_to_window_before_deadline(
+                                candidate.element.as_ptr(),
+                                window,
+                                deadline,
+                            );
                         if candidate.resolver.window_matches
                             && hit_test_candidate_has_composer_semantics(&candidate.resolver)
                             && !candidates.iter().any(|existing| {
@@ -785,6 +872,9 @@ fn collect_hit_test_editable_candidates(
                         {
                             candidates.push(candidate);
                         }
+                        break;
+                    }
+                    if bounded_ax_query(element.as_ptr(), deadline).is_none() {
                         break;
                     }
                     let Some(parent) = copy_ax_attribute(element.as_ptr(), "AXParent") else {

@@ -456,6 +456,10 @@ fn apply_timeout(element: AXUIElementRef, timeout: f32) {
     }
 }
 
+pub(super) fn set_messaging_timeout(element: AXUIElementRef, timeout: f32) {
+    apply_timeout(element, timeout);
+}
+
 pub(super) fn copy_attribute(
     element: AXUIElementRef,
     attribute: &str,
