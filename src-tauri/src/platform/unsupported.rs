@@ -219,6 +219,15 @@ pub fn current_pointer_location() -> Option<(f64, f64)> {
     None
 }
 
+pub fn effective_submit_key_for_target(
+    _bundle_id: &str,
+    _target_pid: u32,
+    _page_url: Option<&str>,
+    requested: NativeSubmitKey,
+) -> NativeSubmitKey {
+    requested
+}
+
 pub fn paste_prompt_with_copier<C>(body: &str, copy_sender: C) -> Result<(), String>
 where
     C: FnOnce(&str) -> Result<(), String>,
