@@ -2143,6 +2143,30 @@ where
     Ok(())
 }
 
+fn effective_submit_key_for_profile(
+    profile: InputCapabilityProfile,
+    requested: NativeSubmitKey,
+) -> NativeSubmitKey {
+    match profile {
+        InputCapabilityProfile::Accessibility(accessibility) if !accessibility.permits_submit() => {
+            NativeSubmitKey::None
+        }
+        _ => requested,
+    }
+}
+
+pub fn effective_submit_key_for_target(
+    bundle_id: &str,
+    target_pid: u32,
+    page_url: Option<&str>,
+    requested: NativeSubmitKey,
+) -> NativeSubmitKey {
+    let observed_version = app_version_for_pid(target_pid);
+    let profile =
+        input_capability_profile_for_page(bundle_id, observed_version.as_deref(), page_url);
+    effective_submit_key_for_profile(profile, requested)
+}
+
 pub fn paste_prompt_and_submit_to_app_clipboard_with_copier<C, A>(
     body: &str,
     bundle_id: &str,
@@ -2166,12 +2190,7 @@ where
     let observed_version = app_version_for_pid(target_pid);
     let profile =
         input_capability_profile_for_page(bundle_id, observed_version.as_deref(), page_url);
-    let submit_key = match profile {
-        InputCapabilityProfile::Accessibility(accessibility) if !accessibility.permits_submit() => {
-            NativeSubmitKey::None
-        }
-        _ => submit_key,
-    };
+    let submit_key = effective_submit_key_for_profile(profile, submit_key);
     let verification_delay = match profile {
         InputCapabilityProfile::Accessibility(accessibility) => {
             post_paste_verification_delay(accessibility.paste_verification)
@@ -4071,6 +4090,35 @@ mod tests {
             &before,
             &after,
         ));
+    }
+
+    #[test]
+    fn effective_submit_preserves_calibrated_wechat_and_downgrades_unknown_versions() {
+        let calibrated = input_capability_profile("com.tencent.xinWeChat", Some("4.1.2"));
+        let unknown = input_capability_profile("com.tencent.xinWeChat", Some("4.1.3"));
+
+        assert_eq!(
+            effective_submit_key_for_profile(calibrated, NativeSubmitKey::Enter),
+            NativeSubmitKey::Enter
+        );
+        assert_eq!(
+            effective_submit_key_for_profile(unknown, NativeSubmitKey::Enter),
+            NativeSubmitKey::None
+        );
+    }
+
+    #[test]
+    fn effective_submit_preserves_non_wechat_profiles() {
+        for profile in [
+            input_capability_profile("com.openai.codex", None),
+            input_capability_profile("com.apple.Notes", None),
+            input_capability_profile("com.anthropic.claudefordesktop", None),
+        ] {
+            assert_eq!(
+                effective_submit_key_for_profile(profile, NativeSubmitKey::Enter),
+                NativeSubmitKey::Enter
+            );
+        }
     }
 
     #[test]

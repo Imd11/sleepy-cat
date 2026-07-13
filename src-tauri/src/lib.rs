@@ -317,6 +317,12 @@ fn paste_prompt_sequence_and_submit_to_last_target_impl(
     let target_launch_identity = captured_identity.application.launch_identity;
     let captured_window = captured_identity.window;
     let captured_page_url = captured_identity.page_url;
+    let submit_key = platform::macos::effective_submit_key_for_target(
+        &captured_identity.application.bundle_id,
+        target_pid,
+        captured_page_url.as_deref(),
+        submit_key,
+    );
     paste_prompt_sequence_and_submit_to_session_target_with_senders(
         bodies,
         interval_ms,
@@ -4786,6 +4792,45 @@ mod last_input_target_tests {
         assert!(!outcome.sent);
         assert_eq!(outcome.sent_count, 0);
         assert_eq!(outcome.processed_count, 2);
+        assert_eq!(
+            outcome.completion,
+            Some(platform::AutosendCompletion::PastedOnly)
+        );
+        assert_eq!(outcome.failed_index, None);
+    }
+
+    #[test]
+    fn unknown_wechat_group_effective_paste_only_keeps_every_body() {
+        let state = PromptPickSessionState::default();
+        state.set(prompt_target(
+            "WeChat",
+            "com.tencent.xinWeChat",
+            Some(std::process::id()),
+        ));
+        let bodies = vec!["first".to_string(), "second".to_string()];
+        let sender_calls = std::cell::Cell::new(0);
+
+        let outcome = paste_prompt_sequence_and_submit_to_session_target_with_senders(
+            &bodies,
+            700,
+            &state,
+            None,
+            platform::macos::NativeSubmitKey::None,
+            |body, bundle_id, _, submit_key| {
+                sender_calls.set(sender_calls.get() + 1);
+                assert_eq!(body, "first\n\nsecond");
+                assert_eq!(bundle_id, "com.tencent.xinWeChat");
+                assert_eq!(submit_key, platform::macos::NativeSubmitKey::None);
+                AutosendOutcome::pasted_only()
+            },
+            |_| panic!("copy fallback must not run"),
+            |_| panic!("joined paste-only group must not sleep between bodies"),
+        )
+        .unwrap();
+
+        assert_eq!(sender_calls.get(), 1);
+        assert_eq!(outcome.processed_count, bodies.len());
+        assert_eq!(outcome.sent_count, 0);
         assert_eq!(
             outcome.completion,
             Some(platform::AutosendCompletion::PastedOnly)
