@@ -40,9 +40,10 @@ describe("quick picker layout styles", () => {
     const activeRule = rule(".prompt-quick-item:active");
 
     expect(css).not.toContain(".prompt-quick-item:hover {");
-    expect(hoverRule).toContain("background: #f1f5f9");
-    expect(hoverRule).toContain("border-color: #94a3b8");
-    expect(activeRule).toContain("background: #e8eef5");
+    expect(hoverRule).toContain("background: #e7eef8");
+    expect(hoverRule).toContain("border-color: #7f93ad");
+    expect(hoverRule).toContain("rgba(15, 23, 42, 0.14)");
+    expect(activeRule).toContain("background: #dce6f2");
   });
 
   it("keeps the rounded popover panel flush with the native popover window", () => {

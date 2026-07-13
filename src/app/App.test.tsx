@@ -156,7 +156,7 @@ describe("app", () => {
 
   function revealPromptPopoverTooltip() {
     vi.useFakeTimers();
-    fireEvent.mouseMove(screen.getByRole("option", { name: /Test Prompt/i }));
+    fireEvent.pointerMove(screen.getByRole("option", { name: /Test Prompt/i }));
     act(() => {
       vi.advanceTimersByTime(1500);
     });

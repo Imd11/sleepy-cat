@@ -241,12 +241,13 @@ export function PromptQuickList({
               role="option"
               aria-selected="false"
               disabled={submittingPromptId === prompt.id}
-              onMouseEnter={() => showPromptHover(prompt)}
-              onMouseMove={(event) => {
+              onPointerEnter={() => showPromptHover(prompt)}
+              onPointerMove={(event) => {
                 setHoveredPromptId(prompt.id);
                 scheduleHoverPreview(prompt, event.currentTarget);
               }}
-              onMouseLeave={hidePromptHover}
+              onPointerLeave={hidePromptHover}
+              onPointerCancel={hidePromptHover}
               onFocus={() => reportGroupPreview(prompt)}
               onBlur={hideHoverPreview}
               onClick={() => selectPrompt(prompt)}

@@ -806,14 +806,14 @@ button {
 }
 
 .prompt-quick-item.is-hovered {
-  background: #f1f5f9;
-  border-color: #94a3b8;
-  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.1);
+  background: #e7eef8;
+  border-color: #7f93ad;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.14);
 }
 
 .prompt-quick-item:active {
-  background: #e8eef5;
-  border-color: #7f93aa;
+  background: #dce6f2;
+  border-color: #667b98;
   box-shadow: 0 1px 4px rgba(15, 23, 42, 0.12);
 }
 

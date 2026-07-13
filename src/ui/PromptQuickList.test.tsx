@@ -64,7 +64,7 @@ function makeRect(
 function revealHoverPreview(
   option: HTMLElement
 ) {
-  fireEvent.mouseMove(option);
+  fireEvent.pointerMove(option);
   act(() => {
     vi.advanceTimersByTime(1500);
   });
@@ -98,7 +98,7 @@ describe("PromptQuickList", () => {
     expect(screen.queryByText("Single · 1 prompt")).toBeNull();
   });
 
-  it("starts without a highlighted prompt and follows the live mouse position", () => {
+  it("starts without a highlighted prompt and follows the live pointer position", () => {
     renderQuickList();
 
     const first = screen.getByRole("option", { name: /讨论方案/i });
@@ -106,22 +106,22 @@ describe("PromptQuickList", () => {
     expect(first.classList.contains("is-hovered")).toBe(false);
     expect(second.classList.contains("is-hovered")).toBe(false);
 
-    fireEvent.mouseEnter(first);
+    fireEvent.pointerEnter(first);
     expect(first.classList.contains("is-hovered")).toBe(true);
     expect(second.classList.contains("is-hovered")).toBe(false);
 
-    fireEvent.mouseMove(second);
+    fireEvent.pointerMove(second);
     expect(first.classList.contains("is-hovered")).toBe(false);
     expect(second.classList.contains("is-hovered")).toBe(true);
 
-    fireEvent.mouseLeave(second);
+    fireEvent.pointerLeave(second);
     expect(second.classList.contains("is-hovered")).toBe(false);
   });
 
   it("clears prompt highlight and stale focus when a reused popover resets", () => {
     const { rerender } = renderQuickList({ hoverResetKey: 0 });
     const option = screen.getByRole("option", { name: /讨论方案/i });
-    fireEvent.mouseEnter(option);
+    fireEvent.pointerEnter(option);
     option.focus();
     expect(option.classList.contains("is-hovered")).toBe(true);
     expect(document.activeElement).toBe(option);
@@ -256,7 +256,7 @@ describe("PromptQuickList", () => {
       makeRect(40, 180, 300, 90)
     );
 
-    fireEvent.mouseMove(option, { clientX: 90, clientY: 330 });
+    fireEvent.pointerMove(option, { clientX: 90, clientY: 330 });
     act(() => {
       vi.advanceTimersByTime(1500);
     });
@@ -272,7 +272,7 @@ describe("PromptQuickList", () => {
     vi.useFakeTimers();
     renderQuickList();
 
-    fireEvent.mouseMove(screen.getByRole("option", { name: /讨论方案/i }));
+    fireEvent.pointerMove(screen.getByRole("option", { name: /讨论方案/i }));
 
     act(() => {
       vi.advanceTimersByTime(1499);
@@ -285,12 +285,12 @@ describe("PromptQuickList", () => {
     expect(screen.getByRole("tooltip")).toBeTruthy();
   });
 
-  it("does not start hover preview from mouse enter alone", () => {
+  it("does not start hover preview from pointer enter alone", () => {
     vi.useFakeTimers();
     renderQuickList();
 
     const option = screen.getByRole("option", { name: /讨论方案/i });
-    fireEvent.mouseEnter(option);
+    fireEvent.pointerEnter(option);
 
     act(() => {
       vi.advanceTimersByTime(2000);
@@ -298,7 +298,7 @@ describe("PromptQuickList", () => {
 
     expect(screen.queryByRole("tooltip")).toBeNull();
 
-    fireEvent.mouseMove(option);
+    fireEvent.pointerMove(option);
     act(() => {
       vi.advanceTimersByTime(1500);
     });
@@ -306,12 +306,12 @@ describe("PromptQuickList", () => {
     expect(screen.getByRole("tooltip")).toBeTruthy();
   });
 
-  it("reports group preview on mouse enter without starting the hover tooltip", () => {
+  it("reports group preview on pointer enter without starting the hover tooltip", () => {
     vi.useFakeTimers();
     const onGroupPreview = vi.fn();
     renderQuickList({ onGroupPreview });
 
-    fireEvent.mouseEnter(screen.getByRole("option", { name: /修复流程/i }));
+    fireEvent.pointerEnter(screen.getByRole("option", { name: /修复流程/i }));
     act(() => {
       vi.advanceTimersByTime(2000);
     });
@@ -324,7 +324,7 @@ describe("PromptQuickList", () => {
     const onGroupPreview = vi.fn();
     renderQuickList({ onGroupPreview });
 
-    fireEvent.mouseEnter(screen.getByRole("option", { name: /讨论方案/i }));
+    fireEvent.pointerEnter(screen.getByRole("option", { name: /讨论方案/i }));
 
     expect(onGroupPreview).not.toHaveBeenCalled();
   });
@@ -354,7 +354,7 @@ describe("PromptQuickList", () => {
     vi.useFakeTimers();
     const { rerender } = renderQuickList({ hoverResetKey: 0 });
 
-    fireEvent.mouseMove(screen.getByRole("option", { name: /修复流程/i }));
+    fireEvent.pointerMove(screen.getByRole("option", { name: /修复流程/i }));
 
     const zh = getMessages("zh-CN");
     rerender(
@@ -416,7 +416,7 @@ describe("PromptQuickList", () => {
     expect(tooltip.textContent).not.toContain("修复流程");
     expect(tooltip.textContent).not.toContain("群组 · 3 条");
 
-    fireEvent.mouseLeave(option);
+    fireEvent.pointerLeave(option);
 
     expect(screen.queryByRole("tooltip")).toBeNull();
   });
