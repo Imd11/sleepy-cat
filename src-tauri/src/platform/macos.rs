@@ -1538,6 +1538,7 @@ pub fn current_input_target() -> Option<InputTarget> {
     // a real pid.
     if app_info.pid == std::process::id()
         || app_info.app.bundle_id == "local.promptpicker.dev"
+        || app_info.app.name == crate::PRODUCT_NAME
         || app_info.app.name == "Prompt Drawer"
     {
         return None;
@@ -2816,7 +2817,11 @@ fn frontmost_target_matches(
 
 fn should_cmd_tab_refocus_before_autosend(frontmost: Option<&FrontmostApp>) -> bool {
     frontmost
-        .map(|app| app.bundle_id == "local.promptpicker.dev" || app.name == "Prompt Drawer")
+        .map(|app| {
+            app.bundle_id == "local.promptpicker.dev"
+                || app.name == crate::PRODUCT_NAME
+                || app.name == "Prompt Drawer"
+        })
         .unwrap_or(false)
 }
 
@@ -4747,7 +4752,7 @@ mod tests {
     fn should_cmd_tab_refocus_only_when_prompt_picker_is_frontmost() {
         assert!(should_cmd_tab_refocus_before_autosend(Some(
             &FrontmostApp {
-                name: "Prompt Drawer".to_string(),
+                name: crate::PRODUCT_NAME.to_string(),
                 bundle_id: "local.promptpicker.dev".to_string(),
             }
         )));

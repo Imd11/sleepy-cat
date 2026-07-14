@@ -6,8 +6,8 @@ APP_VERSION="$(
   node -e "console.log(JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).version)" \
     "$ROOT_DIR/src-tauri/tauri.conf.json"
 )"
-APP_PATH="$ROOT_DIR/src-tauri/target/release/bundle/macos/Prompt Drawer.app"
-DMG_PATH="$ROOT_DIR/src-tauri/target/release/bundle/dmg/Prompt Drawer_${APP_VERSION}_aarch64.dmg"
+APP_PATH="$ROOT_DIR/src-tauri/target/release/bundle/macos/Sleepy Cat.app"
+DMG_PATH="$ROOT_DIR/src-tauri/target/release/bundle/dmg/Sleepy Cat_${APP_VERSION}_aarch64.dmg"
 BUNDLE_IDENTIFIER="local.promptpicker.dev"
 SIGNING_IDENTITY="${PROMPT_PICKER_CODESIGN_IDENTITY:-}"
 
@@ -36,9 +36,9 @@ codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 if command -v hdiutil >/dev/null 2>&1; then
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf "$tmp_dir"' EXIT
-  ditto "$APP_PATH" "$tmp_dir/Prompt Drawer.app"
+  ditto "$APP_PATH" "$tmp_dir/Sleepy Cat.app"
   mkdir -p "$(dirname "$DMG_PATH")"
-  hdiutil create -volname "Prompt Drawer" -srcfolder "$tmp_dir" -ov -format UDZO "$DMG_PATH"
+  hdiutil create -volname "Sleepy Cat" -srcfolder "$tmp_dir" -ov -format UDZO "$DMG_PATH"
 fi
 
 codesign -dv --verbose=4 "$APP_PATH" 2>&1 | sed -n '1,24p'

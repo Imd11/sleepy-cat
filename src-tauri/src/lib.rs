@@ -6,6 +6,9 @@ use tauri::{
 };
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
+pub(crate) const PRODUCT_NAME: &str = "Sleepy Cat";
+const LEGACY_PRODUCT_NAME: &str = "Prompt Drawer";
+
 #[cfg(debug_assertions)]
 mod calico_probe;
 mod platform;
@@ -1011,7 +1014,7 @@ fn quit_prompt_picker(app: tauri::AppHandle) {
 fn set_menu_language(app: tauri::AppHandle, language: String) -> Result<(), String> {
     let menu = build_menu_bar_menu(&app, &language)?;
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
-        return Err("Prompt Drawer tray icon is not available.".to_string());
+        return Err(format!("{PRODUCT_NAME} tray icon is not available."));
     };
     tray.set_menu(Some(menu)).map_err(|e| e.to_string())
 }
@@ -2171,7 +2174,9 @@ fn emit_autosend_diagnostic(
 }
 
 fn is_prompt_picker_app(app: &FrontmostApp) -> bool {
-    app.bundle_id == "local.promptpicker.dev" || app.name == "Prompt Drawer"
+    app.bundle_id == "local.promptpicker.dev"
+        || app.name == PRODUCT_NAME
+        || app.name == LEGACY_PRODUCT_NAME
 }
 
 fn is_usable_autosend_app(app: &FrontmostApp) -> bool {
@@ -2268,18 +2273,18 @@ fn menu_labels_for_language(language: &str) -> MenuLabels {
         "zh-CN" => MenuLabels {
             open_main: "管理提示词...",
             open_settings: "设置...",
-            show_button: "显示 Prompt Drawer",
-            hide_button: "隐藏 Prompt Drawer",
+            show_button: "显示 Sleepy Cat",
+            hide_button: "隐藏 Sleepy Cat",
             open_accessibility: "打开辅助功能设置",
-            quit: "退出 Prompt Drawer",
+            quit: "退出 Sleepy Cat",
         },
         _ => MenuLabels {
             open_main: "Manage Prompts...",
             open_settings: "Settings...",
-            show_button: "Show Prompt Drawer",
-            hide_button: "Hide Prompt Drawer",
+            show_button: "Show Sleepy Cat",
+            hide_button: "Hide Sleepy Cat",
             open_accessibility: "Open Accessibility Settings",
-            quit: "Quit Prompt Drawer",
+            quit: "Quit Sleepy Cat",
         },
     }
 }
@@ -2528,7 +2533,7 @@ fn setup_menu_bar_app(app_handle: &tauri::AppHandle) -> Result<(), String> {
 
     let tray_builder = TrayIconBuilder::with_id(TRAY_ID)
         .menu(&menu)
-        .tooltip("Prompt Drawer")
+        .tooltip(PRODUCT_NAME)
         .show_menu_on_left_click(true)
         .icon_as_template(true)
         .icon(menubar_template_icon())
@@ -2659,7 +2664,7 @@ pub fn run() {
             }
 
             let window = app.get_webview_window("main").unwrap();
-            window.set_title("Prompt Drawer").unwrap();
+            window.set_title(PRODUCT_NAME).unwrap();
             let main_window = window.clone();
             window.on_window_event(move |event| {
                 if let WindowEvent::CloseRequested { api, .. } = event {
@@ -3347,11 +3352,11 @@ mod last_input_target_tests {
         assert_eq!(menu_labels_for_language("zh-CN").open_settings, "设置...");
         assert_eq!(
             menu_labels_for_language("zh-CN").show_button,
-            "显示 Prompt Drawer"
+            "显示 Sleepy Cat"
         );
         assert_eq!(
             menu_labels_for_language("zh-CN").hide_button,
-            "隐藏 Prompt Drawer"
+            "隐藏 Sleepy Cat"
         );
         assert_eq!(
             menu_labels_for_language("en-US").open_main,
@@ -3359,13 +3364,13 @@ mod last_input_target_tests {
         );
         assert_eq!(
             menu_labels_for_language("en-US").show_button,
-            "Show Prompt Drawer"
+            "Show Sleepy Cat"
         );
         assert_eq!(
             menu_labels_for_language("en-US").hide_button,
-            "Hide Prompt Drawer"
+            "Hide Sleepy Cat"
         );
-        assert_eq!(menu_labels_for_language("bad").quit, "Quit Prompt Drawer");
+        assert_eq!(menu_labels_for_language("bad").quit, "Quit Sleepy Cat");
     }
 
     #[test]
@@ -3620,7 +3625,7 @@ mod last_input_target_tests {
             button_position: (10.0, 10.0),
             click_point: (6.0, 5.0),
             app: Some(FrontmostApp {
-                name: "Prompt Drawer".to_string(),
+                name: PRODUCT_NAME.to_string(),
                 bundle_id: "local.promptpicker.dev".to_string(),
             }),
             pid: std::process::id(),
@@ -3743,7 +3748,7 @@ mod last_input_target_tests {
             classify_target_frontmost(
                 &target,
                 Some(&frontmost_target(
-                    "Prompt Drawer",
+                    PRODUCT_NAME,
                     "local.promptpicker.dev",
                     Some(1)
                 ))

@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Prompt Drawer",
+  "productName": "Sleepy Cat",
   "identifier": "local.promptpicker.dev",
   "version": "1.0.14",
   "build": {
@@ -13,7 +13,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "Prompt Drawer",
+        "title": "Sleepy Cat",
         "width": 760,
         "height": 560,
         "minWidth": 640,

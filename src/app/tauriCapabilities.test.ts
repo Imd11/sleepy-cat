@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "fs";
 import { describe, expect, it } from "vitest";
 
 describe("Tauri capabilities", () => {
-  it("grants permissions to every Prompt Drawer webview window", () => {
+  it("grants permissions to every Sleepy Cat webview window", () => {
     const capability = JSON.parse(
       readFileSync("src-tauri/capabilities/default.json", "utf8")
     ) as { windows?: string[] };

@@ -1,7 +1,7 @@
 {
   "name": "prompt-picker",
   "version": "1.0.14",
-  "description": "Prompt Drawer is a local-first prompt library and launcher.",
+  "description": "Sleepy Cat is a local-first personal prompt library and launcher.",
   "type": "module",
   "scripts": {
     "dev": "vite",

@@ -113,7 +113,7 @@ export function createPromptLibrarySyncStorage({
       }
 
       if (link.lastKnownSignature && metadata.signature !== link.lastKnownSignature) {
-        const error = new Error("Linked prompt file changed outside Prompt Drawer.");
+        const error = new Error("Linked prompt file changed outside Sleepy Cat.");
         onSyncError?.({ kind: "conflict", path, error });
         throw error;
       }

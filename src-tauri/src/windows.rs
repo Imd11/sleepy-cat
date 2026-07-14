@@ -632,7 +632,7 @@ fn build_prompt_popover_window(
     let popover_size = popover_window_size_for_mode(mode);
     let url = format!("index.html?mode={}", mode);
     WebviewWindowBuilder::new(app, POPOVER_WINDOW_LABEL, WebviewUrl::App(url.into()))
-        .title("Prompt Drawer")
+        .title(crate::PRODUCT_NAME)
         .inner_size(popover_size.width, popover_size.height)
         .resizable(false)
         .decorations(false)
@@ -699,7 +699,7 @@ fn build_prompt_button_window(
         BUTTON_WINDOW_LABEL,
         WebviewUrl::App(overlay_url.into()),
     )
-    .title("Prompt Drawer")
+    .title(crate::PRODUCT_NAME)
     .inner_size(BUTTON_WINDOW_WIDTH, BUTTON_WINDOW_HEIGHT)
     .resizable(false)
     .decorations(false)
@@ -733,7 +733,7 @@ fn build_prompt_button_input_window(
         BUTTON_INPUT_WINDOW_LABEL,
         WebviewUrl::App("overlay-interaction.html".into()),
     )
-    .title("Prompt Drawer Input")
+    .title("Sleepy Cat Input")
     .inner_size(BUTTON_VISUAL_WIDTH, BUTTON_VISUAL_HEIGHT)
     .resizable(false)
     .decorations(false)
