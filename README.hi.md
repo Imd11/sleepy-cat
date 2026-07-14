@@ -6,7 +6,7 @@
 
 हर व्यक्ति अपने निजी prompt library का हकदार है।
 
-Prompt Drawer Codex, Cursor और CLI के लिए एक local prompt library है। कोई saved prompt चुनें और Prompt Drawer उसे active input में भरकर एक ही action में भेज देता है। बार-बार copy, paste और Return दबाने की जरूरत नहीं। भेजने से पहले content देखना हो तो **Insert only** चुनें।
+Prompt Drawer desktop apps, terminals और browser-based AI tools के लिए एक local prompt library है, जिसमें Codex, Cursor, Claude, ChatGPT, Gemini और अन्य tools शामिल हैं। कोई saved prompt चुनें और Prompt Drawer उसे active input में भरकर एक ही action में भेज देता है। बार-बार copy, paste और Return दबाने की जरूरत नहीं। भेजने से पहले content देखना हो तो **Insert only** चुनें।
 
 Prompt groups बनाकर prompts की एक sequence को क्रम से भेजें।
 

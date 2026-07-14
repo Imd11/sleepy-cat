@@ -6,7 +6,7 @@
 
 Todos merecen una biblioteca personal de prompts.
 
-Prompt Drawer es una biblioteca local de prompts para Codex, Cursor y CLI. Selecciona un prompt guardado y Prompt Drawer lo introduce en el campo activo y lo envía en una sola acción. Sin copiar, pegar ni pulsar Return repetidamente. Cambia a **Solo insertar** cuando quieras revisar el contenido antes de enviarlo.
+Prompt Drawer es una biblioteca local de prompts para aplicaciones de escritorio, terminales y herramientas de IA en el navegador, como Codex, Cursor, Claude, ChatGPT, Gemini y muchas más. Selecciona un prompt guardado y Prompt Drawer lo introduce en el campo activo y lo envía en una sola acción. Sin copiar, pegar ni pulsar Return repetidamente. Cambia a **Solo insertar** cuando quieras revisar el contenido antes de enviarlo.
 
 Crea grupos de prompts para enviar una secuencia de prompts en orden.
 
