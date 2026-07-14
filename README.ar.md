@@ -2,7 +2,7 @@
 
 **مكتبة prompts الشخصية الخاصة بك.**
 
-![عرض Sleepy Cat](docs/prompt-drawer-demo.gif)
+![عرض Sleepy Cat](docs/sleepy-cat-demo.gif)
 
 **اقرأ هذا باللغة:** [English](README.md) | [简体中文](README.zh-CN.md) | [हिन्दी](README.hi.md) | [Español](README.es.md) | **العربية**
 
@@ -20,7 +20,7 @@ Sleepy Cat هو مكتبة prompts محلية لتطبيقات سطح المكت
 
 ## التنزيل
 
-نزّل أحدث ملف DMG لأجهزة macOS Apple Silicon أو مثبت Windows x64 من [GitHub Releases](https://github.com/Imd11/prompt-drawer/releases/latest).
+نزّل أحدث ملف DMG لأجهزة macOS Apple Silicon أو مثبت Windows x64 من [GitHub Releases](https://github.com/Imd11/sleepy-cat/releases/latest).
 
 على macOS، يحتاج التطبيق إلى إذن Accessibility لإدراج prompts وإرسالها في التطبيقات المدعومة.
 

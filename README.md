@@ -2,7 +2,7 @@
 
 **Your personal prompt library.**
 
-![Sleepy Cat demo](docs/prompt-drawer-demo.gif)
+![Sleepy Cat demo](docs/sleepy-cat-demo.gif)
 
 **Read this in:** **English** | [简体中文](README.zh-CN.md) | [हिन्दी](README.hi.md) | [Español](README.es.md) | [العربية](README.ar.md)
 
@@ -20,7 +20,7 @@ Create prompt groups to send a sequence of prompts in order.
 
 ## Download
 
-Get the latest macOS Apple Silicon DMG or Windows x64 installer from [GitHub Releases](https://github.com/Imd11/prompt-drawer/releases/latest).
+Get the latest macOS Apple Silicon DMG or Windows x64 installer from [GitHub Releases](https://github.com/Imd11/sleepy-cat/releases/latest).
 
 macOS needs Accessibility permission to insert and send prompts in supported apps.
 

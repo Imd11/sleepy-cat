@@ -2,7 +2,7 @@
 
 **आपकी निजी prompt library।**
 
-![Sleepy Cat डेमो](docs/prompt-drawer-demo.gif)
+![Sleepy Cat डेमो](docs/sleepy-cat-demo.gif)
 
 **इस भाषा में पढ़ें:** [English](README.md) | [简体中文](README.zh-CN.md) | **हिन्दी** | [Español](README.es.md) | [العربية](README.ar.md)
 
@@ -20,7 +20,7 @@ Prompt groups बनाकर prompts की एक sequence को क्रम
 
 ## डाउनलोड
 
-[GitHub Releases](https://github.com/Imd11/prompt-drawer/releases/latest) से नवीनतम macOS Apple Silicon DMG या Windows x64 installer डाउनलोड करें।
+[GitHub Releases](https://github.com/Imd11/sleepy-cat/releases/latest) से नवीनतम macOS Apple Silicon DMG या Windows x64 installer डाउनलोड करें।
 
 macOS पर supported apps में prompts insert और send करने के लिए Accessibility permission चाहिए।
 
