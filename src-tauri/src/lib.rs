@@ -8,6 +8,7 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 
 pub(crate) const PRODUCT_NAME: &str = "Sleepy Cat";
 const LEGACY_PRODUCT_NAME: &str = "Prompt Drawer";
+const PROMPT_PICK_CAPTURE_WAIT_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(900);
 
 #[cfg(debug_assertions)]
 mod calico_probe;
@@ -134,14 +135,7 @@ pub(crate) fn capture_prompt_pick_session_target(
     session_id: u64,
 ) -> Option<FrontmostApp> {
     session_state.begin_if_new(session_id);
-    let frontmost = platform::frontmost_app_with_pid();
-    let needs_underlying_app = frontmost.as_ref().is_none_or(|frontmost| {
-        frontmost.pid == Some(std::process::id()) || is_prompt_picker_app(&frontmost.app)
-    });
-    let underlying_app = needs_underlying_app
-        .then(|| platform::macos::topmost_external_app_with_pid(std::process::id()))
-        .flatten();
-    let frontmost = prompt_pick_frontmost_candidate(frontmost, underlying_app);
+    let frontmost = current_prompt_pick_frontmost_candidate();
 
     if let Some(input_target) = platform::macos::current_input_target() {
         record_last_input_target_if_valid(recent_state, &input_target);
@@ -163,6 +157,33 @@ pub(crate) fn capture_prompt_pick_session_target(
         }
     }
     captured_app
+}
+
+pub(crate) fn prepare_prompt_pick_session_target(
+    session_state: &PromptPickSessionState,
+    recent_state: &LastInputTargetState,
+    session_id: u64,
+) -> Option<FrontmostApp> {
+    session_state.begin(session_id);
+    let captured_app = freeze_prompt_pick_session_target(
+        session_state,
+        current_prompt_pick_frontmost_candidate(),
+        recent_state.get(),
+        session_id,
+    );
+    session_state.mark_capture_pending(session_id);
+    captured_app
+}
+
+fn current_prompt_pick_frontmost_candidate() -> Option<FrontmostAppWithPid> {
+    let frontmost = platform::frontmost_app_with_pid();
+    let needs_underlying_app = frontmost.as_ref().is_none_or(|frontmost| {
+        frontmost.pid == Some(std::process::id()) || is_prompt_picker_app(&frontmost.app)
+    });
+    let underlying_app = needs_underlying_app
+        .then(|| platform::macos::topmost_external_app_with_pid(std::process::id()))
+        .flatten();
+    prompt_pick_frontmost_candidate(frontmost, underlying_app)
 }
 
 #[tauri::command]
@@ -306,6 +327,7 @@ fn paste_prompt_sequence_and_submit_to_last_target_impl(
     app: &tauri::AppHandle,
     submit_key: platform::macos::NativeSubmitKey,
 ) -> Result<AutosendSequenceOutcome, String> {
+    state.wait_for_capture(PROMPT_PICK_CAPTURE_WAIT_TIMEOUT);
     let Some(captured_identity) = state
         .captured_identity()
         .or_else(|| recent_state.captured_identity())
@@ -358,6 +380,7 @@ fn paste_prompt_and_submit_to_last_target_impl(
     app: &tauri::AppHandle,
     submit_key: platform::macos::NativeSubmitKey,
 ) -> Result<AutosendOutcome, String> {
+    state.wait_for_capture(PROMPT_PICK_CAPTURE_WAIT_TIMEOUT);
     let Some(captured_identity) = state
         .captured_identity()
         .or_else(|| recent_state.captured_identity())
@@ -1108,38 +1131,73 @@ struct PromptPickSessionInner {
     active_session_id: u64,
     target: Option<PromptPickSessionTarget>,
     identity: Option<CapturedTargetIdentity>,
+    capture_pending: bool,
+    consumed: bool,
+}
+
+#[derive(Default)]
+struct PromptPickSessionShared {
+    inner: std::sync::Mutex<PromptPickSessionInner>,
+    capture_finished: std::sync::Condvar,
 }
 
 #[derive(Clone, Default)]
-pub struct PromptPickSessionState(std::sync::Arc<std::sync::Mutex<PromptPickSessionInner>>);
+pub struct PromptPickSessionState(std::sync::Arc<PromptPickSessionShared>);
 
 impl PromptPickSessionState {
     pub fn begin(&self, session_id: u64) {
-        let mut state = self.0.lock().expect("prompt pick session lock poisoned");
+        let mut state = self
+            .0
+            .inner
+            .lock()
+            .expect("prompt pick session lock poisoned");
         state.active_session_id = session_id;
         state.target = None;
         state.identity = None;
+        state.capture_pending = false;
+        state.consumed = false;
+        drop(state);
+        self.0.capture_finished.notify_all();
     }
 
     pub fn begin_if_new(&self, session_id: u64) {
-        let mut state = self.0.lock().expect("prompt pick session lock poisoned");
+        let mut state = self
+            .0
+            .inner
+            .lock()
+            .expect("prompt pick session lock poisoned");
         if state.active_session_id == session_id {
             return;
         }
         state.active_session_id = session_id;
         state.target = None;
         state.identity = None;
+        state.capture_pending = false;
+        state.consumed = false;
+        drop(state);
+        self.0.capture_finished.notify_all();
     }
 
     pub fn set(&self, target: PromptPickSessionTarget) {
-        let mut state = self.0.lock().expect("prompt pick session lock poisoned");
+        let mut state = self
+            .0
+            .inner
+            .lock()
+            .expect("prompt pick session lock poisoned");
+        if state.consumed {
+            return;
+        }
         state.target = Some(target);
         state.identity = None;
     }
 
     pub fn set_if_current(&self, session_id: u64, target: PromptPickSessionTarget) -> bool {
-        let mut state = self.0.lock().expect("prompt pick session lock poisoned");
-        if state.active_session_id != session_id {
+        let mut state = self
+            .0
+            .inner
+            .lock()
+            .expect("prompt pick session lock poisoned");
+        if state.active_session_id != session_id || state.consumed {
             return false;
         }
         state.target = Some(target);
@@ -1153,18 +1211,35 @@ impl PromptPickSessionState {
         target: PromptPickSessionTarget,
         identity: CapturedTargetIdentity,
     ) -> bool {
-        let mut state = self.0.lock().expect("prompt pick session lock poisoned");
-        if state.active_session_id != session_id {
+        let mut state = self
+            .0
+            .inner
+            .lock()
+            .expect("prompt pick session lock poisoned");
+        if state.active_session_id != session_id || state.consumed {
             return false;
         }
-        if let Some(frozen) = state.target.as_ref() {
+        if let Some(frozen) = state.target.as_mut() {
             if frozen.app.bundle_id != target.app.bundle_id
                 || matches!((frozen.pid, target.pid), (Some(left), Some(right)) if left != right)
             {
                 return false;
             }
+            if frozen.pid.is_none() {
+                frozen.pid = target.pid;
+            }
+            if target.click_point.is_some() {
+                frozen.click_point = target.click_point;
+            }
+            frozen.observed_at_ms = target.observed_at_ms;
         }
-        if state.identity.is_some() {
+        if let Some(frozen_identity) = state.identity.as_mut() {
+            if frozen_identity.application != identity.application {
+                return false;
+            }
+            if frozen_identity.window.is_none() {
+                frozen_identity.window = identity.window;
+            }
             return true;
         }
         state.target = Some(target);
@@ -1177,8 +1252,12 @@ impl PromptPickSessionState {
         session_id: u64,
         target: PromptPickSessionTarget,
     ) -> bool {
-        let mut state = self.0.lock().expect("prompt pick session lock poisoned");
-        if state.active_session_id != session_id || state.target.is_some() {
+        let mut state = self
+            .0
+            .inner
+            .lock()
+            .expect("prompt pick session lock poisoned");
+        if state.active_session_id != session_id || state.consumed || state.target.is_some() {
             return false;
         }
         state.target = Some(target);
@@ -1190,8 +1269,12 @@ impl PromptPickSessionState {
         session_id: u64,
         candidate: PromptPickSessionTarget,
     ) -> bool {
-        let mut state = self.0.lock().expect("prompt pick session lock poisoned");
-        if state.active_session_id != session_id {
+        let mut state = self
+            .0
+            .inner
+            .lock()
+            .expect("prompt pick session lock poisoned");
+        if state.active_session_id != session_id || state.consumed {
             return false;
         }
         let Some(target) = state.target.as_mut() else {
@@ -1220,8 +1303,12 @@ impl PromptPickSessionState {
         bundle_id: &str,
         page_url: String,
     ) -> bool {
-        let mut state = self.0.lock().expect("prompt pick session lock poisoned");
-        if state.active_session_id != session_id {
+        let mut state = self
+            .0
+            .inner
+            .lock()
+            .expect("prompt pick session lock poisoned");
+        if state.active_session_id != session_id || state.consumed {
             return false;
         }
         let Some(identity) = state.identity.as_mut() else {
@@ -1235,23 +1322,85 @@ impl PromptPickSessionState {
     }
 
     pub fn clear(&self) {
-        let mut state = self.0.lock().expect("prompt pick session lock poisoned");
+        let mut state = self
+            .0
+            .inner
+            .lock()
+            .expect("prompt pick session lock poisoned");
         state.target = None;
         state.identity = None;
+        state.capture_pending = false;
+        state.consumed = true;
+        drop(state);
+        self.0.capture_finished.notify_all();
     }
 
     pub fn clear_if_current(&self, session_id: u64) -> bool {
-        let mut state = self.0.lock().expect("prompt pick session lock poisoned");
+        let mut state = self
+            .0
+            .inner
+            .lock()
+            .expect("prompt pick session lock poisoned");
         if state.active_session_id != session_id {
             return false;
         }
         state.target = None;
         state.identity = None;
+        state.capture_pending = false;
+        state.consumed = true;
+        drop(state);
+        self.0.capture_finished.notify_all();
         true
+    }
+
+    pub fn mark_capture_pending(&self, session_id: u64) -> bool {
+        let mut state = self
+            .0
+            .inner
+            .lock()
+            .expect("prompt pick session lock poisoned");
+        if state.active_session_id != session_id || state.consumed {
+            return false;
+        }
+        state.capture_pending = true;
+        true
+    }
+
+    pub fn finish_capture(&self, session_id: u64) -> bool {
+        let mut state = self
+            .0
+            .inner
+            .lock()
+            .expect("prompt pick session lock poisoned");
+        if state.active_session_id != session_id || state.consumed {
+            return false;
+        }
+        state.capture_pending = false;
+        drop(state);
+        self.0.capture_finished.notify_all();
+        true
+    }
+
+    pub fn wait_for_capture(&self, timeout: std::time::Duration) -> bool {
+        let state = self
+            .0
+            .inner
+            .lock()
+            .expect("prompt pick session lock poisoned");
+        let session_id = state.active_session_id;
+        let (state, _) = self
+            .0
+            .capture_finished
+            .wait_timeout_while(state, timeout, |state| {
+                state.active_session_id == session_id && !state.consumed && state.capture_pending
+            })
+            .expect("prompt pick session lock poisoned while waiting for capture");
+        state.active_session_id != session_id || state.consumed || !state.capture_pending
     }
 
     pub fn get(&self) -> Option<PromptPickSessionTarget> {
         self.0
+            .inner
             .lock()
             .expect("prompt pick session lock poisoned")
             .target
@@ -1259,19 +1408,34 @@ impl PromptPickSessionState {
     }
 
     pub fn take(&self) -> Option<PromptPickSessionTarget> {
-        let mut state = self.0.lock().expect("prompt pick session lock poisoned");
+        let mut state = self
+            .0
+            .inner
+            .lock()
+            .expect("prompt pick session lock poisoned");
         state.identity = None;
+        state.capture_pending = false;
+        state.consumed = true;
+        self.0.capture_finished.notify_all();
         state.target.take()
     }
 
     fn take_captured(&self) -> Option<(PromptPickSessionTarget, Option<CapturedTargetIdentity>)> {
-        let mut state = self.0.lock().expect("prompt pick session lock poisoned");
+        let mut state = self
+            .0
+            .inner
+            .lock()
+            .expect("prompt pick session lock poisoned");
         let target = state.target.take()?;
+        state.capture_pending = false;
+        state.consumed = true;
+        self.0.capture_finished.notify_all();
         Some((target, state.identity.take()))
     }
 
     fn captured_identity(&self) -> Option<CapturedTargetIdentity> {
         self.0
+            .inner
             .lock()
             .expect("prompt pick session lock poisoned")
             .identity
@@ -1902,7 +2066,6 @@ fn stale_target_outcome() -> AutosendOutcome {
     }
 }
 
-#[cfg(test)]
 pub(crate) fn freeze_prompt_pick_session_target(
     state: &PromptPickSessionState,
     frontmost: Option<FrontmostAppWithPid>,
@@ -1930,7 +2093,7 @@ pub(crate) fn freeze_prompt_pick_session_target(
             &session_target.app.bundle_id,
             pid,
             platform::macos::process_launch_identity(pid)?,
-            platform::macos::current_target_window_identity(pid),
+            None,
         ))
     });
     let stored = captured_identity
@@ -3006,6 +3169,33 @@ mod last_input_target_tests {
     }
 
     #[test]
+    fn background_capture_fills_a_missing_frozen_window() {
+        let state = PromptPickSessionState::default();
+        state.begin(8);
+        let target = prompt_target("Chrome", "com.google.Chrome", Some(42));
+        let mut frozen = captured_identity("com.google.Chrome", std::process::id());
+        frozen.window = None;
+        let mut background = frozen.clone();
+        background.window = Some(TargetWindowIdentity {
+            owner_pid: 42,
+            frame: CandidateInput {
+                x: 10.0,
+                y: 20.0,
+                width: 1200.0,
+                height: 800.0,
+            },
+            role: Some("AXWindow".to_string()),
+            title_hash: Some("background".to_string()),
+            cg_window_id: None,
+        });
+
+        assert!(state.set_captured_if_current(8, target.clone(), frozen));
+        assert!(state.set_captured_if_current(8, target, background.clone()));
+
+        assert_eq!(state.captured_identity(), Some(background));
+    }
+
+    #[test]
     fn target_application_identity_rejects_restarted_process() {
         let identity = TargetApplicationIdentity {
             bundle_id: "com.anthropic.claudefordesktop".to_string(),
@@ -3138,6 +3328,41 @@ mod last_input_target_tests {
 
         state.begin_if_new(8);
         assert!(state.get().is_none());
+    }
+
+    #[test]
+    fn prompt_pick_session_capture_wait_is_bounded() {
+        let state = PromptPickSessionState::default();
+        state.begin(7);
+        assert!(state.mark_capture_pending(7));
+
+        let started = std::time::Instant::now();
+        assert!(!state.wait_for_capture(std::time::Duration::from_millis(20)));
+        assert!(started.elapsed() < std::time::Duration::from_millis(250));
+    }
+
+    #[test]
+    fn stale_capture_completion_does_not_finish_the_current_session() {
+        let state = PromptPickSessionState::default();
+        state.begin(7);
+        assert!(state.mark_capture_pending(7));
+        state.begin(8);
+        assert!(state.mark_capture_pending(8));
+
+        assert!(!state.finish_capture(7));
+        assert!(!state.wait_for_capture(std::time::Duration::from_millis(1)));
+        assert!(state.finish_capture(8));
+        assert!(state.wait_for_capture(std::time::Duration::from_millis(1)));
+    }
+
+    #[test]
+    fn consumed_session_rejects_late_background_capture() {
+        let state = PromptPickSessionState::default();
+        state.begin(9);
+        state.set(prompt_target("Codex", "com.openai.codex", Some(42)));
+        assert!(state.take().is_some());
+
+        assert!(!state.set_if_current(9, prompt_target("Chrome", "com.google.Chrome", Some(84))));
     }
 
     #[test]

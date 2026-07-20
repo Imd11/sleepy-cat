@@ -123,7 +123,7 @@ describe("overlay button html", () => {
     const html = readOverlayInteractionHtml();
     const clickBlock = html.slice(
       html.indexOf("const permission = await invoke('prompt_interaction_permission_status');"),
-      html.indexOf("start = null;", html.indexOf("const permission = await invoke('prompt_interaction_permission_status');"))
+      html.indexOf("btn.addEventListener('pointerenter'")
     );
 
     expect(clickBlock).toContain("prompt_interaction_permission_status");
@@ -131,6 +131,37 @@ describe("overlay button html", () => {
     expect(clickBlock).toContain("toggle_prompt_popover_from_button");
     expect(clickBlock).not.toContain("begin_prompt_pick_session");
     expect(clickBlock).not.toContain("sessionPromise");
+  });
+
+  it("clears only the completed pointer interaction before awaiting the click action", () => {
+    const html = readOverlayInteractionHtml();
+    const pointerUpStart = html.indexOf("btn.addEventListener('pointerup'");
+    const pointerEnterStart = html.indexOf("btn.addEventListener('pointerenter'");
+    const pointerUpBlock = html.slice(pointerUpStart, pointerEnterStart);
+
+    expect(pointerUpBlock).toContain("const interaction = start;");
+    expect(pointerUpBlock).toContain("clearPointerInteraction(interaction.sequence)");
+    expect(pointerUpBlock.indexOf("clearPointerInteraction(interaction.sequence)")).toBeLessThan(
+      pointerUpBlock.indexOf("prompt_interaction_permission_status")
+    );
+    expect(html).toContain("if (start?.sequence !== sequence) return false;");
+  });
+
+  it("coalesces repeated primary clicks while the first toggle is still running", () => {
+    const html = readOverlayInteractionHtml();
+
+    expect(html).toContain("let primaryActionInFlight = false;");
+    expect(html).toContain("if (primaryActionInFlight) {");
+    expect(html).toContain("primaryActionInFlight = true;");
+    expect(html).toContain("primaryActionInFlight = false;");
+  });
+
+  it("cleans up cancelled pointer interactions without changing the drag threshold", () => {
+    const html = readOverlayInteractionHtml();
+
+    expect(html).toContain("btn.addEventListener('pointercancel'");
+    expect(html).toContain("btn.addEventListener('lostpointercapture'");
+    expect(html).toContain("const DRAG_START_DISTANCE_PX = 10;");
   });
 
   it("keeps existing drag and click commands for the Calico entry", () => {
@@ -239,7 +270,7 @@ describe("overlay button html", () => {
     const html = readOverlayInteractionHtml();
     const clickBlock = html.slice(
       html.indexOf("const permission = await invoke('prompt_interaction_permission_status');"),
-      html.indexOf("start = null;", html.indexOf("const permission = await invoke('prompt_interaction_permission_status');"))
+      html.indexOf("btn.addEventListener('pointerenter'")
     );
 
     expect(clickBlock).not.toContain("handleAttention");

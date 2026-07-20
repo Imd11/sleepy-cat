@@ -671,16 +671,22 @@ fn show_non_activating_overlay_window(window: &tauri::WebviewWindow) -> Result<(
     }
 }
 
-async fn capture_prompt_pick_session_before_show(
+fn start_prompt_pick_session_capture(
     session_id: u64,
     session_state: crate::PromptPickSessionState,
     recent_state: crate::LastInputTargetState,
-) -> Result<Option<crate::platform::FrontmostApp>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        crate::capture_prompt_pick_session_target(&session_state, &recent_state, session_id)
-    })
-    .await
-    .map_err(|error| format!("Prompt pick session task failed: {error}"))
+) {
+    tauri::async_runtime::spawn(async move {
+        let capture_state = session_state.clone();
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            crate::capture_prompt_pick_session_target(&capture_state, &recent_state, session_id)
+        })
+        .await;
+        session_state.finish_capture(session_id);
+        if let Err(error) = result {
+            eprintln!("Prompt pick session task failed: {error}");
+        }
+    });
 }
 
 fn build_prompt_button_window(
@@ -906,12 +912,10 @@ pub async fn show_prompt_popover_from_button(
     recent_state: tauri::State<'_, crate::LastInputTargetState>,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
-    capture_prompt_pick_session_before_show(
-        session_id,
-        session_state.inner().clone(),
-        recent_state.inner().clone(),
-    )
-    .await?;
+    let session_state = session_state.inner().clone();
+    let recent_state = recent_state.inner().clone();
+    crate::prepare_prompt_pick_session_target(&session_state, &recent_state, session_id);
+    start_prompt_pick_session_capture(session_id, session_state, recent_state);
     let position = button_relative_popover_position(
         &app,
         BUTTON_VISUAL_WIDTH,
@@ -949,12 +953,10 @@ pub async fn toggle_prompt_popover_from_button(
         }
     }
 
-    capture_prompt_pick_session_before_show(
-        session_id,
-        session_state.inner().clone(),
-        recent_state.inner().clone(),
-    )
-    .await?;
+    let session_state = session_state.inner().clone();
+    let recent_state = recent_state.inner().clone();
+    crate::prepare_prompt_pick_session_target(&session_state, &recent_state, session_id);
+    start_prompt_pick_session_capture(session_id, session_state, recent_state);
     let position = button_relative_popover_position(
         &app,
         BUTTON_VISUAL_WIDTH,
@@ -1616,7 +1618,7 @@ mod tests {
     }
 
     #[test]
-    fn prompt_popover_open_preserves_existing_session_capture() {
+    fn prompt_popover_open_freezes_immediately_and_enriches_in_background() {
         let source = include_str!("windows.rs");
         let start = source
             .find("pub async fn toggle_prompt_popover_from_button")
@@ -1626,18 +1628,28 @@ mod tests {
             .expect("next command should follow toggle");
         let command_source = &source[start..start + end];
         let capture_start = source
-            .find("async fn capture_prompt_pick_session_before_show")
+            .find("fn start_prompt_pick_session_capture")
             .expect("capture helper should exist");
         let capture_end = source[capture_start..]
             .find("fn build_prompt_button_window")
             .expect("button builder should follow capture helper");
         let capture_source = &source[capture_start..capture_start + capture_end];
 
-        assert!(command_source.contains("capture_prompt_pick_session_before_show"));
-        assert!(command_source.contains(".await"));
-        assert!(command_source.contains("session_state.begin(session_id);"));
+        assert!(command_source.contains("prepare_prompt_pick_session_target"));
+        assert!(command_source.contains("start_prompt_pick_session_capture"));
+        assert!(command_source.contains("show_popover_mode"));
+        assert!(
+            command_source
+                .find("prepare_prompt_pick_session_target")
+                .expect("target should be frozen")
+                < command_source
+                    .find("show_popover_mode")
+                    .expect("popover should be shown")
+        );
+        assert!(!command_source.contains("capture_prompt_pick_session_before_show"));
         assert!(capture_source.contains("capture_prompt_pick_session_target"));
         assert!(capture_source.contains("spawn_blocking"));
+        assert!(capture_source.contains("finish_capture"));
     }
 
     #[test]

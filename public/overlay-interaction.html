@@ -54,6 +54,7 @@ let promptPickSessionId = Math.floor(performance.timeOrigin) * 1000;
 let dragStartedEmitted = false;
 let dragPopoverHidden = false;
 let lastAccessibilitySettingsOpenAt = 0;
+let primaryActionInFlight = false;
 
 const permissionMessages = {
   'zh-CN': {
@@ -72,6 +73,20 @@ const permissionMessages = {
 
 function distance(a, b) {
   return Math.hypot(a.screenX - b.screenX, a.screenY - b.screenY);
+}
+
+function clearPointerInteraction(sequence) {
+  if (start?.sequence !== sequence) return false;
+  if (animationFrame) {
+    cancelAnimationFrame(animationFrame);
+    animationFrame = 0;
+  }
+  start = null;
+  dragging = false;
+  lastMove = null;
+  dragStartedEmitted = false;
+  dragPopoverHidden = false;
+  return true;
 }
 
 async function invoke(command, args) {
@@ -155,9 +170,7 @@ async function openButtonControls(event) {
   event.preventDefault();
   if (contextMenuOpened) return;
   contextMenuOpened = true;
-  start = null;
-  dragging = false;
-  lastMove = null;
+  if (start) clearPointerInteraction(start.sequence);
   await notifyVisual('context-menu');
   await invoke('show_prompt_button_controls_from_button');
 }
@@ -235,37 +248,62 @@ btn.addEventListener('pointerup', async (event) => {
     return;
   }
   if (!start) return;
+  const interaction = start;
   const wasDragging = dragging;
-  try {
-    btn.releasePointerCapture(event.pointerId);
-  } catch {}
   if (wasDragging) {
-    if (!start.positionReady && start.positionPromise) {
-      await start.positionPromise.catch(() => null);
+    if (!interaction.positionReady && interaction.positionPromise) {
+      await interaction.positionPromise.catch(() => null);
     }
     await flushMove();
     const position = await invoke('prompt_button_position_cmd');
     if (position) {
       await emit('prompt-button-drag-ended', position);
     }
+    clearPointerInteraction(interaction.sequence);
   } else {
-    const permission = await invoke('prompt_interaction_permission_status');
-    if (permission?.required && !permission.trusted) {
-      await handleMissingPromptInteractionPermission(permission);
-      await notifyVisual('reset');
-    } else {
-      const sessionId = ++promptPickSessionId;
-      const toggleResult = await invoke('toggle_prompt_popover_from_button', { sessionId });
-      if (!toggleResult?.opened) {
+    clearPointerInteraction(interaction.sequence);
+  }
+  try {
+    btn.releasePointerCapture(event.pointerId);
+  } catch {}
+
+  if (!wasDragging) {
+    if (primaryActionInFlight) {
+      await notifyVisual('release', { wasDragging });
+      return;
+    }
+    primaryActionInFlight = true;
+    try {
+      const permission = await invoke('prompt_interaction_permission_status');
+      if (permission?.required && !permission.trusted) {
+        await handleMissingPromptInteractionPermission(permission);
         await notifyVisual('reset');
+      } else {
+        const sessionId = ++promptPickSessionId;
+        const toggleResult = await invoke('toggle_prompt_popover_from_button', { sessionId });
+        if (!toggleResult?.opened) {
+          await notifyVisual('reset');
+        }
       }
+    } finally {
+      primaryActionInFlight = false;
     }
   }
-  start = null;
-  dragging = false;
-  lastMove = null;
-  dragStartedEmitted = false;
   await notifyVisual('release', { wasDragging });
+});
+
+btn.addEventListener('pointercancel', (event) => {
+  if (!start || start.pointerId !== event.pointerId) return;
+  const wasDragging = dragging;
+  clearPointerInteraction(start.sequence);
+  notifyVisual('release', { wasDragging }).catch(() => {});
+});
+
+btn.addEventListener('lostpointercapture', (event) => {
+  if (!start || start.pointerId !== event.pointerId) return;
+  const wasDragging = dragging;
+  clearPointerInteraction(start.sequence);
+  notifyVisual('release', { wasDragging }).catch(() => {});
 });
 
 btn.addEventListener('pointerenter', () => {
