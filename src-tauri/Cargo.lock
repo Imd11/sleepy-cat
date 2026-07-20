@@ -2549,7 +2549,7 @@ dependencies = [
 
 [[package]]
 name = "prompt-picker"
-version = "1.0.16"
+version = "1.0.17"
 dependencies = [
  "block2",
  "core-foundation",
