@@ -7,6 +7,7 @@ type CalicoState = {
   durationMs: number;
   minMs: number;
   replay: boolean;
+  completeBeforeTransition?: boolean;
   scale: number;
   offsetX: number;
   offsetY: number;
@@ -125,6 +126,17 @@ describe("Calico manifest", () => {
       expect(typeof state.scale, stateName).toBe("number");
       expect(typeof state.offsetX, stateName).toBe("number");
       expect(typeof state.offsetY, stateName).toBe("number");
+    }
+  });
+
+  it("protects the waking transition until its full sequence completes", () => {
+    const manifest = readManifest();
+
+    expect(manifest.states.waking.completeBeforeTransition).toBe(true);
+    for (const [stateName, state] of Object.entries(manifest.states)) {
+      if (stateName !== "waking") {
+        expect(state.completeBeforeTransition, stateName).not.toBe(true);
+      }
     }
   });
 

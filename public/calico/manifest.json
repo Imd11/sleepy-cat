@@ -194,6 +194,7 @@
       "durationMs": 5800,
       "minMs": 800,
       "replay": true,
+      "completeBeforeTransition": true,
       "scale": 1.05,
       "offsetX": 8,
       "offsetY": -5

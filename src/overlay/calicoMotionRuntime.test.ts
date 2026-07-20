@@ -22,6 +22,16 @@ const manifest = {
       offsetX: 0,
       offsetY: 0,
     },
+    waking: {
+      priority: 10,
+      durationMs: 100,
+      minMs: 0,
+      replay: true,
+      completeBeforeTransition: true,
+      scale: 1,
+      offsetX: 0,
+      offsetY: 0,
+    },
     happy: {
       priority: 50,
       durationMs: 3000,
@@ -55,6 +65,7 @@ const manifest = {
 const sheetManifest = {
   states: {
     idle: { file: "/calico/sheets/idle.png", plays: 0 },
+    waking: { file: "/calico/sheets/waking.png", plays: 1 },
     happy: { file: "/calico/sheets/happy.png", plays: 1 },
     error: { file: "/calico/sheets/error.png", plays: 1 },
     "react-drag": { file: "/calico/sheets/react-drag.png", plays: 0 },
@@ -142,6 +153,45 @@ describe("Calico motion runtime", () => {
     expect(renderer.play).toHaveBeenLastCalledWith("idle", sheetManifest.states.idle, {
       restart: false,
     });
+  });
+
+  it("finishes waking before applying a queued result motion", async () => {
+    vi.useFakeTimers();
+    const { createCalicoMotionRuntime } = await loadRuntime();
+    const { options, renderer } = setup(() => Date.now());
+    const runtime = createCalicoMotionRuntime(options);
+
+    expect(runtime.apply({ state: "waking" })).toBe(true);
+    expect(runtime.requestReset()).toBe(true);
+    expect(runtime.apply({ state: "happy" })).toBe(true);
+
+    expect(options.host.dataset.motionState).toBe("waking");
+    expect(renderer.play).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(99);
+    expect(options.host.dataset.motionState).toBe("waking");
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(options.host.dataset.motionState).toBe("happy");
+    expect(renderer.play).toHaveBeenLastCalledWith("happy", sheetManifest.states.happy, {
+      restart: true,
+    });
+  });
+
+  it("allows direct manipulation to interrupt waking", async () => {
+    const { createCalicoMotionRuntime } = await loadRuntime();
+    const { options, renderer } = setup();
+    const runtime = createCalicoMotionRuntime(options);
+
+    runtime.apply({ state: "waking" });
+    expect(runtime.apply({ state: "react-drag", interruptProtected: true })).toBe(true);
+
+    expect(options.host.dataset.motionState).toBe("react-drag");
+    expect(renderer.play).toHaveBeenLastCalledWith(
+      "react-drag",
+      sheetManifest.states["react-drag"],
+      { restart: false }
+    );
   });
 
   it("auto-return is independent of intrinsic sheet playback", async () => {

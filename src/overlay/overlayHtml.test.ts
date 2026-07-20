@@ -352,12 +352,11 @@ describe("overlay button html", () => {
     expect(html).not.toContain("THROW_RELEASE_MS");
   });
 
-  it("resets Calico when the popover is dismissed without sending", () => {
+  it("requests a baseline return when the popover is dismissed", () => {
     const html = readOverlayHtml();
 
     expect(html).toContain("prompt-popover-dismissed");
-    expect(html).toContain("resetCalicoMotion");
-    expect(html).toContain("motionResetTimer");
+    expect(html).toContain("requestReset");
   });
 
   it("does not ship the removed paper-plane flight window", () => {
