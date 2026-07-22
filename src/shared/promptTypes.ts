@@ -20,6 +20,7 @@ export type PromptCategory = {
 
 export type PromptEntry = {
   id: string;
+  title?: string;
   body: string;
   order: number;
 };
@@ -41,7 +42,7 @@ export type PromptContainerInput = {
   title: string;
   type: PromptContainerType;
   sendBehavior?: PromptSendBehavior;
-  prompts: Array<{ id?: string; body: string; order?: number }>;
+  prompts: Array<{ id?: string; title?: string; body: string; order?: number }>;
   intervalMs?: number;
   categoryId?: string;
 };

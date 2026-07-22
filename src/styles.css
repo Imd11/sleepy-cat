@@ -1271,6 +1271,14 @@ button {
   padding-inline: 14px;
 }
 
+.prompt-manager .list-heading-actions,
+.prompt-manager .selection-toolbar-actions,
+.prompt-manager .manager-dialog-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .prompt-manager .button {
   min-height: 32px;
   border-radius: 7px;
@@ -1408,8 +1416,270 @@ button {
   background: rgba(251, 253, 255, 0.86);
 }
 
+.prompt-manager .prompt-item.is-selected {
+  background: #f1f5f9;
+}
+
 .prompt-manager .prompt-content {
   padding: 11px 13px;
+}
+
+.prompt-manager .selection-toolbar {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  padding: 6px 8px 6px 12px;
+  background: var(--pp-surface-subtle);
+  border: 1px solid var(--pp-border);
+  border-radius: var(--pp-radius-sm);
+  font-size: 12px;
+}
+
+.prompt-manager .prompt-selection-row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-height: 64px;
+  padding: 11px 13px;
+  cursor: pointer;
+}
+
+.prompt-manager .prompt-selection-row.is-unavailable {
+  cursor: default;
+  opacity: 0.58;
+}
+
+.prompt-manager .prompt-selection-control {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.prompt-manager .prompt-selection-control input,
+.prompt-manager .merge-delete-originals input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: #344054;
+}
+
+.prompt-manager .prompt-action-menu-wrap {
+  position: relative;
+}
+
+.prompt-manager .prompt-more-button {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.prompt-manager .prompt-action-menu {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 4px);
+  right: 0;
+  display: grid;
+  width: 132px;
+  padding: 4px;
+  background: var(--pp-surface);
+  border: 1px solid var(--pp-border-strong);
+  border-radius: var(--pp-radius-sm);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.14);
+}
+
+.prompt-manager .prompt-item:nth-last-child(-n + 2) .prompt-action-menu {
+  top: auto;
+  bottom: calc(100% + 4px);
+}
+
+.prompt-manager .prompt-action-menu button {
+  min-height: 32px;
+  padding: 0 10px;
+  color: var(--pp-text);
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 620;
+  text-align: left;
+}
+
+.prompt-manager .prompt-action-menu button:hover,
+.prompt-manager .prompt-action-menu button:focus-visible {
+  background: var(--pp-surface-subtle);
+  outline: none;
+}
+
+.prompt-manager .prompt-action-menu button.is-danger {
+  color: var(--pp-danger);
+}
+
+.prompt-manager .manager-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.22);
+}
+
+.prompt-manager .manager-dialog {
+  display: grid;
+  width: min(520px, 100%);
+  max-height: min(680px, calc(100vh - 48px));
+  gap: 14px;
+  overflow-y: auto;
+  padding: 18px;
+  color: var(--pp-text);
+  background: var(--pp-surface);
+  border: 1px solid var(--pp-border-strong);
+  border-radius: var(--pp-radius-md);
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18);
+}
+
+.prompt-manager .manager-dialog h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.prompt-manager .manager-dialog p {
+  margin: 4px 0 0;
+  color: var(--pp-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.prompt-manager .manager-dialog-field,
+.prompt-manager .merge-order-section {
+  display: grid;
+  gap: 7px;
+  color: #344054;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.prompt-manager .merge-order-list,
+.prompt-manager .split-preview-list {
+  display: grid;
+  border: 1px solid var(--pp-border);
+  border-radius: var(--pp-radius-sm);
+}
+
+.prompt-manager .merge-order-item {
+  display: grid;
+  grid-template-columns: 18px 22px minmax(0, 1fr) 28px;
+  gap: 7px;
+  align-items: center;
+  min-height: 54px;
+  padding: 7px 8px;
+  background: var(--pp-surface);
+  border-bottom: 1px solid var(--pp-border);
+}
+
+.prompt-manager .merge-order-item:last-child,
+.prompt-manager .split-preview-list > div:last-child {
+  border-bottom: 0;
+}
+
+.prompt-manager .merge-order-item.is-dragging {
+  opacity: 0.55;
+}
+
+.prompt-manager .merge-order-handle {
+  color: #98a2b3;
+  cursor: grab;
+}
+
+.prompt-manager .merge-order-number {
+  color: var(--pp-muted);
+  font-size: 11px;
+}
+
+.prompt-manager .merge-order-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.prompt-manager .merge-order-copy strong,
+.prompt-manager .merge-order-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prompt-manager .merge-order-copy small {
+  color: var(--pp-muted);
+  font-weight: 400;
+}
+
+.prompt-manager .merge-remove-button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: #667085;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  font-size: 18px;
+}
+
+.prompt-manager .merge-remove-button:hover {
+  background: var(--pp-surface-subtle);
+}
+
+.prompt-manager .merge-delete-originals {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 10px;
+  align-items: flex-start;
+  padding: 11px;
+  background: var(--pp-surface-subtle);
+  border: 1px solid var(--pp-border);
+  border-radius: var(--pp-radius-sm);
+  cursor: pointer;
+}
+
+.prompt-manager .merge-delete-originals input {
+  margin-top: 2px;
+}
+
+.prompt-manager .merge-delete-originals span {
+  display: grid;
+  gap: 3px;
+}
+
+.prompt-manager .merge-delete-originals strong {
+  font-size: 12px;
+}
+
+.prompt-manager .merge-delete-originals small {
+  color: var(--pp-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.prompt-manager .manager-dialog-actions {
+  justify-content: flex-end;
+}
+
+.prompt-manager .split-preview-list > div {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 8px;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--pp-border);
+  font-size: 12px;
+}
+
+.prompt-manager .split-preview-list span {
+  color: var(--pp-muted);
 }
 
 .prompt-manager .prompt-info strong {
@@ -1641,6 +1911,13 @@ button {
 
   .prompt-actions {
     flex-wrap: wrap;
+  }
+
+  .prompt-manager .selection-toolbar,
+  .prompt-manager .list-heading-actions,
+  .prompt-manager .manager-dialog-actions {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .category-rail {

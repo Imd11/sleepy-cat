@@ -12,11 +12,17 @@ import { CategoryRail } from "./CategoryRail";
 
 type EditorMode = "single" | "group";
 
+type DraftPrompt = {
+  id?: string;
+  title?: string;
+  body: string;
+};
+
 type Draft = {
   title: string;
   type: EditorMode;
   body: string;
-  prompts: string[];
+  prompts: DraftPrompt[];
   intervalMs: number;
 };
 
@@ -41,7 +47,7 @@ interface PromptManagerProps {
   }) => void | Promise<void>;
   onCreateGroup: (input: {
     title: string;
-    prompts: Array<{ body: string }>;
+    prompts: Array<{ id?: string; title?: string; body: string; order: number }>;
     intervalMs: number;
   }) => void | Promise<void>;
   onUpdate: (
@@ -50,10 +56,16 @@ interface PromptManagerProps {
       title?: string;
       body?: string;
       type?: EditorMode;
-      prompts?: Array<{ body: string; order: number }>;
+      prompts?: Array<{ id?: string; title?: string; body: string; order: number }>;
       intervalMs?: number;
     }
   ) => void | Promise<void>;
+  onCombineSingles: (input: {
+    ids: string[];
+    title: string;
+    deleteOriginals: boolean;
+  }) => void | Promise<void>;
+  onSplitGroup: (id: string) => void | Promise<void>;
   onDelete: (id: string) => void | Promise<void>;
   onReorder: (orderedIds: string[]) => void | Promise<void>;
   onImport: () => void | Promise<void>;
@@ -64,7 +76,7 @@ const emptyDraft = (): Draft => ({
   title: "",
   type: "single",
   body: "",
-  prompts: ["", ""],
+  prompts: [{ body: "" }, { body: "" }],
   intervalMs: DEFAULT_GROUP_INTERVAL_MS,
 });
 
@@ -75,23 +87,29 @@ function draftFromPrompt(prompt: PromptContainer): Draft {
     type: prompt.type,
     body: orderedPrompts[0]?.body ?? "",
     prompts: prompt.type === "group"
-      ? orderedPrompts.map((entry) => entry.body)
-      : [orderedPrompts[0]?.body ?? "", ""],
+      ? orderedPrompts.map((entry) => ({
+          id: entry.id,
+          title: entry.title,
+          body: entry.body,
+        }))
+      : [{ body: orderedPrompts[0]?.body ?? "" }, { body: "" }],
     intervalMs: prompt.intervalMs,
   };
 }
 
-function cleanBodies(bodies: string[]): Array<{ body: string; order: number }> {
-  return bodies
-    .map((body) => body.trim())
-    .filter(Boolean)
-    .map((body, order) => ({ body, order }));
+function cleanPrompts(
+  prompts: DraftPrompt[]
+): Array<{ id?: string; title?: string; body: string; order: number }> {
+  return prompts
+    .map((prompt) => ({ ...prompt, body: prompt.body.trim() }))
+    .filter((prompt) => Boolean(prompt.body))
+    .map((prompt, order) => ({ ...prompt, order }));
 }
 
 function hasValidDraft(draft: Draft): boolean {
   if (!draft.title.trim()) return false;
   if (draft.type === "single") return Boolean(draft.body.trim());
-  return cleanBodies(draft.prompts).length > 0;
+  return cleanPrompts(draft.prompts).length > 0;
 }
 
 const GROUP_INTERVAL_STEP_SECONDS = 0.1;
@@ -146,6 +164,8 @@ export function PromptManager({
   onCreate,
   onCreateGroup,
   onUpdate,
+  onCombineSingles,
+  onSplitGroup,
   onDelete,
   onReorder,
   onImport,
@@ -157,6 +177,14 @@ export function PromptManager({
   const [editDraft, setEditDraft] = useState<Draft>(() => emptyDraft());
   const [createPanelOpen, setCreatePanelOpen] = useState(false);
   const [createToastMessage, setCreateToastMessage] = useState<string | null>(null);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [mergeIds, setMergeIds] = useState<string[]>([]);
+  const [mergeTitle, setMergeTitle] = useState("");
+  const [deleteOriginals, setDeleteOriginals] = useState(true);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [splitConfirmId, setSplitConfirmId] = useState<string | null>(null);
+  const [draggingMergeId, setDraggingMergeId] = useState<string | null>(null);
   const titleInputRef = useRef<HTMLInputElement | null>(null);
   const bodyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const groupPromptRefs = useRef<Array<HTMLTextAreaElement | null>>([]);
@@ -166,6 +194,8 @@ export function PromptManager({
   const submitGuardRef = useRef(false);
   const submitGuardTimerRef = useRef<number | null>(null);
   const createToastTimerRef = useRef<number | null>(null);
+  const mergeTitleInputRef = useRef<HTMLInputElement | null>(null);
+  const mergeDialogOpenRef = useRef(false);
 
   useEffect(() => {
     return () => {
@@ -183,9 +213,40 @@ export function PromptManager({
     setDeleteConfirmId(null);
     setCreatePanelOpen(false);
     setDraft(emptyDraft());
+    setSelectionMode(false);
+    setSelectedIds([]);
+    setMergeIds([]);
+    setOpenMenuId(null);
+    setSplitConfirmId(null);
   }, [activeCategoryId]);
 
-  const hasDraftActivity = createPanelOpen || editingId !== null || deleteConfirmId !== null;
+  useEffect(() => {
+    if (!openMenuId) return;
+    const closeMenu = () => setOpenMenuId(null);
+    const closeMenuOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeMenu();
+    };
+    window.addEventListener("pointerdown", closeMenu);
+    window.addEventListener("keydown", closeMenuOnEscape);
+    return () => {
+      window.removeEventListener("pointerdown", closeMenu);
+      window.removeEventListener("keydown", closeMenuOnEscape);
+    };
+  }, [openMenuId]);
+
+  useEffect(() => {
+    const isOpen = mergeIds.length > 0;
+    if (isOpen && !mergeDialogOpenRef.current) {
+      window.requestAnimationFrame(() => {
+        mergeTitleInputRef.current?.focus();
+        mergeTitleInputRef.current?.select();
+      });
+    }
+    mergeDialogOpenRef.current = isOpen;
+  }, [mergeIds.length]);
+
+  const hasDraftActivity = createPanelOpen || editingId !== null || deleteConfirmId !== null
+    || selectionMode || mergeIds.length > 0 || splitConfirmId !== null;
 
   useEffect(() => {
     onDraftActivityChange?.(hasDraftActivity);
@@ -193,13 +254,13 @@ export function PromptManager({
 
   const setDraftPrompt = (index: number, value: string) => {
     const next = [...draft.prompts];
-    next[index] = value;
+    next[index] = { ...next[index], body: value };
     setDraft({ ...draft, prompts: next });
   };
 
   const setEditPrompt = (index: number, value: string) => {
     const next = [...editDraft.prompts];
-    next[index] = value;
+    next[index] = { ...next[index], body: value };
     setEditDraft({ ...editDraft, prompts: next });
   };
 
@@ -207,16 +268,20 @@ export function PromptManager({
     ...draft,
     title: titleInputRef.current?.value ?? draft.title,
     body: bodyTextareaRef.current?.value ?? draft.body,
-    prompts: draft.prompts.map((value, index) => groupPromptRefs.current[index]?.value ?? value),
+    prompts: draft.prompts.map((prompt, index) => ({
+      ...prompt,
+      body: groupPromptRefs.current[index]?.value ?? prompt.body,
+    })),
   });
 
   const draftFromEditDom = (): Draft => ({
     ...editDraft,
     title: editTitleInputRef.current?.value ?? editDraft.title,
     body: editBodyTextareaRef.current?.value ?? editDraft.body,
-    prompts: editDraft.prompts.map((value, index) =>
-      editGroupPromptRefs.current[index]?.value ?? value
-    ),
+    prompts: editDraft.prompts.map((prompt, index) => ({
+      ...prompt,
+      body: editGroupPromptRefs.current[index]?.value ?? prompt.body,
+    })),
   });
 
   const runSubmitOnce = (callback: () => void | Promise<void>) => {
@@ -250,7 +315,7 @@ export function PromptManager({
     if (sourceDraft.type === "group") {
       await onCreateGroup({
         title: sourceDraft.title.trim(),
-        prompts: cleanBodies(sourceDraft.prompts),
+        prompts: cleanPrompts(sourceDraft.prompts),
         intervalMs: sourceDraft.intervalMs,
       });
       showCreateToast(messages.manager.groupAdded);
@@ -284,7 +349,7 @@ export function PromptManager({
       await onUpdate(id, {
         title: sourceDraft.title.trim(),
         type: "group",
-        prompts: cleanBodies(sourceDraft.prompts),
+        prompts: cleanPrompts(sourceDraft.prompts),
         intervalMs: sourceDraft.intervalMs,
       });
     } else {
@@ -311,6 +376,66 @@ export function PromptManager({
     [newOrder[index], newOrder[index + 1]] = [newOrder[index + 1], newOrder[index]];
     runSubmitOnce(() => onReorder(newOrder));
   };
+
+  const startSelection = () => {
+    setEditingId(null);
+    setDeleteConfirmId(null);
+    setCreatePanelOpen(false);
+    setOpenMenuId(null);
+    setSelectionMode(true);
+    setSelectedIds([]);
+  };
+
+  const cancelSelection = () => {
+    setSelectionMode(false);
+    setSelectedIds([]);
+    setMergeIds([]);
+  };
+
+  const toggleSelection = (id: string) => {
+    setSelectedIds((current) => current.includes(id)
+      ? current.filter((selectedId) => selectedId !== id)
+      : [...current, id]);
+  };
+
+  const openMergeDialog = () => {
+    const selected = prompts.filter((prompt) =>
+      prompt.type === "single" && selectedIds.includes(prompt.id)
+    );
+    if (selected.length < 2) return;
+    setMergeIds(selected.map((prompt) => prompt.id));
+    setMergeTitle(messages.manager.newGroupDefaultName);
+    setDeleteOriginals(true);
+  };
+
+  const handleCombine = async () => {
+    if (mergeIds.length < 2 || !mergeTitle.trim()) return;
+    await onCombineSingles({
+      ids: mergeIds,
+      title: mergeTitle.trim(),
+      deleteOriginals,
+    });
+    cancelSelection();
+    showCreateToast(messages.manager.groupCombined);
+  };
+
+  const handleSplit = async (id: string) => {
+    await onSplitGroup(id);
+    setSplitConfirmId(null);
+    showCreateToast(messages.manager.groupSplit);
+  };
+
+  const moveMergeItem = (sourceId: string, targetId: string) => {
+    const from = mergeIds.indexOf(sourceId);
+    const to = mergeIds.indexOf(targetId);
+    if (from === -1 || to === -1) return;
+    setMergeIds(moveArrayItem(mergeIds, from, to));
+  };
+
+  const mergePrompts = mergeIds
+    .map((id) => prompts.find((prompt) => prompt.id === id))
+    .filter((prompt): prompt is PromptContainer => Boolean(prompt));
+  const splitPrompt = prompts.find((prompt) => prompt.id === splitConfirmId) ?? null;
 
   return (
     <div className="prompt-manager page-stack">
@@ -361,13 +486,26 @@ export function PromptManager({
               <div>
                 <h2>{messages.manager.promptListTitle}</h2>
               </div>
-              <button
-                className="button button-primary list-add-button"
-                type="button"
-                onClick={openCreatePanel}
-              >
-                + {messages.manager.addPrompt}
-              </button>
+              <div className="list-heading-actions">
+                {!selectionMode ? (
+                  <button
+                    className="button button-secondary"
+                    type="button"
+                    onClick={startSelection}
+                    disabled={prompts.filter((prompt) => prompt.type === "single").length < 2}
+                  >
+                    {messages.manager.selectPrompts}
+                  </button>
+                ) : null}
+                <button
+                  className="button button-primary list-add-button"
+                  type="button"
+                  onClick={openCreatePanel}
+                  disabled={selectionMode}
+                >
+                  + {messages.manager.addPrompt}
+                </button>
+              </div>
             </div>
             {createPanelOpen ? (
               <form
@@ -431,12 +569,12 @@ export function PromptManager({
                     onPromptChange={setDraftPrompt}
                     onInsertPrompt={(index) => {
                       const next = [...draft.prompts];
-                      next.splice(index + 1, 0, "");
+                      next.splice(index + 1, 0, { body: "" });
                       setDraft({ ...draft, prompts: next });
                     }}
                     onRemovePrompt={(index) => {
                       const next = draft.prompts.filter((_, i) => i !== index);
-                      setDraft({ ...draft, prompts: next.length ? next : [""] });
+                      setDraft({ ...draft, prompts: next.length ? next : [{ body: "" }] });
                     }}
                     onMovePrompt={(from, to) => {
                       setDraft({ ...draft, prompts: moveArrayItem(draft.prompts, from, to) });
@@ -468,6 +606,30 @@ export function PromptManager({
                 <span>{createToastMessage}</span>
               </div>
             ) : null}
+            {selectionMode ? (
+              <div className="selection-toolbar">
+                <strong role="status" aria-live="polite">
+                  {messages.manager.selectedCount(selectedIds.length)}
+                </strong>
+                <div className="selection-toolbar-actions">
+                  <button
+                    className="button button-primary"
+                    type="button"
+                    disabled={selectedIds.length < 2}
+                    onClick={openMergeDialog}
+                  >
+                    {messages.manager.combineIntoGroup}
+                  </button>
+                  <button
+                    className="button button-secondary"
+                    type="button"
+                    onClick={cancelSelection}
+                  >
+                    {messages.manager.cancel}
+                  </button>
+                </div>
+              </div>
+            ) : null}
             <div className="prompt-list">
               {prompts.length === 0 ? (
                 <div className="empty-state-block">
@@ -476,9 +638,34 @@ export function PromptManager({
               ) : prompts.map((prompt, index) => (
                 <div
                   key={prompt.id}
-                  className={`prompt-item ${prompt.type === "group" ? "prompt-item-group" : ""}`}
+                  className={`prompt-item ${prompt.type === "group" ? "prompt-item-group" : ""} ${selectedIds.includes(prompt.id) ? "is-selected" : ""}`}
                 >
-                  {editingId === prompt.id ? (
+                  {selectionMode ? (
+                    <label
+                      className={`prompt-selection-row ${prompt.type === "group" ? "is-unavailable" : ""}`}
+                    >
+                      <span className="prompt-selection-control">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.includes(prompt.id)}
+                          disabled={prompt.type === "group"}
+                          aria-label={messages.manager.selectPrompt(prompt.title)}
+                          onChange={() => toggleSelection(prompt.id)}
+                        />
+                      </span>
+                      <span className="prompt-info">
+                        <span className="prompt-title-row">
+                          <strong>{prompt.title}</strong>
+                          <PromptKindBadge prompt={prompt} messages={messages} />
+                        </span>
+                        <span className="prompt-preview-lines">
+                          {getPromptContainerPreviewLines(prompt).map((line) => (
+                            <span className="prompt-preview-line" key={line}>{line}</span>
+                          ))}
+                        </span>
+                      </span>
+                    </label>
+                  ) : editingId === prompt.id ? (
                     <form
                       className="edit-form edit-form-stacked"
                       onSubmit={(event) => {
@@ -535,12 +722,15 @@ export function PromptManager({
                           onPromptChange={setEditPrompt}
                           onInsertPrompt={(entryIndex) => {
                             const next = [...editDraft.prompts];
-                            next.splice(entryIndex + 1, 0, "");
+                            next.splice(entryIndex + 1, 0, { body: "" });
                             setEditDraft({ ...editDraft, prompts: next });
                           }}
                           onRemovePrompt={(entryIndex) => {
                             const next = editDraft.prompts.filter((_, i) => i !== entryIndex);
-                            setEditDraft({ ...editDraft, prompts: next.length ? next : [""] });
+                            setEditDraft({
+                              ...editDraft,
+                              prompts: next.length ? next : [{ body: "" }],
+                            });
                           }}
                           onMovePrompt={(from, to) => {
                             setEditDraft({
@@ -630,18 +820,217 @@ export function PromptManager({
                         >
                           {messages.manager.edit}
                         </button>
-                        <button
-                          className="button button-ghost-danger"
-                          onClick={() => setDeleteConfirmId(prompt.id)}
+                        <div
+                          className="prompt-action-menu-wrap"
+                          onPointerDown={(event) => event.stopPropagation()}
                         >
-                          {messages.manager.delete}
-                        </button>
+                          <button
+                            className="button icon-button prompt-more-button"
+                            type="button"
+                            aria-label={messages.manager.moreActions(prompt.title)}
+                            aria-haspopup="menu"
+                            aria-expanded={openMenuId === prompt.id}
+                            onClick={() => setOpenMenuId(
+                              openMenuId === prompt.id ? null : prompt.id
+                            )}
+                          >
+                            ⋯
+                          </button>
+                          {openMenuId === prompt.id ? (
+                            <div className="prompt-action-menu" role="menu">
+                              {prompt.type === "group" ? (
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  onClick={() => {
+                                    setSplitConfirmId(prompt.id);
+                                    setOpenMenuId(null);
+                                  }}
+                                >
+                                  {messages.manager.splitIntoSingles}
+                                </button>
+                              ) : null}
+                              <button
+                                className="is-danger"
+                                type="button"
+                                role="menuitem"
+                                onClick={() => {
+                                  setDeleteConfirmId(prompt.id);
+                                  setOpenMenuId(null);
+                                }}
+                              >
+                                {messages.manager.delete}
+                              </button>
+                            </div>
+                          ) : null}
+                        </div>
                       </div>
                     </div>
                   )}
                 </div>
               ))}
             </div>
+            {mergeIds.length > 0 ? (
+              <div
+                className="manager-dialog-backdrop"
+                onMouseDown={(event) => {
+                  if (event.target === event.currentTarget) setMergeIds([]);
+                }}
+              >
+                <form
+                  className="manager-dialog merge-dialog"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="merge-dialog-title"
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") setMergeIds([]);
+                  }}
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    runSubmitOnce(handleCombine);
+                  }}
+                >
+                  <div>
+                    <h2 id="merge-dialog-title">{messages.manager.combineDialogTitle}</h2>
+                    <p>{messages.manager.combineDialogDescription}</p>
+                  </div>
+                  <label className="manager-dialog-field">
+                    <span>{messages.manager.groupName}</span>
+                    <input
+                      ref={mergeTitleInputRef}
+                      className="field"
+                      value={mergeTitle}
+                      onChange={(event) => setMergeTitle(event.target.value)}
+                    />
+                  </label>
+                  <div className="merge-order-section">
+                    <strong>{messages.manager.executionOrder}</strong>
+                    <div className="merge-order-list">
+                      {mergePrompts.map((prompt, index) => (
+                        <div
+                          className={`merge-order-item ${draggingMergeId === prompt.id ? "is-dragging" : ""}`}
+                          draggable
+                          key={prompt.id}
+                          onDragStart={(event) => {
+                            setDraggingMergeId(prompt.id);
+                            event.dataTransfer.effectAllowed = "move";
+                            event.dataTransfer.setData("text/plain", prompt.id);
+                          }}
+                          onDragEnd={() => setDraggingMergeId(null)}
+                          onDragOver={(event) => event.preventDefault()}
+                          onDrop={(event) => {
+                            event.preventDefault();
+                            const sourceId = draggingMergeId
+                              ?? event.dataTransfer.getData("text/plain");
+                            moveMergeItem(sourceId, prompt.id);
+                            setDraggingMergeId(null);
+                          }}
+                        >
+                          <span className="merge-order-handle" aria-hidden="true">⋮⋮</span>
+                          <span className="merge-order-number">{index + 1}</span>
+                          <span className="merge-order-copy">
+                            <strong>{prompt.title}</strong>
+                            <small>{getPromptContainerPreviewLines(prompt)[0]}</small>
+                          </span>
+                          <button
+                            className="merge-remove-button"
+                            type="button"
+                            aria-label={messages.manager.removeFromCombination(prompt.title)}
+                            onClick={() => setMergeIds((ids) =>
+                              ids.filter((id) => id !== prompt.id)
+                            )}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <label className="merge-delete-originals">
+                    <input
+                      type="checkbox"
+                      checked={deleteOriginals}
+                      onChange={(event) => setDeleteOriginals(event.target.checked)}
+                    />
+                    <span>
+                      <strong>{messages.manager.deleteOriginals(mergeIds.length)}</strong>
+                      <small>{messages.manager.deleteOriginalsDescription}</small>
+                    </span>
+                  </label>
+                  <div className="manager-dialog-actions">
+                    <button
+                      className="button button-secondary"
+                      type="button"
+                      onClick={() => setMergeIds([])}
+                    >
+                      {messages.manager.cancel}
+                    </button>
+                    <button
+                      className="button button-primary"
+                      type="submit"
+                      disabled={mergeIds.length < 2 || !mergeTitle.trim()}
+                    >
+                      {deleteOriginals
+                        ? messages.manager.createGroupAndDelete
+                        : messages.manager.createGroup}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            ) : null}
+            {splitPrompt ? (
+              <div
+                className="manager-dialog-backdrop"
+                onMouseDown={(event) => {
+                  if (event.target === event.currentTarget) setSplitConfirmId(null);
+                }}
+              >
+                <div
+                  className="manager-dialog split-dialog"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="split-dialog-title"
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") setSplitConfirmId(null);
+                  }}
+                >
+                  <div>
+                    <h2 id="split-dialog-title">{messages.manager.splitDialogTitle}</h2>
+                    <p>{messages.manager.splitDialogDescription(
+                      splitPrompt.title,
+                      getPromptContainerBodies(splitPrompt).length
+                    )}</p>
+                  </div>
+                  <div className="split-preview-list">
+                    {[...splitPrompt.prompts]
+                      .sort((a, b) => a.order - b.order)
+                      .map((entry, index) => (
+                        <div key={entry.id}>
+                          <span>{index + 1}</span>
+                          <strong>{entry.title || `${splitPrompt.title} ${index + 1}`}</strong>
+                        </div>
+                      ))}
+                  </div>
+                  <div className="manager-dialog-actions">
+                    <button
+                      className="button button-secondary"
+                      type="button"
+                      autoFocus
+                      onClick={() => setSplitConfirmId(null)}
+                    >
+                      {messages.manager.cancel}
+                    </button>
+                    <button
+                      className="button button-primary"
+                      type="button"
+                      onClick={() => runSubmitOnce(() => handleSplit(splitPrompt.id))}
+                    >
+                      {messages.manager.confirmSplit}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
           </section>
         </div>
       </div>
@@ -650,7 +1039,7 @@ export function PromptManager({
 }
 
 interface GroupFieldsProps {
-  prompts: string[];
+  prompts: DraftPrompt[];
   intervalMs: number;
   messages: Messages;
   promptRef?: (index: number, node: HTMLTextAreaElement | null) => void;
@@ -723,7 +1112,7 @@ function GroupFields({
         <span>s</span>
       </label>
       <div className="group-prompt-list">
-        {prompts.map((body, index) => (
+        {prompts.map((prompt, index) => (
           <div
             className={`group-prompt-row ${draggingIndex === index ? "is-dragging" : ""}`}
             key={index}
@@ -745,7 +1134,7 @@ function GroupFields({
               ref={(node) => promptRef?.(index, node)}
               aria-label={messages.manager.promptBody(index + 1)}
               className="field prompt-body-field"
-              value={body}
+              value={prompt.body}
               onChange={(e) => onPromptChange(index, e.target.value)}
             />
             <div className="group-prompt-actions">

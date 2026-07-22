@@ -89,20 +89,27 @@ function sortEntries(entries: PromptEntry[]): PromptEntry[] {
 function entryFromBody(
   body: string,
   order: number,
-  id = generateId("entry")
+  id = generateId("entry"),
+  title?: string
 ): PromptEntry {
   return {
     id,
+    ...(title?.trim() ? { title: title.trim() } : {}),
     body: body.trim(),
     order,
   };
 }
 
 function normalizeEntries(
-  prompts: Array<{ id?: string; body: string; order?: number }>
+  prompts: Array<{ id?: string; title?: string; body: string; order?: number }>
 ): PromptEntry[] {
   return prompts
-    .map((prompt, index) => entryFromBody(prompt.body, prompt.order ?? index, prompt.id))
+    .map((prompt, index) => entryFromBody(
+      prompt.body,
+      prompt.order ?? index,
+      prompt.id,
+      prompt.title
+    ))
     .filter((prompt) => prompt.body.length > 0)
     .sort((a, b) => a.order - b.order)
     .map((prompt, index) => ({ ...prompt, order: index }));
@@ -161,6 +168,7 @@ function containerToInput(container: PromptContainer | LegacyPromptContainer): P
     sendBehavior: normalizePromptSendBehavior(container.sendBehavior),
     prompts: sortEntries(container.prompts).map((prompt) => ({
       id: prompt.id,
+      title: prompt.title,
       body: prompt.body,
       order: prompt.order,
     })),
@@ -521,7 +529,7 @@ export function createPromptStore(adapter: StorageAdapter) {
 
     async createGroup(input: {
       title: string;
-      prompts: Array<{ body: string }>;
+      prompts: Array<{ id?: string; title?: string; body: string; order?: number }>;
       intervalMs?: number;
       sendBehavior?: PromptContainerInput["sendBehavior"];
       categoryId?: string;
@@ -558,7 +566,7 @@ export function createPromptStore(adapter: StorageAdapter) {
         title?: string;
         body?: string;
         type?: "single" | "group";
-        prompts?: Array<{ id?: string; body: string; order?: number }>;
+        prompts?: Array<{ id?: string; title?: string; body: string; order?: number }>;
         intervalMs?: number;
         sendBehavior?: PromptContainerInput["sendBehavior"];
       }
@@ -598,6 +606,127 @@ export function createPromptStore(adapter: StorageAdapter) {
         ...store,
         containers: store.containers.filter((p) => p.id !== id),
       });
+    },
+
+    async combineSingles(input: {
+      ids: string[];
+      title: string;
+      deleteOriginals: boolean;
+    }): Promise<PromptContainer> {
+      const uniqueIds = [...new Set(input.ids)];
+      if (uniqueIds.length < 2) {
+        throw new Error("Select at least two prompts");
+      }
+
+      const store = await load();
+      const byId = new Map(store.containers.map((container) => [container.id, container]));
+      const selected = uniqueIds.map((id) => byId.get(id));
+      if (selected.some((container) => !container || container.type !== "single")) {
+        throw new Error("Only single prompts can be combined");
+      }
+
+      const singles = selected as PromptContainer[];
+      const categoryId = singles[0].categoryId;
+      if (singles.some((container) => container.categoryId !== categoryId)) {
+        throw new Error("Prompts must belong to the same category");
+      }
+
+      const now = nowIso();
+      const sendBehavior = singles.every(
+        (container) => container.sendBehavior === singles[0].sendBehavior
+      ) ? singles[0].sendBehavior : "inherit";
+      const group = normalizeContainer(
+        {
+          title: input.title,
+          type: "group",
+          sendBehavior,
+          prompts: singles.map((container) => ({
+            title: container.title,
+            body: sortEntries(container.prompts)[0].body,
+          })),
+          intervalMs: DEFAULT_GROUP_INTERVAL_MS,
+          categoryId,
+        },
+        0,
+        now,
+        categoryId
+      );
+
+      const categoryContainers = sortContainers(
+        store.containers.filter((container) => container.categoryId === categoryId)
+      );
+      const selectedIdSet = new Set(uniqueIds);
+      const earliestSelectedIndex = categoryContainers.findIndex((container) =>
+        selectedIdSet.has(container.id)
+      );
+      const nextCategoryContainers = input.deleteOriginals
+        ? categoryContainers.filter((container) => !selectedIdSet.has(container.id))
+        : [...categoryContainers];
+      const insertIndex = input.deleteOriginals
+        ? Math.max(0, earliestSelectedIndex)
+        : nextCategoryContainers.length;
+      nextCategoryContainers.splice(insertIndex, 0, group);
+
+      const normalizedCategory = nextCategoryContainers.map((container, order) => ({
+        ...container,
+        order,
+        updatedAt: container.id === group.id ? container.updatedAt : now,
+      }));
+      await save({
+        ...store,
+        containers: [
+          ...store.containers.filter((container) => container.categoryId !== categoryId),
+          ...normalizedCategory,
+        ],
+      });
+      return { ...group, order: insertIndex };
+    },
+
+    async splitGroup(id: string): Promise<PromptContainer[]> {
+      const store = await load();
+      const group = store.containers.find((container) => container.id === id);
+      if (!group || group.type !== "group") {
+        throw new Error("Prompt group not found");
+      }
+
+      const now = nowIso();
+      const entries = sortEntries(group.prompts);
+      const singles = entries.map((entry, index) => normalizeContainer(
+        {
+          title: entry.title?.trim() || `${group.title} ${index + 1}`,
+          type: "single",
+          sendBehavior: group.sendBehavior,
+          prompts: [{ body: entry.body }],
+          intervalMs: DEFAULT_GROUP_INTERVAL_MS,
+          categoryId: group.categoryId,
+        },
+        0,
+        now,
+        group.categoryId
+      ));
+
+      const categoryContainers = sortContainers(
+        store.containers.filter((container) => container.categoryId === group.categoryId)
+      );
+      const groupIndex = categoryContainers.findIndex((container) => container.id === id);
+      categoryContainers.splice(groupIndex, 1, ...singles);
+      const normalizedCategory = categoryContainers.map((container, order) => ({
+        ...container,
+        order,
+        updatedAt: singles.some((single) => single.id === container.id)
+          ? container.updatedAt
+          : now,
+      }));
+      await save({
+        ...store,
+        containers: [
+          ...store.containers.filter((container) => container.categoryId !== group.categoryId),
+          ...normalizedCategory,
+        ],
+      });
+      return normalizedCategory.filter((container) =>
+        singles.some((single) => single.id === container.id)
+      );
     },
 
     async reorder(orderedIds: string[], categoryId?: string): Promise<void> {

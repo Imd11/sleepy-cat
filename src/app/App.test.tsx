@@ -1885,7 +1885,8 @@ describe("app", () => {
       },
     ]);
 
-    fireEvent.click(screen.getByRole("button", { name: "删除" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete Me 的更多操作" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "删除" }));
     fireEvent.click(screen.getByRole("button", { name: "确认" }));
 
     await waitFor(() => {

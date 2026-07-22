@@ -52,6 +52,8 @@ describe("prompt manager", () => {
       totalPromptCount: mockPrompts.length,
       onCreate: () => {},
       onCreateGroup: () => {},
+      onCombineSingles: () => {},
+      onSplitGroup: () => {},
       onUpdate: () => {},
       onDelete: () => {},
       onReorder: () => {},
@@ -493,8 +495,8 @@ describe("prompt manager", () => {
   it("asks for confirmation before delete", () => {
     renderManager();
 
-    const deleteBtn = screen.getAllByText("删除")[0];
-    fireEvent.click(deleteBtn);
+    fireEvent.click(screen.getByRole("button", { name: "Code Review 的更多操作" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "删除" }));
 
     expect(screen.getByText("删除这个提示词？")).toBeTruthy();
   });
@@ -503,10 +505,73 @@ describe("prompt manager", () => {
     let deleteId: string | null = null;
     renderManager({ onDelete: (id: string) => { deleteId = id; } });
 
-    fireEvent.click(screen.getAllByText("删除")[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Code Review 的更多操作" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "删除" }));
     fireEvent.click(screen.getByText("确认"));
 
     expect(deleteId).toBe("1");
+  });
+
+  it("uses the same four row actions for singles and groups", () => {
+    const { container } = renderManager();
+
+    const actionRows = [...container.querySelectorAll(".prompt-actions")];
+    expect(actionRows).toHaveLength(2);
+    expect(actionRows.map((row) => row.querySelectorAll("button").length)).toEqual([4, 4]);
+  });
+
+  it("combines non-adjacent single prompts with source deletion enabled by default", async () => {
+    const combineCalls: Array<{
+      ids: string[];
+      title: string;
+      deleteOriginals: boolean;
+    }> = [];
+    const singles = [
+      makePrompt({ id: "1", title: "First", order: 0 }),
+      makePrompt({ id: "2", title: "Second", order: 1 }),
+      makePrompt({ id: "3", title: "Third", order: 2 }),
+    ];
+    renderManager({
+      prompts: singles,
+      categoryCounts: { [defaultCategory.id]: singles.length },
+      totalPromptCount: singles.length,
+      onCombineSingles: (input) => { combineCalls.push(input); },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "选择" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "选择 First" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "选择 Third" }));
+    fireEvent.click(screen.getByRole("button", { name: "合并为群组" }));
+
+    await waitFor(() => {
+      expect((screen.getByDisplayValue("新提示词组") as HTMLInputElement).selectionStart).toBe(0);
+    });
+    expect((screen.getByRole("checkbox", {
+      name: /合并后删除原来的 2 个单条提示词/,
+    }) as HTMLInputElement).checked).toBe(true);
+    fireEvent.change(screen.getByDisplayValue("新提示词组"), {
+      target: { value: "Combined" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建群组并删除原提示词" }));
+
+    await waitFor(() => expect(combineCalls).toEqual([{
+      ids: ["1", "3"],
+      title: "Combined",
+      deleteOriginals: true,
+    }]));
+  });
+
+  it("splits a group from the same row menu used by single prompts", async () => {
+    const splitIds: string[] = [];
+    renderManager({ onSplitGroup: (id) => { splitIds.push(id); } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Repair Group 的更多操作" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "拆分为单条" }));
+
+    expect(screen.getByRole("dialog", { name: "拆分提示词组" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "确认拆分" }));
+
+    await waitFor(() => expect(splitIds).toEqual(["2"]));
   });
 
   it("calls reorder with new order when moving down", () => {

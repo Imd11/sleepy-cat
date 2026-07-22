@@ -789,6 +789,16 @@ export function App({
               await reloadPromptData();
               emitCalicoMotion("happy", "create-group-success", 3000);
             }}
+            onCombineSingles={async (input) => {
+              await storeRef.current.combineSingles(input);
+              await reloadPromptData();
+              emitCalicoMotion("happy", "combine-prompts-success", 3000);
+            }}
+            onSplitGroup={async (id) => {
+              await storeRef.current.splitGroup(id);
+              await reloadPromptData();
+              emitCalicoMotion("happy", "split-group-success", 3000);
+            }}
             onUpdate={async (id, input) => {
               await storeRef.current.update(id, input);
               await reloadPromptData();

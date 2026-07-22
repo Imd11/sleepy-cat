@@ -114,6 +114,85 @@ describe("prompt store", () => {
     expect(await store.list()).toHaveLength(0);
   });
 
+  it("combines non-adjacent singles in requested order and replaces their earliest position", async () => {
+    const store = createTestStore();
+    const first = await store.create({ title: "First", body: "first" });
+    const middle = await store.create({ title: "Middle", body: "middle" });
+    const last = await store.create({ title: "Last", body: "last" });
+
+    const group = await store.combineSingles({
+      ids: [last.id, first.id],
+      title: "Combined",
+      deleteOriginals: true,
+    });
+
+    expect((await store.list()).map((container) => container.title)).toEqual([
+      "Combined",
+      "Middle",
+    ]);
+    expect(group.prompts.map((entry) => [entry.title, entry.body])).toEqual([
+      ["Last", "last"],
+      ["First", "first"],
+    ]);
+    expect((await store.list()).some((container) => container.id === middle.id)).toBe(true);
+  });
+
+  it("keeps source singles and appends the combined group when requested", async () => {
+    const store = createTestStore();
+    const first = await store.create({ title: "First", body: "first" });
+    const second = await store.create({ title: "Second", body: "second" });
+
+    await store.combineSingles({
+      ids: [first.id, second.id],
+      title: "Combined",
+      deleteOriginals: false,
+    });
+
+    expect((await store.list()).map((container) => container.title)).toEqual([
+      "First",
+      "Second",
+      "Combined",
+    ]);
+  });
+
+  it("splits a group in place and restores preserved source titles", async () => {
+    const store = createTestStore();
+    await store.create({ title: "Before", body: "before" });
+    const group = await store.createGroup({
+      title: "Workflow",
+      prompts: [
+        { title: "Analyze", body: "analyze" },
+        { title: "Repair", body: "repair" },
+      ],
+    });
+    await store.create({ title: "After", body: "after" });
+
+    const singles = await store.splitGroup(group.id);
+
+    expect(singles.map((container) => container.title)).toEqual(["Analyze", "Repair"]);
+    expect((await store.list()).map((container) => container.title)).toEqual([
+      "Before",
+      "Analyze",
+      "Repair",
+      "After",
+    ]);
+  });
+
+  it("generates stable titles when splitting a legacy group without entry titles", async () => {
+    const store = createTestStore();
+    const group = await store.createGroup({
+      title: "Workflow",
+      prompts: [{ body: "one" }, { body: "two" }],
+    });
+
+    await store.splitGroup(group.id);
+
+    expect((await store.list()).map((container) => container.title)).toEqual([
+      "Workflow 1",
+      "Workflow 2",
+    ]);
+  });
+
   it("reorder persists new order", async () => {
     const store = createTestStore();
     const first = await store.create({ title: "First", body: "first" });
