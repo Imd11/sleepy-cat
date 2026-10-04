@@ -75,11 +75,13 @@ impl PromptPopoverPointerTracker {
 
     fn emit_pointer_position(&self, event: &NSEvent, inside: bool) {
         let position = if inside {
-            pointer_position_from_event(event).unwrap_or(PromptPopoverPointerPosition {
-                x: 0.0,
-                y: 0.0,
-                inside: false,
-            })
+            match pointer_position_from_event(event) {
+                // An enter/move event without a resolvable position says nothing
+                // about the pointer; emitting inside:false would fabricate a
+                // departure and let the frontend clear a still-valid hover.
+                Some(position) => position,
+                None => return,
+            }
         } else {
             PromptPopoverPointerPosition {
                 x: 0.0,

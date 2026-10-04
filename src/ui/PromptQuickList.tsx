@@ -71,6 +71,9 @@ export function PromptQuickList({
   const hoverPreviewTimerRef = useRef<number | null>(null);
   const hoverPreviewAnchorRef = useRef<HoverPreviewAnchor | null>(null);
   const livePointerPositionRef = useRef<NativePopoverPointerPosition | null>(null);
+  const domPointerPositionRef = useRef<{ x: number; y: number } | null>(null);
+  const domPointerOnItemRef = useRef(false);
+  const lastNativePositionRef = useRef<NativePopoverPointerPosition | null>(null);
   const hoveredPrompt = prompts.find((prompt) => prompt.id === hoverPreview?.promptId) ?? null;
 
   const mergedItems = useMemo(() => {
@@ -110,18 +113,42 @@ export function PromptQuickList({
 
   useEffect(() => {
     if (!nativePointerPosition) return;
+    const isReplayedObservation =
+      nativePointerPosition === lastNativePositionRef.current;
+    lastNativePositionRef.current = nativePointerPosition;
     livePointerPositionRef.current = nativePointerPosition.inside
       ? nativePointerPosition
       : null;
-    reconcilePointerPosition(nativePointerPosition);
+    reconcilePointerPosition(nativePointerPosition, true, isReplayedObservation);
   }, [nativePointerPosition, prompts]);
+
+  // The native stream reports positions asynchronously and, on data refreshes,
+  // replays its last report. Before a negative report may clear live hover
+  // state, the DOM stream must be unable to corroborate the pointer still
+  // sitting on an item at its own last-known (real) position.
+  function domStreamCorroboratesHover(): boolean {
+    if (!domPointerOnItemRef.current) return false;
+    const domPosition = domPointerPositionRef.current;
+    if (!domPosition) return false;
+    const pointedElement = document.elementFromPoint?.(
+      domPosition.x,
+      domPosition.y
+    );
+    const option = pointedElement?.closest<HTMLButtonElement>(".prompt-quick-item");
+    return Boolean(option && listRef.current?.contains(option) && !option.disabled);
+  }
 
   function reconcilePointerPosition(
     pointerPosition: NativePopoverPointerPosition,
-    showDelayedPreview = true
+    showDelayedPreview = true,
+    isReplayedObservation = false
   ) {
     if (!pointerPosition.inside) {
-      hidePromptHover();
+      // A fresh exit report is authoritative; a replayed one is history and
+      // must not override a hover that is still live at the real pointer.
+      if (!isReplayedObservation || !domStreamCorroboratesHover()) {
+        hidePromptHover();
+      }
       return;
     }
 
@@ -131,6 +158,9 @@ export function PromptQuickList({
     );
     const option = pointedElement?.closest<HTMLButtonElement>(".prompt-quick-item");
     if (!option || !listRef.current?.contains(option) || option.disabled) {
+      if (showDelayedPreview && domStreamCorroboratesHover()) {
+        return;
+      }
       hidePromptHover();
       return;
     }
@@ -249,6 +279,7 @@ export function PromptQuickList({
   }
 
   function leavePromptHover() {
+    domPointerOnItemRef.current = false;
     livePointerPositionRef.current = null;
     hidePromptHover();
   }
@@ -342,8 +373,16 @@ export function PromptQuickList({
               role="option"
               aria-selected="false"
               disabled={submittingPromptId === prompt.id}
-              onPointerEnter={() => showPromptHover(prompt)}
+              onPointerEnter={() => {
+                domPointerOnItemRef.current = true;
+                showPromptHover(prompt);
+              }}
               onPointerMove={(event) => {
+                domPointerPositionRef.current = {
+                  x: event.clientX,
+                  y: event.clientY,
+                };
+                domPointerOnItemRef.current = true;
                 livePointerPositionRef.current = {
                   x: event.clientX,
                   y: event.clientY,
