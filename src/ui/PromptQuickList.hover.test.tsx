@@ -296,7 +296,7 @@ describe("PromptQuickList hover stability (acceptance)", () => {
     });
     try {
       const { rerender } = renderQuickList();
-      const option = hoverFirstOption();
+      hoverFirstOption();
       revealTooltip();
 
       // The refresh deletes the hovered entry: its element is gone, so the
