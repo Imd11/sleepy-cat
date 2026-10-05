@@ -278,7 +278,16 @@ export function PromptQuickList({
     hideHoverPreview();
   }
 
-  function leavePromptHover() {
+  function leavePromptHover(prompt: PromptContainer, target: HTMLElement) {
+    // Native tracking can advance to a new row before the non-activating
+    // WebView updates its DOM hover target. A delayed leave/cancel for that
+    // older row must not clear the hover now owned by a different row.
+    const anchor = hoverPreviewAnchorRef.current;
+    const ownsHover = anchor
+      ? anchor.target === target
+      : hoveredPromptId === prompt.id;
+    if (!ownsHover) return;
+
     domPointerOnItemRef.current = false;
     livePointerPositionRef.current = null;
     hidePromptHover();
@@ -391,8 +400,8 @@ export function PromptQuickList({
                 setHoveredPromptId(prompt.id);
                 scheduleHoverPreview(prompt, event.currentTarget);
               }}
-              onPointerLeave={leavePromptHover}
-              onPointerCancel={leavePromptHover}
+              onPointerLeave={(event) => leavePromptHover(prompt, event.currentTarget)}
+              onPointerCancel={(event) => leavePromptHover(prompt, event.currentTarget)}
               onFocus={() => reportGroupPreview(prompt)}
               onBlur={hideHoverPreview}
               onClick={() => selectPrompt(prompt)}

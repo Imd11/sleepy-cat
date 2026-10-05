@@ -335,4 +335,103 @@ describe("PromptQuickList hover stability (acceptance)", () => {
     revealTooltip();
     expect(screen.getByRole("tooltip")).toBeTruthy();
   });
+
+  it.each([0, 1])("keeps native-established hover on option %i when another option receives a delayed DOM leave", (activeIndex) => {
+    vi.useFakeTimers();
+    const { rerender } = renderQuickList();
+    const options = screen.getAllByRole("option");
+    const active = options[activeIndex];
+    const previous = options[1 - activeIndex];
+    const cleanup = mockElementFromPoint(() => active);
+    try {
+      // The non-activating WebView can retain an older DOM hover target
+      // while native tracking already points to a different row. No DOM
+      // pointermove is delivered, matching the captured field trace.
+      fireEvent.pointerEnter(previous);
+      rerender(<PromptQuickList {...baseProps({
+        nativePointerPosition: { x: 85.738, y: 254.160, inside: true },
+      })} />);
+      revealTooltip();
+      act(() => vi.advanceTimersByTime(204));
+
+      fireEvent.pointerLeave(previous, { clientX: 64, clientY: 345 });
+
+      // Waiting without another native report must retain the same preview.
+      act(() => vi.advanceTimersByTime(5000));
+      expect(screen.getByRole("tooltip").textContent).toContain(prompts[activeIndex].prompts[0].body);
+      expect(active.classList.contains("is-hovered")).toBe(true);
+
+      // Leaving the row that actually owns the hover still clears immediately.
+      fireEvent.pointerLeave(active);
+      expect(screen.queryByRole("tooltip")).toBeNull();
+      expect(active.classList.contains("is-hovered")).toBe(false);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("does not cancel the native preview countdown when a different DOM row leaves", () => {
+    vi.useFakeTimers();
+    const { rerender } = renderQuickList();
+    const [previous, active] = screen.getAllByRole("option");
+    const cleanup = mockElementFromPoint(() => active);
+    try {
+      fireEvent.pointerEnter(previous);
+      rerender(<PromptQuickList {...baseProps({
+        nativePointerPosition: { x: 85, y: 254, inside: true },
+      })} />);
+      act(() => vi.advanceTimersByTime(1400));
+      fireEvent.pointerLeave(previous);
+      act(() => vi.advanceTimersByTime(100));
+      expect(screen.getByRole("tooltip").textContent).toContain(prompts[1].prompts[0].body);
+      expect(active.classList.contains("is-hovered")).toBe(true);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("limits DOM pointer cancellation to the row that owns the current hover", () => {
+    vi.useFakeTimers();
+    const { rerender } = renderQuickList();
+    const [previous, active] = screen.getAllByRole("option");
+    const cleanup = mockElementFromPoint(() => active);
+    try {
+      rerender(<PromptQuickList {...baseProps({
+        nativePointerPosition: { x: 85, y: 254, inside: true },
+      })} />);
+      revealTooltip();
+      fireEvent.pointerCancel(previous);
+      expect(screen.getByRole("tooltip")).toBeTruthy();
+      expect(active.classList.contains("is-hovered")).toBe(true);
+
+      fireEvent.pointerCancel(active);
+      expect(screen.queryByRole("tooltip")).toBeNull();
+      expect(active.classList.contains("is-hovered")).toBe(false);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("still clears the owning row's highlight after scrolling has removed the preview anchor", () => {
+    vi.useFakeTimers();
+    const { rerender } = renderQuickList();
+    const [previous, active] = screen.getAllByRole("option");
+    const cleanup = mockElementFromPoint(() => active);
+    try {
+      rerender(<PromptQuickList {...baseProps({
+        nativePointerPosition: { x: 85, y: 254, inside: true },
+      })} />);
+      revealTooltip();
+      fireEvent.scroll(screen.getByRole("listbox"));
+      expect(screen.queryByRole("tooltip")).toBeNull();
+      expect(active.classList.contains("is-hovered")).toBe(true);
+
+      fireEvent.pointerLeave(previous);
+      expect(active.classList.contains("is-hovered")).toBe(true);
+      fireEvent.pointerLeave(active);
+      expect(active.classList.contains("is-hovered")).toBe(false);
+    } finally {
+      cleanup();
+    }
+  });
 });
