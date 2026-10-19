@@ -1,12 +1,12 @@
 {
-  "version": 3,
+  "version": 4,
   "categories": [
     {
       "id": "category-default",
-      "name": "开发工作流",
+      "name": "开发",
       "order": 0,
       "createdAt": "2026-07-05T00:59:37.043Z",
-      "updatedAt": "2026-07-05T06:35:23.512Z"
+      "updatedAt": "2026-08-04T06:21:58.840Z"
     },
     {
       "id": "category-1783233257563-8e6yioa",
@@ -14,14 +14,533 @@
       "order": 1,
       "createdAt": "2026-07-05T06:34:17.563Z",
       "updatedAt": "2026-07-05T06:34:17.563Z"
+    },
+    {
+      "id": "category-1783331794351-usfg8m6",
+      "name": "自由",
+      "order": 2,
+      "createdAt": "2026-07-06T09:56:34.350Z",
+      "updatedAt": "2026-07-06T09:56:34.350Z"
+    },
+    {
+      "id": "category-1785824545197-4cfzwvi",
+      "name": "讨论",
+      "order": 3,
+      "createdAt": "2026-08-04T06:22:25.197Z",
+      "updatedAt": "2026-08-04T06:22:25.197Z"
     }
   ],
   "containers": [
+    {
+      "id": "container-1784556893038-phzhej9",
+      "categoryId": "category-1783233257563-8e6yioa",
+      "title": "简要本地打包",
+      "type": "single",
+      "sendBehavior": "inherit",
+      "prompts": [
+        {
+          "id": "entry-1784556893038-4jb1ov8",
+          "body": "帮我打包 macOS 版本的 App 和 CLI。App 不需要签名、公证，只用于本地测试；两者都不需要上传 R2。\n\n注意：\n1、遵循 SemVer。每次打包必须用新的版本号，不得复用任何已构建过的版本号。按自上次构建以来的变更类型选 PATCH / MINOR / MAJOR；App 与 CLI 版本号必须完全一致。\n2、App 必须使用正确的 icon.icon → Xcode 26 actool → Assets.car 图标打包路径。打包命令需要在非沙箱环境执行；如果遇到权限限制，应申请权限，不能回退使用旧的 icon.icns。完成后确认 App 内包含 Assets.car。\n3、完成后告知我 App 和 CLI 的版本号及本地产物绝对路径。",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 0,
+      "createdAt": "2026-07-20T14:14:53.038Z",
+      "updatedAt": "2026-08-05T07:32:08.788Z"
+    },
+    {
+      "id": "container-1785170240233-rm9vdg0",
+      "categoryId": "category-1783331794351-usfg8m6",
+      "title": "问题根因的陪审团",
+      "type": "single",
+      "sendBehavior": "inherit",
+      "prompts": [
+        {
+          "id": "entry-1785170240233-u9b5w2k",
+          "body": "你分析一下，你找到的这个根本原因它是纯纯的一个错误，还是说它是有其他的价值呢？因为你还需要考虑一个事情：任何任何事物都不会凭空存在，都会有它存在的意义和价值。所以请你分析这个根本原因：它当初出现时曾带来过哪些正向作用，如今在其他地方又是否仍然发挥着某种功能或意义。如果说我们把这个根本原因把它解决掉，它会不会影响其他功能的正常进行？请你帮我详细分析一下。",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 0,
+      "createdAt": "2026-07-27T16:37:20.232Z",
+      "updatedAt": "2026-08-11T12:25:26.460Z"
+    },
+    {
+      "id": "container-1785824633605-it3vuw0",
+      "categoryId": "category-1785824545197-4cfzwvi",
+      "title": "分析根因",
+      "type": "single",
+      "sendBehavior": "inherit",
+      "prompts": [
+        {
+          "id": "entry-1785824633605-qbuj3cx",
+          "body": "请你深入分析问题的根本原因，先不要修改代码",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 0,
+      "createdAt": "2026-08-04T06:23:53.605Z",
+      "updatedAt": "2026-10-04T03:33:35.334Z"
+    },
+    {
+      "id": "container-1784902310306-dwubu4d",
+      "categoryId": "category-default",
+      "title": "让其他 AI 执行",
+      "type": "single",
+      "sendBehavior": "inherit",
+      "prompts": [
+        {
+          "id": "entry-1784902310306-y4s0qtq",
+          "body": "现在我要让其他 AI 来执行你已确认的计划。请生成一段执行提示词，引导其他 AI 严格按计划执行，不要重写或扩展计划，并在提示词中写明该计划文件的本地绝对路径。下面的内容也要写在提示词里：\n使用~/.agents/skills中的Superpower executing-plans skill，按计划分批执行，一直到完成所有任务计划。\n注意：\n1、在分批执行进行编程的时候，严格遵循 karpathy-guidelines skill 中所定义的全部编码规范和行为准则。\n2、完成前使用 verification-before-completion skill，完成前做验证。\n3、执行完所有计划后，推送到GitHub的main\n4、最后站在用户的视角，你汇报一下现在用户看到的效果应该是怎么样的",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 0,
+      "createdAt": "2026-07-24T14:11:50.306Z",
+      "updatedAt": "2026-10-04T04:52:53.936Z"
+    },
+    {
+      "id": "container-1785045297545-q91yc4g",
+      "categoryId": "category-1783233257563-8e6yioa",
+      "title": "Octarca Mac打包发布",
+      "type": "single",
+      "sendBehavior": "inherit",
+      "prompts": [
+        {
+          "id": "entry-1785045297545-5kintwe",
+          "body": "1、请帮我重新发布 Octarca Mac 客户端：打包、签名、公证、staple，并上传 R2 文件，确保落地页下载链接的Mac用户能下载到最新版本。\n2、打包、签名、公证、staple 和上传命令必须在非沙箱环境执行；遇到权限或网络限制时应申请授权，不能回退到旧构建方式，不能把沙箱错误误判为本机或 Apple 服务故障，也不能回退使用旧的 icon.icns。完成后确认 App 内包含 Assets.car。\n3、最后请分别确认：\n- Mac 用户从落地页下载到的是最新客户端；\n- 客户端 App 包里面必须已经内置最新 CLI。也就是说，用户只下载并打开最新客户端 App，不需要单独安装 CLI，App 就应该能把自带的最新 CLI 准备好并使用。\n- 单独安装 CLI 的用户拿到的也是最新 CLI。\n\n另：遵循 SemVer。每次打包必须用新的版本号，不得复用任何已构建过的版本号。按自上次构建以来的变更类型选 PATCH / MINOR / MAJOR；App 与 CLI 版本号必须完全一致。\n\n密钥ID：FFH8KPHXPV\nIssuer ID：2dde16d0-602e-4658-af15-e9637857d5b5\n下载的.p8 文件在：/Users/yang/Desktop/MacOS/AuthKey_FFH8KPHXPV.p8\n\nR2:\n访问密钥 ID：\nb40425803811f1d84c2f668871ead013\n\n机密访问密钥：\n63c227916ebe40c9f85e706061227df353e470251d1ff9afa7a37241c5986765\n\n为 S3 客户端使用管辖权地特定的终结点：\nhttps://d9bca16a6d7c2444cba2e19aab0a0cb3.r2.cloudflarestorage.com",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 1,
+      "createdAt": "2026-07-26T05:54:57.545Z",
+      "updatedAt": "2026-08-06T13:56:49.850Z"
+    },
+    {
+      "id": "container-1785673088314-mentnbq",
+      "categoryId": "category-1783331794351-usfg8m6",
+      "title": "问题解决方案",
+      "type": "single",
+      "sendBehavior": "inherit",
+      "prompts": [
+        {
+          "id": "entry-1785673088312-rvw6glq",
+          "body": "请你基于分析出来的问题的根本原因和分析，给出你的解决方案。你要注意这个解决方案不能影响其他功能的正常进行，必须是一个帕累托改进。请你给出你完整的方案，先不要修改代码",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 1,
+      "createdAt": "2026-08-02T12:18:08.312Z",
+      "updatedAt": "2026-08-02T12:18:30.115Z"
+    },
+    {
+      "id": "container-1785824656496-upb2ioi",
+      "categoryId": "category-1785824545197-4cfzwvi",
+      "title": "评价初析",
+      "type": "single",
+      "sendBehavior": "paste_only",
+      "prompts": [
+        {
+          "id": "entry-1785824656496-kymgzw8",
+          "body": "下面的内容是其他 AI 给出的问题的分析，你觉得它分析的怎么样？————————",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 1,
+      "createdAt": "2026-08-04T06:24:16.496Z",
+      "updatedAt": "2026-10-04T03:33:35.334Z"
+    },
+    {
+      "id": "container-1784903788343-0zloo3g",
+      "categoryId": "category-default",
+      "title": "邀请原AI审阅",
+      "type": "single",
+      "sendBehavior": "inherit",
+      "prompts": [
+        {
+          "id": "entry-1784903788343-nty8obx",
+          "body": "你完成工作后,帮我写一段提示词,用我的口吻,我准备转发给当初制定这个计划的那位 AI,请它审阅你的执行是否到位。提示词里要写明本次执行的计划文件本地绝对路径,并附上你的工作汇报,方便对方了解你实际做了什么。请直接输出提示词正文,不要加额外说明,我要原样转发。提示词结构如下(把路径和工作汇报填进对应位置):\n\n其他AI 已经按你制定并经确认的计划完成了执行(计划文档:「在此填入计划文档的绝对路径」),下面是它的工作汇报:\n「在此填入工作汇报:本次实际做了什么」\n请你基于最终计划和当前代码状态进行审阅，不要重写方案，不要修改代码，重点检查是否严格按计划完成、是否引入偏离计划的改动、是否存在隐藏风险、遗漏步骤、过度实现或破坏性修改，并给出是否可以验收的初步结论：通过 / 需修复 / 不通过，并列出修复建议。（我是多个任务同时进行的，你只需要考虑我们当前的这个任务计划有没有完整实施好就行了）",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 1,
+      "createdAt": "2026-07-24T14:36:28.343Z",
+      "updatedAt": "2026-10-04T04:52:53.936Z"
+    },
+    {
+      "id": "container-1783233353983-pgq01m6",
+      "categoryId": "category-1783233257563-8e6yioa",
+      "title": "Octarca Mac&Win打包发布",
+      "type": "single",
+      "sendBehavior": "inherit",
+      "prompts": [
+        {
+          "id": "entry-1783233353983-3bfn0yv",
+          "body": "1、请帮我重新发布 Octarca Mac 客户端：打包、签名、公证、staple，并上传 R2 文件，确保落地页下载链接的Mac用户能下载到最新版本。\n2、打包、签名、公证、staple 和上传命令必须在非沙箱环境执行；遇到权限或网络限制时应申请授权，不能回退到旧构建方式，不能把沙箱错误误判为本机或 Apple 服务故障，也不能回退使用旧的 icon.icns。完成后确认 App 内包含 Assets.car。\n3、重新打包 Windows 版本的，也要上传到 R2。并上传 R2 文件，确保落地页下载链接的Windows用户能下载到最新版本\n4、最后请分别确认：\n- Mac 用户从落地页下载到的是最新客户端；\n- Windows 用户从落地页下载到的是最新客户端；\n- 客户端 App 包里面必须已经内置最新 CLI。也就是说，用户只下载并打开最新客户端 App，不需要单独安装 CLI，App 就应该能把自带的最新 CLI 准备好并使用。\n- 单独安装 CLI 的用户拿到的也是最新 CLI。\n\n另：遵循 SemVer。每次打包必须用新的版本号，不得复用任何已构建过的版本号。按自上次构建以来的变更类型选 PATCH / MINOR / MAJOR；App 与 CLI 版本号必须完全一致。\n\n密钥ID：FFH8KPHXPV\nIssuer ID：2dde16d0-602e-4658-af15-e9637857d5b5\n下载的.p8 文件在：/Users/yang/Desktop/MacOS/AuthKey_FFH8KPHXPV.p8\n\nR2:\n访问密钥 ID：\nb40425803811f1d84c2f668871ead013\n\n机密访问密钥：\n63c227916ebe40c9f85e706061227df353e470251d1ff9afa7a37241c5986765\n\n为 S3 客户端使用管辖权地特定的终结点：\nhttps://d9bca16a6d7c2444cba2e19aab0a0cb3.r2.cloudflarestorage.com",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 2,
+      "createdAt": "2026-07-05T06:35:53.983Z",
+      "updatedAt": "2026-08-06T13:57:06.053Z"
+    },
+    {
+      "id": "container-1785593923176-7gvcwuz",
+      "categoryId": "category-1783331794351-usfg8m6",
+      "title": "本地main&GitHub",
+      "type": "single",
+      "sendBehavior": "inherit",
+      "prompts": [
+        {
+          "id": "entry-1785593923176-7kljd8u",
+          "body": "你是在本地main修改的吗？推送到GitHub了吗？本地main和GitHub是对齐的吗？",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 2,
+      "createdAt": "2026-08-01T14:18:43.175Z",
+      "updatedAt": "2026-08-02T12:18:30.115Z"
+    },
+    {
+      "id": "container-1785824678562-vzwtoun",
+      "categoryId": "category-1785824545197-4cfzwvi",
+      "title": "回应评价",
+      "type": "single",
+      "sendBehavior": "paste_only",
+      "prompts": [
+        {
+          "id": "entry-1785824678562-6p03f78",
+          "body": "下面的内容是其他 AI 对于你分析的问题的根本原因的评价，你觉得怎么样？——————",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 2,
+      "createdAt": "2026-08-04T06:24:38.562Z",
+      "updatedAt": "2026-10-04T03:33:35.334Z"
+    },
+    {
+      "id": "container-1783066631622-jad31ag",
+      "categoryId": "category-default",
+      "title": "用户视角效果评估",
+      "type": "single",
+      "sendBehavior": "inherit",
+      "prompts": [
+        {
+          "id": "entry-1783066631622-mfrwb0g",
+          "body": "请你深入理解代码，然后用自然语言描述一下，如果按照这个计划执行，最终的效果是怎样的？是否符合我们之前的讨论？能否解决我之前遇到的问题bug？站在用户的视角来回答我，必要时画文本线框图来解释。",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 2,
+      "createdAt": "2026-07-03T08:17:11.622Z",
+      "updatedAt": "2026-10-04T04:52:53.936Z"
+    },
+    {
+      "id": "container-1783233377578-gmwt6dl",
+      "categoryId": "category-1783233257563-8e6yioa",
+      "title": "GitHub Release 发布",
+      "type": "single",
+      "sendBehavior": "inherit",
+      "prompts": [
+        {
+          "id": "entry-1783233377577-q0vkl7r",
+          "body": "帮我重新打包 APP，分别打包 Mac 版本（注意要签名、公证、staple）和 Windows 版本。然后上传到GitHub仓库里，注意要打一个标签。实现用户可以通过GitHub直接下载。如果现在GitHub仓库里已经有了Release，注意进行语义化版本控制。遵循 SemVer。每次打包必须用新的版本号，不得复用任何已构建过的版本号。按自上次构建以来的变更类型选 PATCH / MINOR / MAJOR。\n\nMac密钥ID：FFH8KPHXPV\nIssuer ID：2dde16d0-602e-4658-af15-e9637857d5b5\n下载的.p8 文件在：/Users/yang/Desktop/MacOS/AuthKey_FFH8KPHXPV.p8",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 3,
+      "createdAt": "2026-07-05T06:36:17.577Z",
+      "updatedAt": "2026-08-05T07:34:02.357Z"
+    },
+    {
+      "id": "container-1785824705873-ecm17x5",
+      "categoryId": "category-1785824545197-4cfzwvi",
+      "title": "修正根因",
+      "type": "single",
+      "sendBehavior": "inherit",
+      "prompts": [
+        {
+          "id": "entry-1785824705873-464jz3u",
+          "body": "基于上面的分析和讨论，请你给出你最终的问题的根本原因的分析。先不要修改代码",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 3,
+      "createdAt": "2026-08-04T06:25:05.873Z",
+      "updatedAt": "2026-10-04T03:33:35.334Z"
+    },
+    {
+      "id": "container-1783066643030-36i5hxl",
+      "categoryId": "category-default",
+      "title": "执行前风险评估",
+      "type": "single",
+      "sendBehavior": "inherit",
+      "prompts": [
+        {
+          "id": "entry-1783066643030-n1dd81n",
+          "body": "请你深入理解代码，系统评估分析这个方案计划是否有一般人注意不到的潜在风险？是否会破坏影响其他功能的正常运行？是否是一种帕累托改进？最后基于这些分析，给出最终结论，是否可以直接进入到下一步来执行这个计划？\n\n如果有问题的话，帮我修订这个计划；如果没问题的话，等候我的下一步指令",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 3,
+      "createdAt": "2026-07-03T08:17:23.030Z",
+      "updatedAt": "2026-10-04T04:52:53.936Z"
+    },
+    {
+      "id": "container-1785827906226-dbe926z",
+      "categoryId": "category-1783233257563-8e6yioa",
+      "title": "Mac本地打包（签名）",
+      "type": "single",
+      "sendBehavior": "inherit",
+      "prompts": [
+        {
+          "id": "entry-1785827906226-a1zgy2y",
+          "body": "帮我重新打包 APP，在本地，打包 Mac 版本（注意要签名、公证、staple）。遵循 SemVer。每次打包必须用新的版本号，不得复用任何已构建过的版本号。按自上次构建以来的变更类型选 PATCH / MINOR / MAJOR。\n\nMac密钥ID：FFH8KPHXPV\nIssuer ID：2dde16d0-602e-4658-af15-e9637857d5b5\n下载的.p8 文件在：/Users/yang/Desktop/MacOS/AuthKey_FFH8KPHXPV.p8",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 4,
+      "createdAt": "2026-08-04T07:18:26.226Z",
+      "updatedAt": "2026-08-05T07:33:50.872Z"
+    },
+    {
+      "id": "container-1785911085228-b2hxaoh",
+      "categoryId": "category-1783331794351-usfg8m6",
+      "title": "润色提示词",
+      "type": "single",
+      "sendBehavior": "paste_only",
+      "prompts": [
+        {
+          "id": "entry-1785911085228-mlkylt8",
+          "body": "你的任务是帮我润色提示词,不用执行它们。润色时结合项目的真实情况,修掉不通顺、歧义或表达不当的地方;但不要过度堆砌结构,不用强行加分节、标题或模板框。下面是要润色的提示词:——————————-",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 4,
+      "createdAt": "2026-08-05T06:24:45.228Z",
+      "updatedAt": "2026-08-06T15:05:46.558Z"
+    },
+    {
+      "id": "container-1785828061141-zketr3x",
+      "categoryId": "category-1785824545197-4cfzwvi",
+      "title": "评价最终根因",
+      "type": "single",
+      "sendBehavior": "paste_only",
+      "prompts": [
+        {
+          "id": "entry-1785828061141-cpshnn0",
+          "body": "下面的内容是其他 AI 给出的最终的问题的根本原因分析，你觉得它分析的怎么样？——————————",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 4,
+      "createdAt": "2026-08-04T07:21:01.141Z",
+      "updatedAt": "2026-10-04T03:33:35.334Z"
+    },
+    {
+      "id": "container-1784555826968-595k9k9",
+      "categoryId": "category-default",
+      "title": "修复&执行（简化）",
+      "type": "single",
+      "sendBehavior": "inherit",
+      "prompts": [
+        {
+          "id": "entry-1784555826967-shbqp65",
+          "body": "帮我完成这次修复/执行,注意不要影响其他功能正常运行,并且要在本地 main 分支上改代码。不需要打包App也不需要做 App 真机人工视觉验收,改完代码我自己测。改完后检查一下有没有影响其他功能;没问题的话,帮我推送到 GitHub。",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 4,
+      "createdAt": "2026-07-20T13:57:06.966Z",
+      "updatedAt": "2026-10-04T04:52:53.936Z"
+    },
+    {
+      "id": "container-1786356127533-oetjh5a",
+      "categoryId": "category-1783331794351-usfg8m6",
+      "title": "社交媒体发表",
+      "type": "single",
+      "sendBehavior": "paste_only",
+      "prompts": [
+        {
+          "id": "entry-1786356127533-50btq8h",
+          "body": "根据我提供的 Reddit 帖子链接或截图，以及我想表达的内容，写一条自然、简洁的英文评论。理解帖子语境并准确保留我的原意，不要逐字翻译，不要有翻译腔或 AI 味。最后附上中文翻译。————————",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 5,
+      "createdAt": "2026-08-10T10:02:07.532Z",
+      "updatedAt": "2026-08-10T10:02:11.507Z"
+    },
+    {
+      "id": "container-1791089559063-fz7nzye",
+      "categoryId": "category-default",
+      "title": "执行",
+      "type": "single",
+      "sendBehavior": "inherit",
+      "prompts": [
+        {
+          "id": "entry-1791089559062-1bxzaec",
+          "body": "帮我完成这次修复/执行,注意不要影响其他功能正常运行。改完后检查一下有没有影响其他功能;没问题的话,帮我推送到 GitHub。",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 5,
+      "createdAt": "2026-10-04T04:52:39.062Z",
+      "updatedAt": "2026-10-04T04:53:09.099Z"
+    },
+    {
+      "id": "container-1787058047638-kvctqt7",
+      "categoryId": "category-1783331794351-usfg8m6",
+      "title": "工作交接",
+      "type": "single",
+      "sendBehavior": "inherit",
+      "prompts": [
+        {
+          "id": "entry-1787058047638-kqbqnp4",
+          "body": "本次对话的上下文已经太长了，我打算关掉并重新开一个新的会话。你有什么想对你的继任者说的，以便它能更好的理解你当前的工作并顺利继续？",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 6,
+      "createdAt": "2026-08-18T13:00:47.637Z",
+      "updatedAt": "2026-08-18T13:00:47.637Z"
+    },
+    {
+      "id": "container-1791084807673-pwytm7j",
+      "categoryId": "category-1785824545197-4cfzwvi",
+      "title": "讨论最佳体验",
+      "type": "single",
+      "sendBehavior": "inherit",
+      "prompts": [
+        {
+          "id": "entry-1791084807673-jbmu9p7",
+          "body": "你知道我想实现什么样的效果吗？站在用户的角度最合理、最符合行业内最佳实践的体验是什么样的？",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 6,
+      "createdAt": "2026-10-04T03:33:27.673Z",
+      "updatedAt": "2026-10-04T03:33:35.334Z"
+    },
+    {
+      "id": "container-1784656104897-76b2wra",
+      "categoryId": "category-default",
+      "title": "审阅（简化）",
+      "type": "single",
+      "sendBehavior": "inherit",
+      "prompts": [
+        {
+          "id": "entry-1784656104897-hzs1wni",
+          "body": "请你基于最终的方案计划和当前代码状态进行审阅，检查一下有没有修复完成，有没有影响其他功能的正常运行？重点检查是否严格按方案完成、是否引入偏离计划的改动、是否存在隐藏风险、遗漏步骤、过度实现或破坏性修改，并给出是否可以验收的初步结论：通过 / 需修复 / 不通过，并列出修复建议",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 6,
+      "createdAt": "2026-07-21T17:48:24.896Z",
+      "updatedAt": "2026-10-04T04:52:53.936Z"
+    },
+    {
+      "id": "container-1787220141806-ohl7tzm",
+      "categoryId": "category-1783331794351-usfg8m6",
+      "title": "新开窗口",
+      "type": "single",
+      "sendBehavior": "inherit",
+      "prompts": [
+        {
+          "id": "entry-1787220141806-9sovagr",
+          "body": "这个是我的项目。/Users/yang/Desktop/GitHub-pre/IMD\n另外我跟你说一下我们的情况。我的数据库在Supabase（（你注意，项目用的supabase是另一个账号，不是cli登录的账号，所以你需要用下面的信息帮我操作而不是通过API）），前端是Vercel（绑定域名配置为：www.octarca.com）。用的登录系统是\n  supabase（已经和谷歌授权连接成功）。域名是在Cloudflare里面保管着。现在推送到GitHub之后，会自动部署到vercel和railway。\n  \n  /Users/yang/Desktop/GitHub/imdcode 这个是我的CLI，是和IMD这个客户端App搭配使用的。这个CLI是通过/Users/yang/Desktop/GitHub/claude-code-leak-main 改造而成的。我的IMD CLI安装脚本托管在 Cloudflare Workers 静态资产中，平台二进制托管在 Cloudflare R2 中，脚本会根据操作系统和架构自动下载对应安装包。\n  \n另外我还有一个IMD MCP，这个通过跟随/Users/yang/Desktop/GitHub-pre/IMD推送到GitHub然后把MCP服务器自动部署在railway。还有一个CLI的模型管理在railway上，和MCP在一个Project里的两个容器里\n这个是打包的App文件：/Users/yang/Desktop/GitHub-pre/IMD/frontend/electron-shell/release/0.1.0/mac-arm64/IMD.app\n\n这是和项目相关的一些调研资料和我自己的想法：/Users/yang/Desktop/PersonalWiki/01_raw/06_项目资料/IMD\n项目目录 /Users/yang/Desktop/GitHub-pre/IMD 里面还有一些文档（md、word、pdf），你也读一下，方便你更好理解我们这个项目\n————————————\nSupabase的一些信息（你注意，项目用的supabase是另一个账号，不是cli登录的账号，所以你需要用下面的信息帮我操作而不是通过API）：\nDatabase secret：\n40116491yang11\n\nanon public key ：\neyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJtamFlaXJnanlseWh1eW9mcHRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1Mjg3NjAsImV4cCI6MjA5MjEwNDc2MH0.QnG_8xUbVKJXRwbi-NZSfzPHlkKixyLmO5p8AJGFA0Y\n\nservice_role key：\neyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJtamFlaXJnanlseWh1eW9mcHRmIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NjUyODc2MCwiZXhwIjoyMDkyMTA0NzYwfQ.djvMiJRHfq_iJNQs6ACue1Pfy6LYZlP3BBmCPLREC_Y\n\nData API URL（SUPABASE_URL）：\nhttps://rmjaeirgjylyhuyofptf.supabase.co\n\nPublishable key：\nsb_publishable_-iWQs0BSWQSaYn-L6ypxPg_m08bl8Ng\n\nSecret keys：\nsb_secret_hWaSEBzuhseJEbikx3HKnQ_QEtop6-q\n\nR2:\n访问密钥 ID：\nb40425803811f1d84c2f668871ead013\n\n机密访问密钥：\n63c227916ebe40c9f85e706061227df353e470251d1ff9afa7a37241c5986765\n\n为 S3 客户端使用管辖权地特定的终结点：\nhttps://d9bca16a6d7c2444cba2e19aab0a0cb3.r2.cloudflarestorage.com\n——————————\n\n关于用户的登录管理，我的要求是cli、客户端app、落地页登录，用一套管理系统。\n关于CLI的模型选择，我最终想实现的是我可以自己来控制上游的模型，同时下游的模型用户通过斜杠命令/model可以切模型，这个在Railway里面应该已经实现了一部分了。关于CLI模型的管理等你可以参考/Users/yang/Desktop/GitHub-pre/anthropic-compatible-new-api-gateway\n\n我已经让其他AI之前工作过一些，这是交接文档：'/Users/yang/Desktop/GitHub-pre/IMD/IMD 项目交接文档.md'\n\n另外你要注意一下，我我们的产品名称从 IMD 换成了Octarca，你知道一下就行\n你先读一遍代码、熟悉一些整个项目系统和我上面说的，稍后我们开始正式工作",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 7,
+      "createdAt": "2026-08-20T10:02:21.805Z",
+      "updatedAt": "2026-08-20T10:02:21.805Z"
+    },
+    {
+      "id": "container-1785767647398-84t1mny",
+      "categoryId": "category-default",
+      "title": "审阅后的修复（简化）",
+      "type": "single",
+      "sendBehavior": "inherit",
+      "prompts": [
+        {
+          "id": "entry-1785767647397-3hayhf0",
+          "body": "如果有问题的话，帮我完成修复，注意不要影响其他功能的正常进行。改完之后检查一下有没有影响其他功能的正常进行。没问题的话，帮我推送到 GitHub；\n如果没问题的话，等候我的下一步指令",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 7,
+      "createdAt": "2026-08-03T14:34:07.397Z",
+      "updatedAt": "2026-10-04T04:52:53.936Z"
+    },
+    {
+      "id": "container-1787409295642-bt2vyyl",
+      "categoryId": "category-1783331794351-usfg8m6",
+      "title": "测试数据动作",
+      "type": "single",
+      "sendBehavior": "inherit",
+      "prompts": [
+        {
+          "id": "entry-1787409295642-a2xml88",
+          "body": "你看一下我刚刚测试了哪个数据动作，然后再看一下这个数据动作的测试情况，看一下它的日志之类的，然后看看有没有成功，有没有哪些暴露出来的问题，进行详细分析一下",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 8,
+      "createdAt": "2026-08-22T14:34:55.641Z",
+      "updatedAt": "2026-08-22T14:34:55.641Z"
+    },
+    {
+      "id": "container-1785827994252-toagro7",
+      "categoryId": "category-1785824545197-4cfzwvi",
+      "title": "制定方案",
+      "type": "single",
+      "sendBehavior": "inherit",
+      "prompts": [
+        {
+          "id": "entry-1785827994252-uh1uori",
+          "body": "请你基于我们过去的分析和讨论，给出你最终的方案。你要注意这个解决方案不能影响其他功能的正常进行，必须是一个帕累托改进。请你给出你完整的方案，先不要修改代码",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 8,
+      "createdAt": "2026-08-04T07:19:54.252Z",
+      "updatedAt": "2026-10-11T05:10:44.756Z"
+    },
     {
       "id": "prompt-1779776521979-3umga02",
       "categoryId": "category-default",
       "title": "方案讨论",
       "type": "single",
+      "sendBehavior": "inherit",
       "prompts": [
         {
           "id": "prompt-1779776521979-3umga02-entry",
@@ -30,32 +549,52 @@
         }
       ],
       "intervalMs": 700,
-      "order": 0,
+      "order": 8,
       "createdAt": "2026-05-26T06:22:01.979Z",
-      "updatedAt": "2026-07-04T18:48:10.896Z"
+      "updatedAt": "2026-10-04T04:52:53.936Z"
     },
     {
-      "id": "container-1783233353983-pgq01m6",
-      "categoryId": "category-1783233257563-8e6yioa",
-      "title": "R2 发布打包",
+      "id": "container-1788312108902-y44yq20",
+      "categoryId": "category-1783331794351-usfg8m6",
+      "title": "AI界的请神上身",
       "type": "single",
+      "sendBehavior": "inherit",
       "prompts": [
         {
-          "id": "entry-1783233353983-3bfn0yv",
-          "body": "1、请帮我重新发布 IMD Mac 客户端：打包、签名、公证、staple，并上传 R2 文件，确保落地页下载链接的Mac用户能下载到最新版本。\n2、重新打包 Windows 版本的，也要上传到 R2。并上传 R2 文件，确保落地页下载链接的Windows用户能下载到最新版本",
+          "id": "entry-1788312108902-77o01vk",
+          "body": "像乔布斯一样思考、像Linus一样思考、像Dieter Rams一样思考",
           "order": 0
         }
       ],
       "intervalMs": 700,
-      "order": 0,
-      "createdAt": "2026-07-05T06:35:53.983Z",
-      "updatedAt": "2026-07-05T10:37:45.444Z"
+      "order": 9,
+      "createdAt": "2026-09-02T01:21:48.902Z",
+      "updatedAt": "2026-09-02T01:21:48.902Z"
+    },
+    {
+      "id": "container-1785828234143-5b4uxjk",
+      "categoryId": "category-1785824545197-4cfzwvi",
+      "title": "评价方案",
+      "type": "single",
+      "sendBehavior": "paste_only",
+      "prompts": [
+        {
+          "id": "entry-1785828234143-4fv2e4s",
+          "body": "下面的内容是其他 AI 给出的最终的完整方案。你觉得它的方案怎么样？可以直接执行吗？——————",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 9,
+      "createdAt": "2026-08-04T07:23:54.143Z",
+      "updatedAt": "2026-10-04T03:33:35.334Z"
     },
     {
       "id": "container-1783066534923-njjnpyn",
       "categoryId": "category-default",
       "title": "单点方案分析",
       "type": "single",
+      "sendBehavior": "inherit",
       "prompts": [
         {
           "id": "entry-1783066534923-c1lkdc1",
@@ -64,32 +603,52 @@
         }
       ],
       "intervalMs": 700,
-      "order": 1,
+      "order": 9,
       "createdAt": "2026-07-03T08:15:34.923Z",
-      "updatedAt": "2026-07-04T18:48:10.896Z"
+      "updatedAt": "2026-10-04T04:52:53.936Z"
     },
     {
-      "id": "container-1783233377578-gmwt6dl",
-      "categoryId": "category-1783233257563-8e6yioa",
-      "title": "GitHub Release 发布",
+      "id": "container-1788829567978-shagixh",
+      "categoryId": "category-1783331794351-usfg8m6",
+      "title": "PRD",
       "type": "single",
+      "sendBehavior": "inherit",
       "prompts": [
         {
-          "id": "entry-1783233377577-q0vkl7r",
-          "body": "帮我重新打包 APP，分别打包 Mac 版本（注意要签名、公证、staple）和 Windows 版本。然后上传到GitHub仓库里，注意要打一个标签。实现用户可以通过GitHub直接下载。如果现在GitHub仓库里已经有了Release，注意进行语义化版本控制。",
+          "id": "entry-1788829567978-jq5qbau",
+          "body": "# Role：产品经理\n\n## Background：产品需求文档编写\n\n## Attention：编写高质量的产品需求文档是确保项目成功的关键步骤。\n\n## Profile：\n- Author: nimbus\n- Version: 1.0\n- Language: 中文\n- Description: 我是一名产品经理，擅长撰写清晰明了的产品需求文档，以指导开发团队实现项目目标。\n\n## Skills:\n- 熟悉产品开发流程，能够理解并提炼各阶段的需求。\n- 具备良好的沟通和写作能力，能够将复杂的概念转化为易于理解的语言。\n- 能够捕捉用户需求，将其转化为明确的功能要求。\n- 了解界面设计原则，能够编写相关页面设计的需求。\n- 能够描绘用户旅程，帮助团队理解用户使用产品的情景。\n- 熟练编写用户故事，从用户角度描述功能需求。\n- 具备逻辑思维，能够编写合理的实现逻辑和功能细节描述。\n\n## Goals:\n- 设计一个规范的产品需求文档框架，确保每个需求都得到明确描述。\n- 在需求文档中包含功能名、需求描述、概述、相关页面设计、用户旅程、用户故事、实现逻辑、功能细节描述。\n\n## Constrains:\n- 确保每个需求都准确表达用户需求和产品目标。\n- 需求文档中的信息应该具备清晰的逻辑结构，易于理解。\n- 涵盖的内容应当充分详尽，以便开发团队准确实现。\n\n\n## Workflow:\n1. 首先，用话术引导用户输入功能需求描述，分析产品需求，理解用户期望和项目目标。\n2. 设计一个明确的需求文档框架，包含功能名、需求描述、概述、页面设计、用户旅程、用户故事、实现逻辑、功能细节描述。\n3. 根据功能名，撰写对应的需求描述，明确功能的作用和价值。\n4. 编写概述，简要介绍项目的背景和整体目标。\n5. 描述相关页面的设计，包括界面元素、布局等。\n6. 绘制用户旅程，详细描述用户在使用产品过程中的各个步骤和情境。\n7. 编写用户故事，从用户的角度描述具体的功能需求。\n8. 阐述实现逻辑，描述功能的具体实现方式和流程。\n9. 描述功能细节，包括各种输入、输出、边界条件等。\n   \n## OutputFormat:\n- 功能名：[功能名]\n- 需求描述：[需求描述]\n- 概述：[概述]\n- 相关页面设计：[相关页面设计]\n- 用户旅程：[用户旅程]\n- 用户故事：[用户故事]\n- 实现逻辑：[实现逻辑]\n- 功能细节描述：[功能细节描述]\n    \n## Suggestions:\n- 明确界定每个部分的内容，以便开发团队理解和实施。\n- 使用简明的语言，避免使用过于专业的术语。\n- 在用户旅程和用户故事中注重用户体验，以便准确捕捉用户需求。\n- 实现逻辑和功能细节描述要足够详细，以便开发团队能够准确实现功能。\n\n## Initialization\n简介自己, 引导用户输入产品功能需求描述。",
           "order": 0
         }
       ],
       "intervalMs": 700,
-      "order": 1,
-      "createdAt": "2026-07-05T06:36:17.577Z",
-      "updatedAt": "2026-07-05T10:38:17.737Z"
+      "order": 10,
+      "createdAt": "2026-09-08T01:06:07.978Z",
+      "updatedAt": "2026-09-08T01:06:19.057Z"
+    },
+    {
+      "id": "container-1785828269668-68c6rqs",
+      "categoryId": "category-1785824545197-4cfzwvi",
+      "title": "回应方案评价",
+      "type": "single",
+      "sendBehavior": "paste_only",
+      "prompts": [
+        {
+          "id": "entry-1785828269668-9iruzdu",
+          "body": "下面的内容是其他 AI 对于你的方案的评价，你觉得怎么样？————————",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 10,
+      "createdAt": "2026-08-04T07:24:29.668Z",
+      "updatedAt": "2026-10-04T03:33:35.334Z"
     },
     {
       "id": "container-1783146424566-6x3y6j3",
       "categoryId": "category-default",
       "title": "工作清单与方案汇总",
       "type": "single",
+      "sendBehavior": "inherit",
       "prompts": [
         {
           "id": "entry-1783146424566-27rybtd",
@@ -98,83 +657,106 @@
         }
       ],
       "intervalMs": 700,
-      "order": 2,
+      "order": 10,
       "createdAt": "2026-07-04T06:27:04.566Z",
-      "updatedAt": "2026-07-04T18:48:10.896Z"
+      "updatedAt": "2026-10-04T04:52:53.936Z"
+    },
+    {
+      "id": "container-1790397060120-3l30z15",
+      "categoryId": "category-1783331794351-usfg8m6",
+      "title": "是否重新运行项目",
+      "type": "single",
+      "sendBehavior": "inherit",
+      "prompts": [
+        {
+          "id": "entry-1790397060120-m6jtna1",
+          "body": "你看一下，如果说我想要去检验你刚刚的代码的修改的话，我是否需要在本地再重新启动一下？还是说直接在我之前的端口直接测试就行",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 11,
+      "createdAt": "2026-09-26T04:31:00.120Z",
+      "updatedAt": "2026-09-26T04:31:00.120Z"
+    },
+    {
+      "id": "container-1786019065386-jtoji2m",
+      "categoryId": "category-1785824545197-4cfzwvi",
+      "title": "选择最佳方案",
+      "type": "single",
+      "sendBehavior": "inherit",
+      "prompts": [
+        {
+          "id": "entry-1786019065386-rswak5e",
+          "body": "你和另一个 AI 给的方案都有问题。但现在需要你做一个决策:你觉得这两个方案哪个更好一点?我会在你选定的方案基础上继续修改——也就是说现在要舍弃一个方案、主攻另一个。如果让你选,你选自己的还是他的?",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 11,
+      "createdAt": "2026-08-06T12:24:25.386Z",
+      "updatedAt": "2026-10-04T03:33:35.334Z"
     },
     {
       "id": "container-1783066600444-h5x8po7",
       "categoryId": "category-default",
       "title": "编写执行计划",
       "type": "single",
+      "sendBehavior": "inherit",
       "prompts": [
         {
           "id": "entry-1783066600444-yh71d8o",
-          "body": "使用 writing-plans skill，把上面所有方案整理成执行计划，先不要执行。",
+          "body": "使用~/.agents/skills中的Superpower writing-plans skill，把上面所有方案整理成执行计划，先不要执行。",
           "order": 0
         }
       ],
       "intervalMs": 700,
-      "order": 3,
+      "order": 11,
       "createdAt": "2026-07-03T08:16:40.444Z",
-      "updatedAt": "2026-07-04T18:48:10.896Z"
-    },
-    {
-      "id": "container-1783066631622-jad31ag",
-      "categoryId": "category-default",
-      "title": "用户视角效果评估",
-      "type": "single",
-      "prompts": [
-        {
-          "id": "entry-1783066631622-mfrwb0g",
-          "body": "请你深入理解代码，然后用自然语言描述一下，如果按照这个计划执行，最终的效果是怎样的？是否符合我们之前的讨论？站在用户的视角来回答我的问题，必要时画文本线框图来解释。",
-          "order": 0
-        }
-      ],
-      "intervalMs": 700,
-      "order": 4,
-      "createdAt": "2026-07-03T08:17:11.622Z",
-      "updatedAt": "2026-07-04T18:48:10.896Z"
-    },
-    {
-      "id": "container-1783066643030-36i5hxl",
-      "categoryId": "category-default",
-      "title": "执行前风险评估",
-      "type": "single",
-      "prompts": [
-        {
-          "id": "entry-1783066643030-n1dd81n",
-          "body": "请你深入理解代码，系统评估分析这个方案计划是否有一般人注意不到的潜在风险？是否会破坏影响其他功能的正常运行？是否是一种帕累托改进？最后基于这些分析，给出最终结论，是否可以直接进入到下一步来执行这个计划？",
-          "order": 0
-        }
-      ],
-      "intervalMs": 700,
-      "order": 5,
-      "createdAt": "2026-07-03T08:17:23.030Z",
-      "updatedAt": "2026-07-04T18:48:10.896Z"
+      "updatedAt": "2026-10-04T04:52:53.936Z"
     },
     {
       "id": "container-1783144723315-ttbrem8",
       "categoryId": "category-default",
       "title": "执行计划",
       "type": "single",
+      "sendBehavior": "inherit",
       "prompts": [
         {
           "id": "entry-1783144723315-jupdr61",
-          "body": "使用 executing-plans skill，按计划分批执行，一直到完成所有任务计划。\n注意：\n1、在分批执行进行编程的时候，严格遵循 karpathy-guidelines skill 中所定义的全部编码规范和行为准则。\n2、完成前使用 verification-before-completion skill，完成前做验证。\n3、执行完所有计划后，推送到GitHub的main\n4、最后站在用户的视角，你汇报一下现在用户看到的效果应该是怎么样的",
+          "body": "使用~/.agents/skills中的Superpower executing-plans skill，按计划分批执行，一直到完成所有任务计划。不需要打包App也不需要做 App 真机人工视觉验收,改完代码我自己测。\n注意：\n1、在分批执行进行编程的时候，严格遵循 karpathy-guidelines skill 中所定义的全部编码规范和行为准则。\n2、完成前使用 verification-before-completion skill，完成前做验证。\n3、执行完所有计划后，推送到GitHub的main\n4、最后站在用户的视角，你汇报一下现在用户看到的效果应该是怎么样的",
           "order": 0
         }
       ],
       "intervalMs": 700,
-      "order": 6,
+      "order": 12,
       "createdAt": "2026-07-04T05:58:43.315Z",
-      "updatedAt": "2026-07-04T18:48:10.896Z"
+      "updatedAt": "2026-10-04T04:52:53.936Z"
+    },
+    {
+      "id": "container-1791181168641-37m6gxs",
+      "categoryId": "category-1783331794351-usfg8m6",
+      "title": "提示词",
+      "type": "single",
+      "sendBehavior": "inherit",
+      "prompts": [
+        {
+          "id": "entry-1791181168641-bpm6ff7",
+          "body": "你是一个提示词润色助手。我会陆续发给你一些我准备发给其他 AI 的提示词，你的任务是对它们做\"最小化润色\"后输出，遵守以下规则：\n\n一、核心原则：润色，不是重写\n1. 最大限度保留我的原文措辞、语气和句子结构，能不改就不改。\n2. 只修复影响理解的问题：错别字、语病、歧义指代（如\"它/这个\"指代不明）、逻辑断句混乱、缺失的关键信息（如时间、对象、范围）。\n3. 禁止添加原文没有的内容：不要补充背景说明、不要拆分任务步骤、不要加\"任务一/任务二\"结构、不要加输出格式要求或注意事项、不要替我扩大或收窄需求范围。\n\n二、输出规则\n1. 直接输出润色后的提示词本身，不要输出任何解释、对比、修改说明或\"以下是润色后的提示词\"之类的开场白。\n2. 一次只输出一条润色结果，与我的原文一一对应。\n3. 如果我的原文已经足够清晰，原样返回即可，不要为了\"显得有加工\"而强行改动。\n4. 如果原文缺少关键信息导致你无法判断意图，先简短问我，不要自行脑补。\n\n三、判断标准\n润色完成的标志是：另一个 AI 拿到这段话，能无歧义地理解我想让它做什么——仅此而已，不是让它拿到一份比我原文更\"完整\"或更\"专业\"的任务书。\n\n明白后回复\"已就绪\"，然后等待我发提示词。",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 12,
+      "createdAt": "2026-10-05T06:19:28.641Z",
+      "updatedAt": "2026-10-05T06:19:28.641Z"
     },
     {
       "id": "container-1783145584820-i7hmhod",
       "categoryId": "category-default",
-      "title": "执行结果审阅",
+      "title": "审阅",
       "type": "single",
+      "sendBehavior": "inherit",
       "prompts": [
         {
           "id": "entry-1783145584820-pdjbg0z",
@@ -183,15 +765,70 @@
         }
       ],
       "intervalMs": 700,
-      "order": 7,
+      "order": 13,
       "createdAt": "2026-07-04T06:13:04.820Z",
-      "updatedAt": "2026-07-04T18:48:10.896Z"
+      "updatedAt": "2026-10-04T04:52:53.936Z"
+    },
+    {
+      "id": "container-1791181859806-x43w2za",
+      "categoryId": "category-1783331794351-usfg8m6",
+      "title": "基于录音稿生成会议重点和待办清单",
+      "type": "single",
+      "sendBehavior": "paste_only",
+      "prompts": [
+        {
+          "id": "entry-1791181859806-yu2m2lo",
+          "body": "请通读录音稿，整理成可直接分享的 Markdown《会议重点与待办清单》。只梳理、提炼和总结已有内容，不凭空增加工作、结论或承诺。\n\n开头只写标题和会议时间，正文按以下结构整理：\n\n一、会议重点\n按主题合并分散的讨论，讲清关键问题、讨论结果和推进方向。结合前后文识别最终收敛的意见，保留重要分歧，区分明确决定、建议和待验证假设。\n\n二、待办清单\n完整提取需要跟进的工作，合并重复事项，按重要性和紧迫程度分组排序，用复选框列出。每条简明讲清要做什么，末尾括号注明负责人。负责人以原话为准；根据已知职责提出的分工须标“建议负责人”，无法判断则写“待定”。\n\n每条下面写“依据：”，注明发言人、时间点，并用一两句话概括支持这项工作的具体发言，不只罗列人名和时间。\n\n三、时间安排与补充事项\n按需列出明确提到的期限、外部协助及其他重要事项，不推定日期。会后补充单独标明，不混作会议原话。\n\n语言简洁、自然，每条有据可循；不堆叠术语，不凑条数，不把整理本文件这件事再列为待办。姓名或转写有疑问时，不擅自猜测。",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 13,
+      "createdAt": "2026-10-05T06:30:59.806Z",
+      "updatedAt": "2026-10-09T14:52:36.811Z"
+    },
+    {
+      "id": "container-1783842519336-tn7s347",
+      "categoryId": "category-default",
+      "title": "审阅后的修复",
+      "type": "single",
+      "sendBehavior": "inherit",
+      "prompts": [
+        {
+          "id": "entry-1783842519336-s69oiy5",
+          "body": "如果有问题的话：1、使用~/.agents/skills中的Superpowers writing-plans skill，给出详细的修复计划；2、然后执行这个用来修复问题的计划文件。\n如果没问题的话，等候我的下一步指令。",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 14,
+      "createdAt": "2026-07-12T07:48:39.336Z",
+      "updatedAt": "2026-10-04T04:52:53.936Z"
+    },
+    {
+      "id": "container-1791184914920-7olac16",
+      "categoryId": "category-1783331794351-usfg8m6",
+      "title": "转换成PDF",
+      "type": "single",
+      "sendBehavior": "inherit",
+      "prompts": [
+        {
+          "id": "entry-1791184914920-fpnwky0",
+          "body": "完整读取 /Users/yang/.agents/skills/pretty-pdf/SKILL.md，严格按该 skill 的管线\n（md2html → 渲染 → 页码与元数据 → 质检 + 逐页视觉验收）把下面的文字排版成 PDF。\n\n规则：\n- 内容一字不改，只排版；外链图片按 skill 流程下载内嵌\n- 完成后交付 PDF + 中间 HTML + 一行页数/图数统计，放到 <输出目录，不填就当前目录>\n\n待排版文字：",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 14,
+      "createdAt": "2026-10-05T07:21:54.920Z",
+      "updatedAt": "2026-10-05T07:21:54.920Z"
     },
     {
       "id": "container-1783190876052-eoxiv2z",
       "categoryId": "category-default",
-      "title": "执行结果审阅（严格）",
+      "title": "审阅（严格）",
       "type": "single",
+      "sendBehavior": "inherit",
       "prompts": [
         {
           "id": "entry-1783190876052-o7t3yqj",
@@ -200,15 +837,34 @@
         }
       ],
       "intervalMs": 700,
-      "order": 8,
+      "order": 15,
       "createdAt": "2026-07-04T18:47:56.051Z",
-      "updatedAt": "2026-07-04T18:48:10.896Z"
+      "updatedAt": "2026-10-04T04:52:53.936Z"
+    },
+    {
+      "id": "container-1791600483588-rja84z4",
+      "categoryId": "category-1783331794351-usfg8m6",
+      "title": "Rely bug根本原因拆解",
+      "type": "single",
+      "sendBehavior": "paste_only",
+      "prompts": [
+        {
+          "id": "entry-1791600483588-20328ic",
+          "body": "我刚刚测试了一个任务，但是出现了问题。请你详细查看服务器日志、深入分析代码，从第一性原理出发，把问题的原因逐层拆解到不可再分，找到最根本的原因。使用 ~/.agents/skills中的Superpowers systematic-debugging skill，系统排查根本原因，先不要修改代码。",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 15,
+      "createdAt": "2026-10-10T02:48:03.588Z",
+      "updatedAt": "2026-10-10T02:48:37.971Z"
     },
     {
       "id": "container-1783145619724-ezduoeq",
       "categoryId": "category-default",
       "title": "编写修复计划",
       "type": "single",
+      "sendBehavior": "inherit",
       "prompts": [
         {
           "id": "entry-1783145619724-gy1t9tk",
@@ -217,15 +873,16 @@
         }
       ],
       "intervalMs": 700,
-      "order": 9,
+      "order": 16,
       "createdAt": "2026-07-04T06:13:39.724Z",
-      "updatedAt": "2026-07-04T18:48:10.896Z"
+      "updatedAt": "2026-10-04T04:52:53.936Z"
     },
     {
       "id": "container-1783145721758-20hb6qq",
       "categoryId": "category-default",
       "title": "修复计划可行性评估",
       "type": "single",
+      "sendBehavior": "inherit",
       "prompts": [
         {
           "id": "entry-1783145721758-jvq9tm9",
@@ -234,78 +891,98 @@
         }
       ],
       "intervalMs": 700,
-      "order": 10,
+      "order": 17,
       "createdAt": "2026-07-04T06:15:21.758Z",
-      "updatedAt": "2026-07-04T18:48:10.896Z"
+      "updatedAt": "2026-10-04T04:52:53.936Z"
     },
     {
       "id": "container-1783169939796-3bde1hn",
       "categoryId": "category-default",
       "title": "根因排查",
       "type": "single",
+      "sendBehavior": "inherit",
       "prompts": [
         {
           "id": "entry-1783169939796-dvcvik1",
-          "body": "使用 systematic-debugging skill，系统排查根本原因，先不要修改代码。",
+          "body": "使用 ~/.agents/skills中的Superpowers systematic-debugging skill，系统排查根本原因，先不要修改代码。",
           "order": 0
         }
       ],
       "intervalMs": 700,
-      "order": 11,
+      "order": 18,
       "createdAt": "2026-07-04T12:58:59.796Z",
-      "updatedAt": "2026-07-04T18:48:10.896Z"
+      "updatedAt": "2026-10-04T04:52:53.936Z"
     },
     {
       "id": "container-1783013204947-0ped4fd",
       "categoryId": "category-default",
       "title": "端到端调试修复流程",
       "type": "group",
+      "sendBehavior": "inherit",
       "prompts": [
         {
-          "id": "entry-1783266618373-06zkygi",
+          "id": "entry-1784053994817-v41b92y",
           "body": "根据我们刚刚过去的这些讨论，你总结一下现在我们有哪些工作需要做，你列一个完整的清单，然后每一项工作里面都要列出合理的交互体验是怎么样的、你的完整的方案，必要时画文本线框图来解释",
           "order": 0
         },
         {
-          "id": "entry-1783266618373-a841xva",
+          "id": "entry-1784053994817-jjvkg8k",
           "body": "使用 writing-plans skill，把上面所有方案整理成执行计划，先不要执行。",
           "order": 1
         },
         {
-          "id": "entry-1783266618373-x2xtnk3",
+          "id": "entry-1784053994817-8o7c9tq",
           "body": "请你深入理解代码，然后用自然语言描述一下，如果按照这个计划执行，最终的效果是怎样的？是否符合我们之前的讨论？站在用户的视角来回答我的问题，必要时画文本线框图来解释。",
           "order": 2
         },
         {
-          "id": "entry-1783266618373-6g0ccvj",
+          "id": "entry-1784053994817-tnmzevm",
           "body": "请你深入理解代码，系统评估分析这个方案计划是否有一般人注意不到的潜在风险？是否会破坏影响其他功能的正常运行？是否是一种帕累托改进？最后基于这些分析，给出最终结论，是否可以直接进入到下一步来执行这个计划？",
           "order": 3
         },
         {
-          "id": "entry-1783266618373-mrpgc5u",
+          "id": "entry-1784053994817-4njoupx",
           "body": "如果有问题的话，帮我修复。如果没有问题的话，等候我的下一条指令",
           "order": 4
         },
         {
-          "id": "entry-1783266618373-cek4c79",
+          "id": "entry-1784053994817-8b91zs7",
           "body": "使用 executing-plans skill，按计划分批执行，一直到完成所有任务计划。\n注意：\n1、在分批执行进行编程的时候，严格遵循 karpathy-guidelines skill 中所定义的全部编码规范和行为准则。\n2、完成前使用 verification-before-completion skill，完成前做验证。\n3、执行完所有计划后，推送到GitHub的main\n4、最后站在用户的视角，你汇报一下现在用户看到的效果应该是怎么样的",
           "order": 5
         },
         {
-          "id": "entry-1783266618373-ahk9ljn",
+          "id": "entry-1784053994817-wd2opih",
           "body": "请使用 requesting-code-review skill，派出一个独立 subagent 扮演代码审查员，基于这个任务最开始的执行计划和当前代码状态，对当前任务完成情况做审阅与代码审查，不修改代码。只审查当前任务计划对应的改动，不要泛泛审查整个项目；重点检查是否严格按计划完成、是否引入偏离计划的改动、是否存在隐藏风险、遗漏步骤、过度实现、破坏性修改或验证不足。（我是多个任务同时进行的，你只需要考虑我们当前这个任务计划有没有完整实施好。）\n\n2、处理审查意见：\n使用 receiving-code-review skill，处理审阅与代码审查返回的反馈。不要盲目接受所有意见，请逐条判断问题是否真实成立：成立的问题列为需修复项，并给出修复建议；不成立的问题要用代码、测试或运行结果进行技术性反驳。不要修改代码，不要重写方案，不要扩展计划，不要引入计划外功能。\n\n3、最后结合审阅结果、代码审查结果和对审查意见的判断，给出审阅阶段的最终结论：通过 / 需修复 / 不通过。",
           "order": 6
         },
         {
-          "id": "entry-1783266618373-wovxxap",
-          "body": "如果有问题，用使用 writing-plans skill，给出详细的修复计划，然后执行。如果没问题，你就给我发送一条“Josh，请验货”。",
+          "id": "entry-1784053994817-zyk7m7z",
+          "body": "如果有问题的话：1、使用 writing-plans skill，给出详细的修复计划；2、然后执行这个用来修复问题的计划文件。\n如果没问题的话，等候我的下一步指令。",
           "order": 7
         }
       ],
-      "intervalMs": 700,
-      "order": 12,
+      "intervalMs": 200,
+      "order": 19,
       "createdAt": "2026-07-02T17:26:44.946Z",
-      "updatedAt": "2026-07-05T15:50:18.373Z"
+      "updatedAt": "2026-10-04T04:52:53.936Z"
+    }
+  ],
+  "dividers": [
+    {
+      "id": "divider-1791084783231-zdsisn0",
+      "categoryId": "category-1785824545197-4cfzwvi",
+      "label": "",
+      "order": 5,
+      "createdAt": "2026-10-04T03:33:03.231Z",
+      "updatedAt": "2026-10-04T03:33:35.334Z"
+    },
+    {
+      "id": "divider-1785834760931-krc8g26",
+      "categoryId": "category-1785824545197-4cfzwvi",
+      "label": "",
+      "order": 7,
+      "createdAt": "2026-08-04T09:12:40.930Z",
+      "updatedAt": "2026-10-04T03:33:35.334Z"
     }
   ],
   "activeCategoryId": "category-default"
