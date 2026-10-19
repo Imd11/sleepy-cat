@@ -40,6 +40,8 @@ macOS needs Accessibility permission to insert and send prompts in supported app
 
 Sleepy Cat stores your library locally and never uploads prompt content to a server. Import or export JSON libraries whenever you need a backup or want to move your prompts.
 
+On first launch, new users start with a bundled Chinese prompt library containing 4 categories and 50 entries (including prompt groups). You can add, edit, or delete any entry, or import your own JSON library. Later launches and upgrades preserve your personal library, including an intentionally emptied library. Existing users' prompts and linked-file settings are never replaced.
+
 Example libraries are available in:
 
 - `examples/prompts/prompts-zh.json`

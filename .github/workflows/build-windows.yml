@@ -23,6 +23,12 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Test first-launch prompt library preservation
+        run: |
+          rustc --edition=2021 --test src-tauri/src/prompt_seed.rs -o "$env:RUNNER_TEMP\prompt-seed-tests.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & "$env:RUNNER_TEMP\prompt-seed-tests.exe"
+
       - name: Probe Calico WebView renderer
         run: npm run test:calico-webview
 

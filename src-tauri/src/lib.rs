@@ -32,6 +32,7 @@ mod macos_lifecycle;
 mod macos_panels;
 pub use macos_panels::{activate_main_window, configure_non_activating_panel};
 mod prompt_files;
+mod prompt_seed;
 pub use prompt_files::{
     prompt_library_file_metadata, read_prompt_library_file, write_prompt_library_file,
 };
@@ -3198,6 +3199,12 @@ pub fn run() {
 
             let path = settings_path(app.handle())
                 .ok_or_else(|| "Could not resolve settings path.".to_string())?;
+            if let Err(error) = prompt_seed::initialize_prompt_library(
+                &path.with_file_name("prompts.json"),
+                &path,
+            ) {
+                eprintln!("Could not initialize the bundled prompt library: {error}");
+            }
             let settings_state = SettingsFileState::new(path);
             let initial_settings = settings_state.read_value();
             let visibility_state = PromptButtonVisibilityState::from_settings(&initial_settings);
