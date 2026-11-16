@@ -180,7 +180,13 @@ pub(crate) fn prepare_prompt_pick_session_target(
 }
 
 fn current_prompt_pick_frontmost_candidate() -> Option<FrontmostAppWithPid> {
-    let frontmost = platform::frontmost_app_with_pid();
+    let frontmost = platform::frontmost_app_with_pid().filter(|candidate| {
+        candidate.pid == Some(std::process::id())
+            || is_prompt_picker_app(&candidate.app)
+            || candidate
+                .pid
+                .is_some_and(platform::macos::is_regular_input_application)
+    });
     let needs_underlying_app = frontmost.as_ref().is_none_or(|frontmost| {
         frontmost.pid == Some(std::process::id()) || is_prompt_picker_app(&frontmost.app)
     });

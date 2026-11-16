@@ -203,6 +203,10 @@ pub fn topmost_external_app_with_pid(_excluded_pid: u32) -> Option<FrontmostAppW
     None
 }
 
+pub fn is_regular_input_application(_pid: u32) -> bool {
+    false
+}
+
 pub fn current_input_target() -> Option<InputTarget> {
     None
 }

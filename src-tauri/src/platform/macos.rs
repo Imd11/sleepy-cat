@@ -46,6 +46,7 @@ use core_graphics::window::{
     copy_window_info, kCGNullWindowID, kCGWindowAlpha, kCGWindowLayer,
     kCGWindowListExcludeDesktopElements, kCGWindowListOptionOnScreenOnly, kCGWindowOwnerPID,
 };
+use objc2_app_kit::{NSApplicationActivationPolicy, NSRunningApplication};
 
 const ACCESSIBILITY_PERMISSION_REQUIRED_ERROR: &str =
     "Accessibility permission required for prompt insertion.";
@@ -354,13 +355,17 @@ struct WindowOwnerCandidate {
     pid: u32,
     layer: i32,
     alpha: f64,
+    is_regular_app: bool,
 }
 
 fn topmost_external_window_pid(windows: &[WindowOwnerCandidate], excluded_pid: u32) -> Option<u32> {
     windows
         .iter()
         .find(|window| {
-            window.pid != excluded_pid && window.layer == 0 && window.alpha > f64::EPSILON
+            window.pid != excluded_pid
+                && window.layer == 0
+                && window.alpha > f64::EPSILON
+                && window.is_regular_app
         })
         .map(|window| window.pid)
 }
@@ -395,7 +400,12 @@ fn visible_window_owner_candidates() -> Vec<WindowOwnerCandidate> {
             let alpha = window_dictionary_number(&dictionary, unsafe { kCGWindowAlpha })
                 .and_then(|number| number.to_f64())
                 .unwrap_or(1.0);
-            Some(WindowOwnerCandidate { pid, layer, alpha })
+            Some(WindowOwnerCandidate {
+                pid,
+                layer,
+                alpha,
+                is_regular_app: is_regular_input_application(pid),
+            })
         })
         .collect()
 }
@@ -407,6 +417,17 @@ pub fn topmost_external_app_with_pid(excluded_pid: u32) -> Option<FrontmostAppWi
     Some(FrontmostAppWithPid {
         app: info.app,
         pid: Some(info.pid),
+    })
+}
+
+/// Accessory/background services can expose ordinary windows too (for example
+/// CuaDriver). They must never become an implicit paste/submit destination.
+pub fn is_regular_input_application(pid: u32) -> bool {
+    let Ok(pid) = i32::try_from(pid) else {
+        return false;
+    };
+    NSRunningApplication::runningApplicationWithProcessIdentifier(pid).is_some_and(|app| {
+        !app.isTerminated() && app.activationPolicy() == NSApplicationActivationPolicy::Regular
     })
 }
 
@@ -2214,9 +2235,14 @@ where
         verification_delay,
         copy_sender,
         is_accessibility_trusted,
-        || process_launch_identity(target_pid) == Some(target_launch_identity),
+        || {
+            is_regular_input_application(target_pid)
+                && process_launch_identity(target_pid) == Some(target_launch_identity)
+        },
         |bundle_id, _click_point, captured_window| {
-            if process_launch_identity(target_pid) != Some(target_launch_identity) {
+            if !is_regular_input_application(target_pid)
+                || process_launch_identity(target_pid) != Some(target_launch_identity)
+            {
                 return Err(
                     "The captured target process was replaced before activation.".to_string(),
                 );
@@ -2814,6 +2840,9 @@ fn frontmost_target_matches(
     target_pid: u32,
     launch_identity: ProcessLaunchIdentity,
 ) -> bool {
+    if !is_regular_input_application(target_pid) {
+        return false;
+    }
     frontmost_app_info().is_some_and(|info| {
         info.app.bundle_id == bundle_id
             && info.pid == target_pid
@@ -3073,37 +3102,77 @@ mod tests {
     use std::cell::RefCell;
 
     #[test]
+    fn input_target_skips_background_helper_window_above_the_editor() {
+        // Reproduces the captured CuaDriver/ChatGPT window order. The helper's
+        // ordinary, nontransparent window is not a user input application.
+        let windows = [
+            WindowOwnerCandidate {
+                pid: 58668,
+                layer: 0,
+                alpha: 1.0,
+                is_regular_app: false,
+            },
+            WindowOwnerCandidate {
+                pid: 19279,
+                layer: 0,
+                alpha: 1.0,
+                is_regular_app: true,
+            },
+        ];
+
+        assert_eq!(topmost_external_window_pid(&windows, 33775), Some(19279));
+    }
+
+    #[test]
+    fn input_target_is_absent_when_only_a_background_helper_is_visible() {
+        let windows = [WindowOwnerCandidate {
+            pid: 58668,
+            layer: 0,
+            alpha: 1.0,
+            is_regular_app: false,
+        }];
+
+        assert_eq!(topmost_external_window_pid(&windows, 33775), None);
+    }
+
+    #[test]
     fn topmost_external_window_skips_the_picker_and_non_normal_layers() {
         let windows = [
             WindowOwnerCandidate {
                 pid: 100,
                 layer: 25,
                 alpha: 1.0,
+                is_regular_app: true,
             },
             WindowOwnerCandidate {
                 pid: 100,
                 layer: 0,
                 alpha: 1.0,
+                is_regular_app: true,
             },
             WindowOwnerCandidate {
                 pid: 200,
                 layer: 3,
                 alpha: 1.0,
+                is_regular_app: true,
             },
             WindowOwnerCandidate {
                 pid: 300,
                 layer: 0,
                 alpha: 0.0,
+                is_regular_app: true,
             },
             WindowOwnerCandidate {
                 pid: 400,
                 layer: 0,
                 alpha: 1.0,
+                is_regular_app: true,
             },
             WindowOwnerCandidate {
                 pid: 500,
                 layer: 0,
                 alpha: 1.0,
+                is_regular_app: true,
             },
         ];
 
